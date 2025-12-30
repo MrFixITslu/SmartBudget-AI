@@ -12,6 +12,7 @@ const TransactionForm: React.FC<Props> = ({ onAdd, initialData, onCancel }) => {
   const [amount, setAmount] = useState(initialData?.amount?.toString() || '');
   const [category, setCategory] = useState(initialData?.category || CATEGORIES[0]);
   const [desc, setDesc] = useState(initialData?.description || '');
+  const [notes, setNotes] = useState(initialData?.notes || '');
   const [type, setType] = useState<TransactionType>(initialData?.type || 'expense');
   const [date, setDate] = useState(initialData?.date || new Date().toISOString().split('T')[0]);
   const [vendor, setVendor] = useState(initialData?.vendor || '');
@@ -24,6 +25,7 @@ const TransactionForm: React.FC<Props> = ({ onAdd, initialData, onCancel }) => {
       amount: parseFloat(amount),
       category,
       description: desc,
+      notes: notes.trim() || undefined,
       type,
       date,
       vendor: vendor.trim() || undefined,
@@ -31,6 +33,7 @@ const TransactionForm: React.FC<Props> = ({ onAdd, initialData, onCancel }) => {
     });
     setAmount('');
     setDesc('');
+    setNotes('');
     setVendor('');
     setLineItems([]);
   };
@@ -111,6 +114,17 @@ const TransactionForm: React.FC<Props> = ({ onAdd, initialData, onCancel }) => {
           className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
           placeholder="What was this for?"
           required
+        />
+      </div>
+
+      <div>
+        <label className="block text-xs font-semibold text-slate-500 mb-1">Notes</label>
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
+          placeholder="Add extra details..."
+          rows={2}
         />
       </div>
 

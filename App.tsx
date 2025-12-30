@@ -57,32 +57,6 @@ const App: React.FC = () => {
     return income - outgoings;
   }, [transactions]);
 
-  // Handle Recurring Bill Accumulation Logic
-  useEffect(() => {
-    const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
-    
-    setRecurringExpenses(prev => {
-      let changed = false;
-      const updated = prev.map(rec => {
-        const lastBilled = rec.lastBilledDate ? new Date(rec.lastBilledDate) : null;
-        const currentMonthYear = `${now.getFullYear()}-${now.getMonth()}`;
-        const lastBilledMonthYear = lastBilled ? `${lastBilled.getFullYear()}-${lastBilled.getMonth()}` : '';
-
-        if (currentMonthYear !== lastBilledMonthYear && now.getDate() >= rec.dayOfMonth) {
-          changed = true;
-          return {
-            ...rec,
-            balance: rec.balance + rec.amount,
-            lastBilledDate: todayStr
-          };
-        }
-        return rec;
-      });
-      return changed ? updated : prev;
-    });
-  }, [recurringExpenses.length]);
-
   // Logic to handle auto-salary on the 25th
   useEffect(() => {
     if (salary <= 0) return;
@@ -133,6 +107,19 @@ const App: React.FC = () => {
     setPendingAIResult(null);
   };
 
+  const handleAddAdditionalIncome = (amount: number, description: string, notes: string) => {
+    const newTrans: Transaction = {
+      id: crypto.randomUUID(),
+      amount,
+      description,
+      notes,
+      category: 'Income',
+      type: 'income',
+      date: new Date().toISOString().split('T')[0]
+    };
+    setTransactions(prev => [newTrans, ...prev]);
+  };
+
   const updateTransaction = (t: Omit<Transaction, 'id'>) => {
     if (!editingTransaction) return;
 
@@ -158,17 +145,6 @@ const App: React.FC = () => {
         setRecurringExpenses(prev => prev.map(rec => 
           rec.id === t.recurringId ? { ...rec, balance: rec.balance + t.amount } : rec
         ));
-      }
-      if (t && t.savingGoalId) {
-        if (t.type === 'savings') {
-          setSavingGoals(prev => prev.map(goal => 
-            goal.id === t.savingGoalId ? { ...goal, currentAmount: goal.currentAmount - t.amount } : goal
-          ));
-        } else if (t.type === 'withdrawal') {
-          setSavingGoals(prev => prev.map(goal => 
-            goal.id === t.savingGoalId ? { ...goal, currentAmount: goal.currentAmount + t.amount } : goal
-          ));
-        }
       }
       setTransactions(prev => prev.filter(t => t.id !== id));
     }
@@ -205,20 +181,19 @@ const App: React.FC = () => {
       return;
     }
 
-    const goal = savingGoals.find(g => g.id === goalId);
-    if (!goal) return;
+    setTransactions(prev => [
+      {
+        id: crypto.randomUUID(),
+        amount,
+        description: 'Transfer to Savings',
+        category: 'Savings',
+        type: 'savings',
+        date: new Date().toISOString().split('T')[0],
+        savingGoalId: goalId
+      },
+      ...prev
+    ]);
 
-    const newTrans: Transaction = {
-      id: crypto.randomUUID(),
-      amount: amount,
-      description: `Transfer to ${goal.name}`,
-      category: 'Savings',
-      type: 'savings',
-      date: new Date().toISOString().split('T')[0],
-      savingGoalId: goalId
-    };
-
-    setTransactions([newTrans, ...transactions]);
     setSavingGoals(prev => prev.map(g => 
       g.id === goalId ? { ...g, currentAmount: g.currentAmount + amount } : g
     ));
@@ -226,30 +201,27 @@ const App: React.FC = () => {
 
   const handleWithdrawFromSaving = (goalId: string, amount: number) => {
     const goal = savingGoals.find(g => g.id === goalId);
-    if (!goal) return;
-    if (amount > goal.currentAmount) {
+    if (!goal || amount > goal.currentAmount) {
       alert(`Withdrawal declined: Goal has insufficient balance.`);
       return;
     }
 
-    const newTrans: Transaction = {
-      id: crypto.randomUUID(),
-      amount: amount,
-      description: `Withdrawal from ${goal.name}`,
-      category: 'Income',
-      type: 'withdrawal',
-      date: new Date().toISOString().split('T')[0],
-      savingGoalId: goalId
-    };
+    setTransactions(prev => [
+      {
+        id: crypto.randomUUID(),
+        amount,
+        description: `Withdrawal from ${goal.name}`,
+        category: 'Income',
+        type: 'withdrawal',
+        date: new Date().toISOString().split('T')[0],
+        savingGoalId: goalId
+      },
+      ...prev
+    ]);
 
-    setTransactions([newTrans, ...transactions]);
     setSavingGoals(prev => prev.map(g => 
       g.id === goalId ? { ...g, currentAmount: g.currentAmount - amount } : g
     ));
-  };
-
-  const handleAISuccess = (result: AIAnalysisResult) => {
-    setPendingAIResult(result);
   };
 
   return (
@@ -278,13 +250,6 @@ const App: React.FC = () => {
             title="Budget Settings"
           >
             <i className="fas fa-cog"></i>
-            {(!salary || savingGoals.length === 0) && <span className="absolute -top-1 -right-1 w-3 h-3 bg-rose-500 border-2 border-white rounded-full animate-bounce"></span>}
-          </button>
-          <button 
-            onClick={() => { if(confirm('Clear all data?')) { setTransactions([]); localStorage.clear(); window.location.reload(); } }}
-            className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-slate-400 hover:text-rose-500 transition shadow-sm"
-          >
-            <i className="fas fa-trash-alt"></i>
           </button>
         </div>
       </header>
@@ -297,43 +262,22 @@ const App: React.FC = () => {
             <div className="animate-in fade-in zoom-in duration-200">
               <div className="flex items-center justify-between mb-3 px-2">
                 <h3 className="font-bold text-slate-700">Edit Transaction</h3>
-                <button 
-                  onClick={() => setEditingTransaction(null)}
-                  className="text-slate-400 hover:text-slate-600 text-sm font-medium"
-                >
-                  Cancel
-                </button>
+                <button onClick={() => setEditingTransaction(null)} className="text-slate-400 hover:text-slate-600 text-sm font-medium">Cancel</button>
               </div>
-              <TransactionForm 
-                onAdd={updateTransaction} 
-                initialData={editingTransaction} 
-                onCancel={() => setEditingTransaction(null)}
-              />
+              <TransactionForm onAdd={updateTransaction} initialData={editingTransaction} onCancel={() => setEditingTransaction(null)} />
             </div>
           ) : (
             <>
-              <div className="flex items-center justify-between mb-3 px-2">
-                <h2 className="text-xs font-bold text-indigo-500 uppercase tracking-widest">Quick Entry</h2>
-              </div>
-              <MagicInput onSuccess={handleAISuccess} onLoading={setIsLoading} />
-              
+              <MagicInput onSuccess={setPendingAIResult} onLoading={setIsLoading} />
               {isLoading && (
                 <div className="mt-4 flex items-center justify-center gap-3 p-4 bg-indigo-50 rounded-2xl text-indigo-600 animate-pulse border border-indigo-100">
                   <i className="fas fa-circle-notch fa-spin"></i>
                   <span className="font-medium">AI is analyzing...</span>
                 </div>
               )}
-
               {pendingAIResult && (
                 <div className="mt-6 animate-in slide-in-from-top duration-300">
-                  <div className="flex items-center justify-between mb-3 px-2">
-                    <h3 className="font-bold text-slate-700">Confirm Transaction</h3>
-                  </div>
-                  <TransactionForm 
-                    onAdd={addTransaction} 
-                    initialData={pendingAIResult} 
-                    onCancel={() => setPendingAIResult(null)}
-                  />
+                  <TransactionForm onAdd={addTransaction} initialData={pendingAIResult} onCancel={() => setPendingAIResult(null)} />
                 </div>
               )}
             </>
@@ -341,7 +285,6 @@ const App: React.FC = () => {
         </div>
       </section>
 
-      {/* Main Content */}
       <main>
         <Dashboard 
           transactions={transactions} 
@@ -352,10 +295,10 @@ const App: React.FC = () => {
           onPayRecurring={handlePayRecurring}
           onContributeSaving={handleContributeToSaving}
           onWithdrawSaving={handleWithdrawFromSaving}
+          onAddIncome={handleAddAdditionalIncome}
         />
       </main>
 
-      {/* Modals */}
       {showSettings && (
         <Settings 
           salary={salary}
@@ -364,10 +307,7 @@ const App: React.FC = () => {
           onAddRecurring={item => setRecurringExpenses(prev => [...prev, { ...item, id: crypto.randomUUID(), balance: 0 }])}
           onDeleteRecurring={id => setRecurringExpenses(prev => prev.filter(i => i.id !== id))}
           savingGoals={savingGoals}
-          onAddSavingGoal={item => {
-            const id = crypto.randomUUID();
-            setSavingGoals(prev => [...prev, { ...item, id, currentAmount: item.openingBalance }]);
-          }}
+          onAddSavingGoal={item => setSavingGoals(prev => [...prev, { ...item, id: crypto.randomUUID(), currentAmount: item.openingBalance }])}
           onDeleteSavingGoal={id => setSavingGoals(prev => prev.filter(i => i.id !== id))}
           onClose={() => setShowSettings(false)}
         />

@@ -13,6 +13,7 @@ export interface Transaction {
   category: string;
   description: string;
   type: TransactionType;
+  notes?: string;
   vendor?: string;
   lineItems?: LineItem[];
   recurringId?: string; // Links a transaction to a recurring template
@@ -64,6 +65,7 @@ export interface AIAnalysisResult {
   category: string;
   description: string;
   type: TransactionType;
+  notes?: string;
   date?: string;
   vendor?: string;
   lineItems?: LineItem[];

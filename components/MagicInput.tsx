@@ -7,9 +7,10 @@ interface Props {
   onSuccess: (data: AIAnalysisResult) => void;
   onBulkSuccess: (data: AIAnalysisResult[]) => void;
   onLoading: (isLoading: boolean) => void;
+  onManualEntry?: () => void;
 }
 
-const MagicInput: React.FC<Props> = ({ onSuccess, onBulkSuccess, onLoading }) => {
+const MagicInput: React.FC<Props> = ({ onSuccess, onBulkSuccess, onLoading, onManualEntry }) => {
   const [input, setInput] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -99,6 +100,17 @@ const MagicInput: React.FC<Props> = ({ onSuccess, onBulkSuccess, onLoading }) =>
         </div>
         
         <div className="flex items-center gap-1 pr-1">
+          {onManualEntry && (
+            <button
+              type="button"
+              onClick={onManualEntry}
+              className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-indigo-50 text-indigo-500 transition"
+              title="Manual Form Entry"
+            >
+              <i className="fas fa-edit"></i>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={isRecording ? stopRecording : startRecording}
@@ -136,7 +148,7 @@ const MagicInput: React.FC<Props> = ({ onSuccess, onBulkSuccess, onLoading }) =>
       />
 
       <div className="absolute -bottom-6 left-3 text-[10px] text-slate-400 flex gap-4 uppercase font-bold tracking-wider">
-        <span>1st National Statements Supported</span>
+        <span>AI-Powered Parsing Hub</span>
         <i className="fas fa-check-circle text-indigo-400"></i>
       </div>
     </div>

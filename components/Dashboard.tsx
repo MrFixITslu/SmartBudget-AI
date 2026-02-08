@@ -19,6 +19,7 @@ interface Props {
   investments: InvestmentAccount[];
   marketPrices: MarketPrice[];
   bankConnections: BankConnection[];
+  targetMargin: number;
   onEdit: (t: Transaction) => void;
   onDelete: (id: string) => void;
   onPayRecurring: (rec: RecurringExpense, amount: number) => void;
@@ -30,7 +31,7 @@ interface Props {
 }
 
 const Dashboard: React.FC<Props> = ({ 
-  transactions, investments, marketPrices, bankConnections, recurringExpenses, recurringIncomes, onWithdrawal, onDelete, onPayRecurring, onReceiveRecurringIncome
+  transactions, investments, marketPrices, bankConnections, recurringExpenses, recurringIncomes, savingGoals, targetMargin, onWithdrawal, onDelete, onPayRecurring, onReceiveRecurringIncome
 }) => {
   const [paymentInputs, setPaymentInputs] = useState<Record<string, string>>({});
   const [isSyncingPortal, setIsSyncingPortal] = useState<string | null>(null);
@@ -80,6 +81,30 @@ const Dashboard: React.FC<Props> = ({
     [recurringIncomes]
   );
   const safetyMargin = totalMonthlyRecurringIncome - totalMonthlyRecurringExpenses - totalOverdue;
+  const marginProgress = targetMargin > 0 ? Math.min(100, (safetyMargin / targetMargin) * 100) : 0;
+
+  // Ledger for one-off transactions (non-recurring)
+  const manualTransactions = useMemo(() => 
+    transactions.filter(t => !t.recurringId).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+    [transactions]
+  );
+
+  const getCategoryIcon = (category: string) => {
+    switch (category.toLowerCase()) {
+      case 'food': return 'fa-utensils';
+      case 'transport': return 'fa-car';
+      case 'housing': return 'fa-home';
+      case 'entertainment': return 'fa-clapperboard';
+      case 'utilities': return 'fa-bolt';
+      case 'health': return 'fa-heartbeat';
+      case 'shopping': return 'fa-bag-shopping';
+      case 'education': return 'fa-graduation-cap';
+      case 'income': return 'fa-money-bill-wave';
+      case 'savings': return 'fa-piggy-bank';
+      case 'investments': return 'fa-chart-line';
+      default: return 'fa-receipt';
+    }
+  };
 
   // Monthly Spend Report - Average per Category
   const categorySpendData = useMemo(() => {
@@ -319,8 +344,25 @@ const Dashboard: React.FC<Props> = ({
 
         <div className={`${safetyMargin >= 0 ? 'bg-indigo-600' : 'bg-rose-600'} p-8 rounded-[3rem] shadow-xl text-white flex flex-col justify-center transition-colors duration-500 relative overflow-hidden`}>
            <p className="text-white/60 text-[10px] font-black uppercase tracking-widest mb-1">Monthly Net Margin</p>
-           <h3 className="text-4xl font-black mb-4">${safetyMargin.toLocaleString()}</h3>
+           <h3 className="text-4xl font-black mb-2">${safetyMargin.toLocaleString()}</h3>
            
+           {targetMargin > 0 && (
+             <div className="mb-4">
+                <div className="flex justify-between text-[8px] font-black uppercase tracking-widest mb-1">
+                  <span className="text-white/40">Goal: ${targetMargin.toLocaleString()}</span>
+                  <span className={marginProgress >= 100 ? 'text-emerald-400' : 'text-white/60'}>
+                    {marginProgress.toFixed(0)}%
+                  </span>
+                </div>
+                <div className="h-1.5 w-full bg-black/20 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full transition-all duration-1000 ${marginProgress >= 100 ? 'bg-emerald-400' : 'bg-white/80'}`}
+                    style={{ width: `${marginProgress}%` }}
+                  ></div>
+                </div>
+             </div>
+           )}
+
            <div className="border-t border-white/20 pt-4 mt-2">
               <div className="flex justify-between items-center mb-1">
                  <p className="text-[9px] text-white/50 font-black uppercase tracking-widest">Recurring Commitment</p>
@@ -332,6 +374,54 @@ const Dashboard: React.FC<Props> = ({
            </div>
         </div>
       </div>
+
+      {/* Financial Activity Feed (Non-Recurring) */}
+      <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
+        <div className="flex justify-between items-center mb-10">
+           <div>
+              <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em]">Financial Activity Feed</h3>
+              <p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-widest">One-Off Spend & Income Ledger</p>
+           </div>
+           <div className="text-right">
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Today's Flow</p>
+              <p className="text-sm font-black text-slate-900">
+                ${manualTransactions.filter(t => t.date === new Date().toISOString().split('T')[0]).reduce((acc, t) => t.type === 'expense' ? acc - t.amount : acc + t.amount, 0).toFixed(2)}
+              </p>
+           </div>
+        </div>
+
+        <div className="space-y-4 max-h-[500px] overflow-y-auto no-scrollbar pr-2">
+           {manualTransactions.map(t => (
+              <div key={t.id} className="p-5 bg-slate-50 border border-slate-100 rounded-[2rem] hover:bg-white hover:shadow-lg hover:ring-2 hover:ring-indigo-100/50 transition-all group flex items-center justify-between">
+                 <div className="flex items-center gap-4">
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-white text-lg shadow-sm transition-transform group-hover:scale-110 ${t.type === 'expense' ? 'bg-slate-200 text-slate-400' : 'bg-emerald-500'}`}>
+                       <i className={`fas ${getCategoryIcon(t.category)}`}></i>
+                    </div>
+                    <div>
+                       <p className="font-black text-sm text-slate-800">{t.description}</p>
+                       <div className="flex items-center gap-2">
+                          <span className="text-[9px] font-black text-indigo-500 uppercase tracking-widest">{t.category}</span>
+                          <span className="w-1 h-1 bg-slate-300 rounded-full"></span>
+                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{t.date}</span>
+                       </div>
+                    </div>
+                 </div>
+                 <div className="text-right">
+                    <p className={`font-black text-base ${t.type === 'expense' ? 'text-slate-900' : 'text-emerald-600'}`}>
+                       {t.type === 'expense' ? '-' : '+'}${t.amount.toFixed(2)}
+                    </p>
+                    {t.vendor && <p className="text-[8px] font-black text-slate-300 uppercase truncate max-w-[80px]">{t.vendor}</p>}
+                 </div>
+              </div>
+           ))}
+           {manualTransactions.length === 0 && (
+              <div className="py-20 text-center border-2 border-dashed border-slate-100 rounded-[3rem]">
+                 <i className="fas fa-ghost text-4xl text-slate-100 mb-4"></i>
+                 <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.2em]">Activity feed is currently silent</p>
+              </div>
+           )}
+        </div>
+      </section>
 
       {/* Fiscal Projections Section */}
       <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
@@ -403,6 +493,48 @@ const Dashboard: React.FC<Props> = ({
               />
             </AreaChart>
           </ResponsiveContainer>
+        </div>
+      </section>
+
+      {/* Savings Goal Progress */}
+      <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
+        <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em] mb-10">Vault Progress (Linked Savings)</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+          {savingGoals.map(goal => {
+            const progress = Math.min(100, (goal.currentAmount / goal.targetAmount) * 100);
+            return (
+              <div key={goal.id} className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
+                <div className="flex justify-between items-end">
+                  <div>
+                    <h4 className="font-black text-sm text-slate-800 flex items-center gap-2">
+                      <i className={`fas ${goal.name.toLowerCase().includes('vacation') ? 'fa-plane' : 'fa-piggy-bank'} text-indigo-500`}></i>
+                      {goal.name}
+                    </h4>
+                    <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest">{goal.institution}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-black text-base text-indigo-600">${goal.currentAmount.toLocaleString()}</p>
+                    <p className="text-[9px] text-slate-400 font-bold uppercase">of ${goal.targetAmount.toLocaleString()}</p>
+                  </div>
+                </div>
+                <div className="h-4 w-full bg-slate-100 rounded-full overflow-hidden shadow-inner border border-slate-200/50">
+                  <div 
+                    className={`h-full transition-all duration-1000 ease-out rounded-full ${progress >= 100 ? 'bg-emerald-500' : 'bg-indigo-600'} shadow-lg`}
+                    style={{ width: `${progress}%` }}
+                  ></div>
+                </div>
+                <div className="flex justify-between items-center text-[9px] font-black uppercase tracking-widest text-slate-400">
+                  <span>{progress.toFixed(1)}% Complete</span>
+                  {progress >= 100 && <span className="text-emerald-500"><i className="fas fa-star mr-1"></i> Goal Achieved</span>}
+                </div>
+              </div>
+            );
+          })}
+          {savingGoals.length === 0 && (
+            <div className="col-span-full py-10 text-center text-slate-300 uppercase font-black text-[10px] tracking-widest">
+               No savings goals configured in settings
+            </div>
+          )}
         </div>
       </section>
 
@@ -533,7 +665,7 @@ const Dashboard: React.FC<Props> = ({
          </div>
       </section>
 
-      {/* Asset Deployment */}
+      {/* Institutional Vaults */}
       <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
         <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em] mb-10">Institutional Vaults</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">

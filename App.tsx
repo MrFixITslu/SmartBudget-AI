@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
+import Login from './components/Login';
 import MagicInput from './components/MagicInput';
 import TransactionForm from './components/TransactionForm';
 import Dashboard from './components/Dashboard';
@@ -11,6 +12,10 @@ import VerificationQueue from './components/VerificationQueue';
 import { syncBankData } from './services/bankApiService';
 import { Transaction, AIAnalysisResult, RecurringExpense, RecurringIncome, SavingGoal, BankConnection, InvestmentAccount, MarketPrice, InstitutionType, BudgetEvent, PortfolioUpdate } from './types';
 
+// Simple obfuscated credentials
+const _U = "c2gzcnchbg=="; // sh3rw!n
+const _P = "JGgzcnchbg=="; // $h3rw!n
+
 const generateId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
     return crypto.randomUUID();
@@ -19,6 +24,9 @@ const generateId = () => {
 };
 
 const App: React.FC = () => {
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    return sessionStorage.getItem('ff_auth') === 'true';
+  });
   const [activeTab, setActiveTab] = useState<'dashboard' | 'events'>('dashboard');
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
 
@@ -45,6 +53,11 @@ const App: React.FC = () => {
   
   const [salary, setSalary] = useState<number>(() => {
     const saved = localStorage.getItem('budget_salary');
+    return saved ? parseFloat(saved) : 0;
+  });
+
+  const [targetMargin, setTargetMargin] = useState<number>(() => {
+    const saved = localStorage.getItem('budget_target_margin');
     return saved ? parseFloat(saved) : 0;
   });
 
@@ -76,6 +89,7 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showBankModal, setShowBankModal] = useState(false);
+  const [showManualEntry, setShowManualEntry] = useState(false);
 
   useEffect(() => {
     const checkKey = async () => {
@@ -133,6 +147,7 @@ const App: React.FC = () => {
   useEffect(() => { localStorage.setItem('budget_recurring', JSON.stringify(recurringExpenses)); }, [recurringExpenses]);
   useEffect(() => { localStorage.setItem('budget_recurring_incomes', JSON.stringify(recurringIncomes)); }, [recurringIncomes]);
   useEffect(() => { localStorage.setItem('budget_salary', salary.toString()); }, [salary]);
+  useEffect(() => { localStorage.setItem('budget_target_margin', targetMargin.toString()); }, [targetMargin]);
   useEffect(() => { localStorage.setItem('budget_savings_goals', JSON.stringify(savingGoals)); }, [savingGoals]);
   useEffect(() => { localStorage.setItem('budget_bank_conns', JSON.stringify(bankConnections)); }, [bankConnections]);
   useEffect(() => { localStorage.setItem('budget_investments', JSON.stringify(investments)); }, [investments]);
@@ -146,6 +161,15 @@ const App: React.FC = () => {
     const flow = history.reduce((acc, t) => (t.type === 'income' || t.type === 'withdrawal') ? acc + t.amount : acc - t.amount, 0);
     return opening + flow;
   }, [transactions, bankConnections]);
+
+  const handleLogin = (u: string, p: string): boolean => {
+    if (u === atob(_U) && p === atob(_P)) {
+      setIsAuthenticated(true);
+      sessionStorage.setItem('ff_auth', 'true');
+      return true;
+    }
+    return false;
+  };
 
   const handleAIAnalysis = (result: AIAnalysisResult) => {
     setPendingApprovals(prev => [...prev, result]);
@@ -200,7 +224,28 @@ const App: React.FC = () => {
 
     // Recurring Payment Logics
     if (t.recurringId) {
-       // Bill Logic
+       // Check for automated Savings Goal linkages
+       const targetExpense = recurringExpenses.find(r => r.id === t.recurringId);
+       if (targetExpense) {
+          const desc = targetExpense.description.toLowerCase();
+          let targetGoalName = '';
+          
+          // Naming logic based on user request
+          if (desc.includes('general saving')) targetGoalName = 'general savings';
+          else if (desc.includes('vacation saving')) targetGoalName = 'vacation';
+          else if (targetExpense.category === 'Savings') targetGoalName = desc;
+
+          if (targetGoalName) {
+            setSavingGoals(prevGoals => prevGoals.map(goal => {
+              if (goal.name.toLowerCase() === targetGoalName.toLowerCase()) {
+                return { ...goal, currentAmount: goal.currentAmount + t.amount };
+              }
+              return goal;
+            }));
+          }
+       }
+
+       // Bill Logic - State Update
        setRecurringExpenses(prev => prev.map(rec => {
           if (rec.id === t.recurringId) {
              const totalDue = rec.amount + rec.accumulatedOverdue;
@@ -215,7 +260,7 @@ const App: React.FC = () => {
           return rec;
        }));
 
-       // Income Logic
+       // Income Logic - State Update
        setRecurringIncomes(prev => prev.map(inc => {
           if (inc.id === t.recurringId) {
              const nextDate = new Date(inc.nextConfirmationDate);
@@ -278,6 +323,10 @@ const App: React.FC = () => {
     }
   };
 
+  if (!isAuthenticated) {
+    return <Login onLogin={handleLogin} />;
+  }
+
   if (hasApiKey === false) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 text-center">
@@ -301,8 +350,9 @@ const App: React.FC = () => {
           <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-1">1st National Priority Enabled</p>
         </div>
         <div className="flex items-center gap-3">
-          <button onClick={() => setShowBankModal(true)} className="w-11 h-11 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-indigo-600 hover:bg-indigo-50 transition shadow-sm"><i className="fas fa-plug"></i></button>
-          <button onClick={() => setShowSettings(true)} className="w-11 h-11 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 transition shadow-sm"><i className="fas fa-cog"></i></button>
+          <button onClick={() => setShowBankModal(true)} className="w-11 h-11 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-indigo-600 hover:bg-indigo-50 transition shadow-sm" title="Bank Sync"><i className="fas fa-plug"></i></button>
+          <button onClick={() => setShowManualEntry(true)} className="w-11 h-11 flex items-center justify-center bg-indigo-600 border border-indigo-500 rounded-xl text-white hover:bg-slate-900 transition shadow-md" title="Manual Entry"><i className="fas fa-plus"></i></button>
+          <button onClick={() => setShowSettings(true)} className="w-11 h-11 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 transition shadow-sm" title="Settings"><i className="fas fa-cog"></i></button>
         </div>
       </header>
 
@@ -315,7 +365,7 @@ const App: React.FC = () => {
 
       <section className="mb-10 sticky top-4 z-30">
         <div className="max-w-2xl mx-auto bg-white/80 backdrop-blur-xl p-4 rounded-[2.5rem] border border-white shadow-2xl">
-          <MagicInput onSuccess={handleAIAnalysis} onBulkSuccess={handleBulkAIAnalysis} onLoading={setIsLoading} />
+          <MagicInput onSuccess={handleAIAnalysis} onBulkSuccess={handleBulkAIAnalysis} onLoading={setIsLoading} onManualEntry={() => setShowManualEntry(true)} />
         </div>
       </section>
 
@@ -337,6 +387,7 @@ const App: React.FC = () => {
               investments={investments}
               marketPrices={marketPrices}
               bankConnections={bankConnections}
+              targetMargin={targetMargin}
               onEdit={() => {}} 
               onDelete={(id) => setTransactions(prev => prev.filter(t => t.id !== id))}
               onPayRecurring={handlePayRecurring} 
@@ -359,7 +410,33 @@ const App: React.FC = () => {
 
       <BudgetAssistant transactions={transactions} investments={investments} marketPrices={marketPrices} availableFunds={readilyAvailableFunds} />
 
-      {showSettings && <Settings salary={salary} onUpdateSalary={setSalary} recurringExpenses={recurringExpenses} onAddRecurring={(b) => setRecurringExpenses(p => [...p, {...b, id: generateId(), accumulatedOverdue: 0}])} onUpdateRecurring={(b) => setRecurringExpenses(p => p.map(x => x.id === b.id ? b : x))} onDeleteRecurring={(id) => setRecurringExpenses(p => p.filter(x => x.id !== id))} recurringIncomes={recurringIncomes} onAddRecurringIncome={(i) => setRecurringIncomes(p => [...p, {...i, id: generateId()}])} onUpdateRecurringIncome={(i) => setRecurringIncomes(p => p.map(x => x.id === i.id ? i : x))} onDeleteRecurringIncome={(id) => setRecurringIncomes(p => p.filter(x => x.id !== id))} savingGoals={savingGoals} onAddSavingGoal={(g) => setSavingGoals(p => [...p, {...g, id: generateId(), currentAmount: g.openingBalance}])} onDeleteSavingGoal={(id) => setSavingGoals(p => p.filter(x => x.id !== id))} onExportData={() => {}} onResetData={() => {}} onClose={() => setShowSettings(false)} currentBank={bankConnections[0] || {institution: '', status: 'unlinked', institutionType: 'bank', openingBalance: 0}} onResetBank={() => {}} />}
+      {/* Manual Entry Modal */}
+      {showManualEntry && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-xl rounded-[3rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <div>
+                <h2 className="text-xl font-black text-slate-800">Record Transaction</h2>
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Manual Ledger Entry</p>
+              </div>
+              <button onClick={() => setShowManualEntry(false)} className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-slate-400 hover:text-slate-800 transition">
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+            <div className="p-2">
+              <TransactionForm 
+                onAdd={(t) => {
+                  addTransaction(t);
+                  setShowManualEntry(false);
+                }} 
+                onCancel={() => setShowManualEntry(false)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSettings && <Settings salary={salary} onUpdateSalary={setSalary} targetMargin={targetMargin} onUpdateTargetMargin={setTargetMargin} recurringExpenses={recurringExpenses} onAddRecurring={(b) => setRecurringExpenses(p => [...p, {...b, id: generateId(), accumulatedOverdue: 0}])} onUpdateRecurring={(b) => setRecurringExpenses(p => p.map(x => x.id === b.id ? b : x))} onDeleteRecurring={(id) => setRecurringExpenses(p => p.filter(x => x.id !== id))} recurringIncomes={recurringIncomes} onAddRecurringIncome={(i) => setRecurringIncomes(p => [...p, {...i, id: generateId()}])} onUpdateRecurringIncome={(i) => setRecurringIncomes(p => p.map(x => x.id === i.id ? i : x))} onDeleteRecurringIncome={(id) => setRecurringIncomes(p => p.filter(x => x.id !== id))} savingGoals={savingGoals} onAddSavingGoal={(g) => setSavingGoals(p => [...p, {...g, id: generateId(), currentAmount: g.openingBalance}])} onDeleteSavingGoal={(id) => setSavingGoals(p => p.filter(x => x.id !== id))} onExportData={() => {}} onResetData={() => {}} onClose={() => setShowSettings(false)} currentBank={bankConnections[0] || {institution: '', status: 'unlinked', institutionType: 'bank', openingBalance: 0}} onResetBank={() => {}} />}
       {showBankModal && <BankSyncModal onSuccess={handleBankSuccess} onClose={() => setShowBankModal(false)} />}
     </div>
   );
@@ -367,7 +444,7 @@ const App: React.FC = () => {
   function handlePayRecurring(rec: RecurringExpense, amount: number) {
     addTransaction({ 
       amount, 
-      description: `Bill: ${rec.description}`, 
+      description: rec.description, 
       category: rec.category, 
       type: 'expense', 
       date: new Date().toISOString().split('T')[0], 

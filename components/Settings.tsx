@@ -5,6 +5,8 @@ import { CATEGORIES, RecurringExpense, RecurringIncome, SavingGoal, BankConnecti
 interface Props {
   salary: number;
   onUpdateSalary: (val: number) => void;
+  targetMargin: number;
+  onUpdateTargetMargin: (val: number) => void;
   recurringExpenses: RecurringExpense[];
   onAddRecurring: (item: Omit<RecurringExpense, 'id' | 'accumulatedOverdue'>) => void;
   onUpdateRecurring: (item: RecurringExpense) => void;
@@ -24,6 +26,8 @@ interface Props {
 }
 
 const Settings: React.FC<Props> = ({ 
+  targetMargin,
+  onUpdateTargetMargin,
   recurringExpenses, 
   onAddRecurring, 
   onUpdateRecurring,
@@ -182,6 +186,27 @@ const Settings: React.FC<Props> = ({
 
         <div className="p-8 space-y-10 overflow-y-auto custom-scrollbar flex-1">
           
+          {/* Financial Planning Section */}
+          <section className="p-6 bg-slate-900 text-white rounded-[2rem] shadow-xl">
+            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Financial Planning</label>
+            <div className="flex flex-col gap-6">
+               <div>
+                  <h3 className="text-lg font-black mb-1">Monthly Target Surplus</h3>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-4">Budgeted Net Margin Goal</p>
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-indigo-400 text-lg">$</span>
+                    <input 
+                      type="number" 
+                      value={targetMargin || ''} 
+                      onChange={(e) => onUpdateTargetMargin(parseFloat(e.target.value) || 0)}
+                      placeholder="e.g. 500.00" 
+                      className="w-full pl-10 p-4 bg-white/5 border border-white/10 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500 font-black text-xl text-white placeholder:text-white/10 transition-all" 
+                    />
+                  </div>
+               </div>
+            </div>
+          </section>
+
           {/* Recurring Incomes Section */}
           <section>
             <div className="flex justify-between items-end mb-6">

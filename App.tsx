@@ -99,7 +99,6 @@ const App: React.FC = () => {
       const dueDate = new Date(rec.nextDueDate);
       if (now > dueDate) {
         updated = true;
-        // Roll overdue amount to accumulated bucket
         const nextDate = new Date(dueDate);
         nextDate.setMonth(nextDate.getMonth() + 1);
         return {
@@ -199,13 +198,31 @@ const App: React.FC = () => {
     const newTransaction: Transaction = { ...t, id: generateId() };
     setTransactions(prev => [newTransaction, ...prev]);
 
-    // If paying a recurring bill, reset its overdue amount
+    // Recurring Payment Logics
     if (t.recurringId) {
+       // Bill Logic
        setRecurringExpenses(prev => prev.map(rec => {
           if (rec.id === t.recurringId) {
-             return { ...rec, accumulatedOverdue: 0, lastBilledDate: t.date };
+             const totalDue = rec.amount + rec.accumulatedOverdue;
+             if (t.amount >= totalDue) {
+                const dueDate = new Date(rec.nextDueDate);
+                dueDate.setMonth(dueDate.getMonth() + 1);
+                return { ...rec, accumulatedOverdue: 0, lastBilledDate: t.date, nextDueDate: dueDate.toISOString().split('T')[0] };
+             } else {
+                return { ...rec, accumulatedOverdue: Math.max(0, totalDue - t.amount), lastBilledDate: t.date };
+             }
           }
           return rec;
+       }));
+
+       // Income Logic
+       setRecurringIncomes(prev => prev.map(inc => {
+          if (inc.id === t.recurringId) {
+             const nextDate = new Date(inc.nextConfirmationDate);
+             nextDate.setMonth(nextDate.getMonth() + 1);
+             return { ...inc, lastConfirmedDate: t.date, nextConfirmationDate: nextDate.toISOString().split('T')[0] };
+          }
+          return inc;
        }));
     }
   };
@@ -299,18 +316,6 @@ const App: React.FC = () => {
       <section className="mb-10 sticky top-4 z-30">
         <div className="max-w-2xl mx-auto bg-white/80 backdrop-blur-xl p-4 rounded-[2.5rem] border border-white shadow-2xl">
           <MagicInput onSuccess={handleAIAnalysis} onBulkSuccess={handleBulkAIAnalysis} onLoading={setIsLoading} />
-          {editingApprovalIndex !== null && pendingApprovals[editingApprovalIndex]?.transaction && (
-            <div className="mt-6 animate-in slide-in-from-top-4 duration-300">
-              <TransactionForm 
-                onAdd={(t) => {
-                  addTransaction(t);
-                  discardItem(editingApprovalIndex);
-                }} 
-                initialData={pendingApprovals[editingApprovalIndex].transaction} 
-                onCancel={() => setEditingApprovalIndex(null)} 
-              />
-            </div>
-          )}
         </div>
       </section>
 
@@ -370,7 +375,14 @@ const App: React.FC = () => {
     });
   }
   function handleReceiveRecurringIncome(inc: RecurringIncome, amount: number) {
-    addTransaction({ amount, description: `Income: ${inc.description}`, category: inc.category, type: 'income', date: new Date().toISOString().split('T')[0], recurringId: inc.id });
+    addTransaction({ 
+      amount, 
+      description: `Income: ${inc.description}`, 
+      category: inc.category, 
+      type: 'income', 
+      date: new Date().toISOString().split('T')[0], 
+      recurringId: inc.id 
+    });
   }
   function handleContributeSaving(id: string, amount: number) {
     setSavingGoals(prev => prev.map(g => g.id === id ? { ...g, currentAmount: g.currentAmount + amount } : g));

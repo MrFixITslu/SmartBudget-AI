@@ -1,6 +1,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { Transaction, RecurringExpense, RecurringIncome, SavingGoal, InvestmentAccount, MarketPrice, BankConnection } from '../types';
+import { syncLucelecPortal } from '../services/bankApiService';
 
 interface InstitutionalBalance {
   balance: number;
@@ -28,9 +29,10 @@ interface Props {
 }
 
 const Dashboard: React.FC<Props> = ({ 
-  transactions, investments, marketPrices, bankConnections, recurringExpenses, recurringIncomes, onWithdrawal, onDelete, onPayRecurring
+  transactions, investments, marketPrices, bankConnections, recurringExpenses, recurringIncomes, onWithdrawal, onDelete, onPayRecurring, onReceiveRecurringIncome
 }) => {
-  const [withdrawAmounts, setWithdrawAmounts] = useState<Record<string, string>>({});
+  const [paymentInputs, setPaymentInputs] = useState<Record<string, string>>({});
+  const [isSyncingPortal, setIsSyncingPortal] = useState<string | null>(null);
 
   const institutionalBalances = useMemo<Record<string, InstitutionalBalance>>(() => {
     const balances: Record<string, InstitutionalBalance> = {};
@@ -60,9 +62,8 @@ const Dashboard: React.FC<Props> = ({
   }, [bankConnections, investments, transactions, marketPrices]);
 
   const liquidFunds = useMemo(() => (institutionalBalances['1st National Bank St. Lucia'] as InstitutionalBalance | undefined)?.balance || 0, [institutionalBalances]);
-  const storedFunds = useMemo(() => (Object.values(institutionalBalances) as InstitutionalBalance[]).filter(b => b.type === 'credit_union').reduce((acc, b) => acc + b.balance, 0), [institutionalBalances]);
-  const cryptoFunds = useMemo(() => (institutionalBalances['Binance'] as InstitutionalBalance | undefined)?.balance || 0, [institutionalBalances]);
   const portfolioFunds = useMemo(() => (Object.values(institutionalBalances) as InstitutionalBalance[]).filter(b => b.type === 'investment').reduce((acc, b) => acc + b.balance, 0), [institutionalBalances]);
+  const cryptoFunds = useMemo(() => (institutionalBalances['Binance'] as InstitutionalBalance | undefined)?.balance || 0, [institutionalBalances]);
   const netWorth: number = (Object.values(institutionalBalances) as InstitutionalBalance[]).reduce((acc: number, b) => acc + b.balance, 0);
 
   const totalMonthlyRecurringExpenses = useMemo(() => 
@@ -79,208 +80,298 @@ const Dashboard: React.FC<Props> = ({
   );
   const safetyMargin = totalMonthlyRecurringIncome - totalMonthlyRecurringExpenses - totalOverdue;
 
+  // 25th Cycle Priority logic
+  const cycleBills = useMemo(() => {
+    return recurringExpenses.filter(bill => bill.dayOfMonth >= 25 || bill.accumulatedOverdue > 0);
+  }, [recurringExpenses]);
+
+  const cycleIncomes = useMemo(() => {
+    return recurringIncomes.filter(income => income.dayOfMonth >= 25);
+  }, [recurringIncomes]);
+
+  const cycleBillTotal = useMemo(() => 
+    cycleBills.reduce((acc, b) => acc + b.amount + b.accumulatedOverdue, 0), 
+    [cycleBills]
+  );
+
+  const cycleIncomeTotal = useMemo(() => 
+    cycleIncomes.reduce((acc, i) => acc + i.amount, 0), 
+    [cycleIncomes]
+  );
+
+  const isBillPaidInCycle = (bill: RecurringExpense) => {
+    const now = new Date();
+    const dueDate = new Date(bill.nextDueDate);
+    return dueDate > now && bill.accumulatedOverdue === 0;
+  };
+
+  const isIncomeReceivedInCycle = (income: RecurringIncome) => {
+    const now = new Date();
+    const confirmDate = new Date(income.nextConfirmationDate);
+    return confirmDate > now;
+  };
+
+  const handleSyncLucelec = async (id: string) => {
+    setIsSyncingPortal(id);
+    await syncLucelecPortal();
+    setIsSyncingPortal(null);
+  };
+
+  const renderIncomeCard = (income: RecurringIncome) => {
+    const received = isIncomeReceivedInCycle(income);
+    
+    return (
+      <div key={income.id} className={`p-5 border-2 rounded-[2rem] transition-all ${received ? 'bg-emerald-50/30 border-emerald-100 opacity-60' : 'bg-white border-slate-100 shadow-sm'} flex items-center justify-between group`}>
+        <div className="flex items-center gap-4">
+          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-lg ${received ? 'bg-slate-200 text-slate-400' : 'bg-emerald-500 text-white shadow-lg'}`}>
+            <i className="fas fa-hand-holding-dollar"></i>
+          </div>
+          <div>
+            <p className={`font-black text-sm ${received ? 'text-slate-400' : 'text-slate-800'}`}>{income.description}</p>
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+              {received ? `Expected next: ${income.nextConfirmationDate}` : `Expected on the ${income.dayOfMonth}th`}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-6">
+          <div className="text-right">
+            <p className={`font-black text-base ${received ? 'text-slate-300' : 'text-emerald-600'}`}>+${income.amount.toFixed(2)}</p>
+            {received && <span className="text-[8px] font-black text-emerald-500 uppercase tracking-widest bg-emerald-50 px-2 py-0.5 rounded">Settled</span>}
+          </div>
+          {!received && (
+            <button 
+              onClick={() => onReceiveRecurringIncome(income, income.amount)}
+              className="px-4 py-2 bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-slate-900 transition-all shadow-md active:scale-95"
+            >
+              Confirm
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderBillCard = (bill: RecurringExpense, isCompact: boolean = false) => {
+    const paid = isBillPaidInCycle(bill);
+    const totalToPay = bill.amount + bill.accumulatedOverdue;
+    const currentInput = paymentInputs[bill.id] || totalToPay.toString();
+    const syncing = isSyncingPortal === bill.id;
+
+    return (
+      <div 
+        key={bill.id} 
+        className={`p-6 border-2 transition-all duration-300 ${
+          paid 
+            ? 'bg-slate-50/50 border-slate-100 opacity-70 grayscale-[0.5]' 
+            : bill.accumulatedOverdue > 0 
+              ? 'bg-white border-rose-100 shadow-xl shadow-rose-50/20' 
+              : 'bg-white border-slate-100 shadow-sm'
+        } rounded-[2.5rem] group relative`}
+      >
+        {paid && (
+          <div className="absolute top-4 right-6 flex items-center gap-2 text-[8px] font-black text-emerald-500 uppercase tracking-[0.2em] border border-emerald-200 px-3 py-1.5 rounded-full bg-emerald-50 shadow-sm animate-in fade-in zoom-in">
+            <i className="fas fa-check-circle"></i> Settled
+          </div>
+        )}
+        
+        <div className={`flex flex-col ${isCompact ? 'lg:flex-col' : 'lg:flex-row lg:items-center'} justify-between gap-6`}>
+          <div className="flex items-center gap-5">
+            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-xl shadow-lg transition-all duration-500 ${
+              paid 
+                ? 'bg-slate-200 text-slate-400' 
+                : bill.accumulatedOverdue > 0 
+                  ? 'bg-rose-500 text-white rotate-3' 
+                  : 'bg-indigo-600 text-white'
+            }`}>
+              <i className={`fas ${bill.externalSyncEnabled ? 'fa-plug' : 'fa-file-invoice'}`}></i>
+            </div>
+            <div>
+              <p className={`font-black text-base ${paid ? 'text-slate-400' : 'text-slate-800'} flex items-center gap-2`}>
+                {bill.description}
+                {bill.externalSyncEnabled && !paid && (
+                  <button 
+                    onClick={() => handleSyncLucelec(bill.id)}
+                    disabled={syncing}
+                    className={`text-[8px] px-2 py-1 rounded font-black uppercase transition-all ${syncing ? 'bg-amber-100 text-amber-600 animate-pulse' : 'bg-indigo-50 text-indigo-500 hover:bg-indigo-600 hover:text-white'}`}
+                  >
+                    {syncing ? 'Syncing...' : 'Sync NeilV'}
+                  </button>
+                )}
+              </p>
+              <p className={`text-[10px] font-black uppercase tracking-widest ${paid ? 'text-slate-300' : bill.accumulatedOverdue > 0 ? 'text-rose-500' : 'text-slate-400'}`}>
+                {paid ? `Next: ${bill.nextDueDate}` : `Due: the ${bill.dayOfMonth}th • $${bill.amount} Base`}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-4 lg:gap-8">
+            <div className="text-right min-w-[100px]">
+               <p className={`text-xl font-black transition-colors ${paid ? 'text-slate-300' : bill.accumulatedOverdue > 0 ? 'text-rose-600' : 'text-slate-900'}`}>
+                  ${totalToPay.toFixed(2)}
+               </p>
+               <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Required</p>
+            </div>
+
+            <div className={`flex items-center gap-2 p-2 rounded-2xl border transition-all ${paid ? 'bg-slate-100 border-transparent' : 'bg-slate-50 border-slate-200'}`}>
+               <input 
+                 type="number" 
+                 step="0.01"
+                 disabled={paid}
+                 className={`w-24 px-3 py-2 border-none rounded-xl text-xs font-black outline-none transition-all ${paid ? 'bg-transparent text-slate-300' : 'bg-white focus:ring-2 focus:ring-indigo-500 text-slate-800'}`}
+                 value={paid ? '0.00' : currentInput}
+                 onChange={(e) => setPaymentInputs(prev => ({ ...prev, [bill.id]: e.target.value }))}
+               />
+               <button 
+                 disabled={paid}
+                 onClick={() => {
+                   const amt = parseFloat(currentInput);
+                   if (!isNaN(amt) && amt > 0) {
+                      onPayRecurring(bill, amt);
+                      setPaymentInputs(prev => {
+                         const next = {...prev};
+                         delete next[bill.id];
+                         return next;
+                      });
+                   }
+                 }}
+                 className={`px-5 py-2.5 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all shadow-lg active:scale-95 ${
+                   paid 
+                     ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none' 
+                     : 'bg-indigo-600 text-white hover:bg-slate-900'
+                 }`}
+               >
+                 {paid ? 'Paid' : (parseFloat(currentInput) >= totalToPay ? 'Full Pay' : 'Partial')}
+               </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      {/* Live Market Bar */}
-      <div className="bg-slate-900 rounded-[1.5rem] p-3.5 flex items-center gap-6 overflow-hidden shadow-2xl border border-white/5">
-        <div className="flex items-center gap-2.5 shrink-0 border-r border-white/10 pr-6">
-          <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(16,185,129,0.5)]"></div>
-          <span className="text-[10px] font-black text-white uppercase tracking-[0.2em]">Ticker Live</span>
-        </div>
-        <div className="flex gap-10 whitespace-nowrap overflow-x-auto no-scrollbar py-1">
-          {marketPrices.map(m => (
-            <div key={m.symbol} className="flex items-center gap-2.5 transition-opacity hover:opacity-80 cursor-default">
-              <span className="text-[11px] font-black text-indigo-400">{m.symbol}</span>
-              <span className="text-[11px] font-mono text-slate-300 font-bold">${m.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              <span className={`text-[10px] font-black ${m.change24h >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {m.change24h >= 0 ? '▲' : '▼'}{Math.abs(m.change24h).toFixed(1)}%
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Action Required: Overdue Cards */}
-      {totalOverdue > 0 && (
-        <div className="bg-rose-50 border-2 border-rose-100 p-6 rounded-[2.5rem] flex items-center justify-between animate-pulse-soft">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-rose-500 text-white rounded-2xl flex items-center justify-center text-xl shadow-lg shadow-rose-200">
-               <i className="fas fa-exclamation-triangle"></i>
-            </div>
-            <div>
-               <h4 className="text-sm font-black text-rose-800 uppercase tracking-widest">Overdue Payments Detected</h4>
-               <p className="text-[10px] text-rose-500 font-bold uppercase">Total Debt: ${totalOverdue.toLocaleString()} added to current cycle</p>
-            </div>
+      {/* Summary Row */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div className="bg-slate-900 md:col-span-2 p-10 rounded-[3rem] shadow-2xl text-white relative overflow-hidden group">
+          <div className="absolute top-0 right-0 p-16 opacity-[0.03] scale-150">
+             <i className="fas fa-gem text-[140px]"></i>
           </div>
-          <button 
-            className="px-6 py-2 bg-rose-500 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-rose-600 transition shadow-lg shadow-rose-100"
-          >
-            Review Bills
-          </button>
-        </div>
-      )}
-
-      {/* Global Net Worth Card */}
-      <div className="bg-slate-900 p-10 rounded-[3rem] shadow-2xl text-white relative overflow-hidden group">
-        <div className="absolute top-0 right-0 p-16 opacity-[0.03] scale-150 transition-transform group-hover:scale-[1.6]">
-           <i className="fas fa-gem text-[140px]"></i>
-        </div>
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-8">
-          <div>
+          <div className="relative z-10">
             <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.25em] mb-3">Consolidated Net Worth</p>
             <h2 className="text-5xl font-black tracking-tight">${netWorth.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h2>
-            <div className="flex items-center gap-4 mt-6">
-               <div className="flex items-center gap-2">
-                 <span className="w-2 h-2 bg-emerald-400 rounded-full"></span>
-                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Global Liquid: ${liquidFunds.toLocaleString()}</span>
+            <div className="flex items-center gap-6 mt-8">
+               <div className="bg-white/5 px-4 py-3 rounded-2xl border border-white/10">
+                  <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Liquid Hub</p>
+                  <p className="text-lg font-black text-emerald-400">${liquidFunds.toLocaleString()}</p>
                </div>
-               <div className="flex items-center gap-2">
-                 <span className="w-2 h-2 bg-indigo-400 rounded-full"></span>
-                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Asset Ratio: {netWorth > 0 ? (((portfolioFunds)/netWorth)*100).toFixed(0) : 0}% Growth</span>
+               <div className="bg-white/5 px-4 py-3 rounded-2xl border border-white/10">
+                  <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Asset Value</p>
+                  <p className="text-lg font-black text-indigo-400">${(portfolioFunds + cryptoFunds).toLocaleString()}</p>
                </div>
             </div>
           </div>
-          <div className="flex md:flex-col gap-3">
-             <div className="px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-center">
-                <p className="text-[8px] font-black text-slate-500 uppercase">Crypto</p>
-                <p className="text-sm font-black text-indigo-400">${cryptoFunds.toLocaleString()}</p>
-             </div>
-             <div className="px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-center">
-                <p className="text-[8px] font-black text-slate-500 uppercase">Stored</p>
-                <p className="text-sm font-black text-emerald-400">${storedFunds.toLocaleString()}</p>
-             </div>
-          </div>
+        </div>
+
+        <div className={`${safetyMargin >= 0 ? 'bg-indigo-600' : 'bg-rose-600'} p-8 rounded-[3rem] shadow-xl text-white flex flex-col justify-center transition-colors duration-500`}>
+           <p className="text-white/60 text-[10px] font-black uppercase tracking-widest mb-1">Monthly Net Margin</p>
+           <h3 className="text-4xl font-black">${safetyMargin.toLocaleString()}</h3>
+           <p className="text-[9px] text-white/40 font-bold uppercase mt-4 tracking-widest leading-relaxed">
+             {safetyMargin >= 0 ? 'Monthly Net Surplus (Available)' : 'Monthly Net Deficit (Risk)'}
+           </p>
         </div>
       </div>
 
-      {/* Monthly Commitment Section */}
-      <section className="grid grid-cols-1 md:grid-cols-3 gap-5">
-        <div className="bg-white p-7 rounded-[2.5rem] border border-slate-100 shadow-sm md:col-span-2">
-          <div className="flex items-center justify-between mb-4">
+      {/* 25th Cycle Center - Incomes & Obligations */}
+      <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-10">
+          <div>
+            <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em]">25th Cycle Settlement Center</h3>
+            <p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-widest">Verify End-of-Month Incomes & Bills</p>
+          </div>
+          <div className="flex items-center gap-6">
+             <div className="text-right">
+                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Cycle Net</p>
+                <p className={`text-sm font-black ${(cycleIncomeTotal - cycleBillTotal) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                  ${(cycleIncomeTotal - cycleBillTotal).toLocaleString()}
+                </p>
+             </div>
+             <div className="w-10 h-10 bg-slate-900 text-white rounded-xl flex items-center justify-center">
+                <i className="fas fa-calendar-check"></i>
+             </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+          {/* Expected Incomes Column */}
+          <div className="space-y-6">
+            <div className="flex items-center justify-between px-2">
+              <h4 className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.2em]">Incoming Cash Flow</h4>
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">${cycleIncomeTotal.toLocaleString()} Expected</span>
+            </div>
+            <div className="space-y-4">
+              {cycleIncomes.map(income => renderIncomeCard(income))}
+              {cycleIncomes.length === 0 && (
+                <div className="py-10 text-center bg-slate-50 border border-dashed border-slate-200 rounded-[2rem]">
+                   <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest">No 25th cycle incomes</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Pending Bills Column */}
+          <div className="space-y-6">
+            <div className="flex items-center justify-between px-2">
+              <h4 className="text-[10px] font-black text-rose-600 uppercase tracking-[0.2em]">Cycle Obligations</h4>
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">${cycleBillTotal.toLocaleString()} Total Due</span>
+            </div>
+            <div className="space-y-4">
+              {cycleBills.map(bill => renderBillCard(bill, true))}
+              {cycleBills.length === 0 && (
+                <div className="py-10 text-center bg-slate-50 border border-dashed border-slate-200 rounded-[2rem]">
+                   <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest">Obligations cleared</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* All Scheduled Expenses */}
+      <section className="bg-slate-50 p-10 rounded-[3rem] border border-slate-200 shadow-inner">
+         <div className="flex items-center justify-between mb-8">
             <div>
-              <h3 className="font-black text-slate-800 uppercase text-xs tracking-widest">Commitment Flow</h3>
-              <p className="text-[9px] text-slate-400 font-bold uppercase mt-0.5 tracking-wider">Including Accumulated Debt</p>
+               <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em]">Full Monthly Ledger</h3>
+               <p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-widest">Manage All Recurring Commitments</p>
             </div>
-            <div className={`px-3 py-1 rounded-full text-[10px] font-black uppercase ${safetyMargin >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
-              Margin: ${safetyMargin.toLocaleString()}
-            </div>
-          </div>
-          
-          <div className="grid grid-cols-2 gap-6">
-            <div className="space-y-1">
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Monthly Income</p>
-              <p className="text-xl font-black text-emerald-600">${totalMonthlyRecurringIncome.toLocaleString()}</p>
-            </div>
-            <div className="space-y-1">
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Commitment + Debt</p>
-              <p className="text-xl font-black text-rose-600">${(totalMonthlyRecurringExpenses + totalOverdue).toLocaleString()}</p>
-            </div>
-          </div>
-          
-          <div className="mt-6 w-full h-1.5 bg-slate-100 rounded-full overflow-hidden flex">
-             <div 
-               className="h-full bg-rose-500" 
-               style={{ width: `${Math.min(100, totalMonthlyRecurringIncome > 0 ? ((totalMonthlyRecurringExpenses + totalOverdue) / totalMonthlyRecurringIncome) * 100 : 100)}%` }}
-             ></div>
-          </div>
-        </div>
-
-        {/* Updated Uncommitted Cash Card to show the Safety Margin as requested */}
-        <div className={`${safetyMargin >= 0 ? 'bg-indigo-600' : 'bg-rose-600'} p-7 rounded-[2.5rem] shadow-xl text-white flex flex-col justify-center transition-colors duration-500`}>
-           <p className="text-white/60 text-[10px] font-black uppercase tracking-widest mb-1">Monthly Net Margin</p>
-           <h3 className="text-3xl font-black">${safetyMargin.toLocaleString()}</h3>
-           <p className="text-[9px] text-white/40 font-bold uppercase mt-2 tracking-widest">
-             {safetyMargin >= 0 ? 'Projected Monthly Surplus' : 'Projected Monthly Deficit'}
-           </p>
-        </div>
+         </div>
+         
+         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {recurringExpenses.map(bill => renderBillCard(bill, true))}
+         </div>
       </section>
 
-      {/* Institutional Breakdown */}
+      {/* Asset Deployment */}
       <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
-        <div className="flex items-center justify-between mb-10">
-          <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em]">Institutional Channels</h3>
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Real-time Sync Active</span>
-          </div>
-        </div>
-        <div className="space-y-5">
+        <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em] mb-10">Institutional Vaults</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           {(Object.entries(institutionalBalances) as [string, InstitutionalBalance][]).map(([name, data]) => (
-            <div key={name} className="group flex flex-col p-6 bg-slate-50 border border-slate-100 rounded-[2rem] hover:bg-white hover:ring-2 hover:ring-indigo-100/50 transition-all shadow-sm">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-                <div className="flex items-center gap-5">
-                  <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-white text-xl shadow-lg transition-transform group-hover:scale-110 ${data.available ? 'bg-emerald-500' : 'bg-slate-800'}`}>
-                    <i className={`fas ${data.type === 'investment' ? 'fa-chart-pie' : data.type === 'credit_union' ? 'fa-users' : 'fa-building-columns'}`}></i>
-                  </div>
-                  <div>
-                    <p className="font-black text-base text-slate-800">{name}</p>
-                    <div className="flex items-center gap-2 mt-1">
-                       <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded ${data.available ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>
-                          {data.type.replace('_', ' ')}
-                       </span>
-                    </div>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className="font-black text-xl text-slate-900">${data.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
-                  <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest">Ledger Balance</p>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Bill Sync Status (Specifically for LUCELEC as mentioned) */}
-      {recurringExpenses.some(r => r.externalSyncEnabled) && (
-        <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
-          <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em] mb-8">External Smart Syncs</h3>
-          <div className="space-y-4">
-            {recurringExpenses.filter(r => r.externalSyncEnabled).map(bill => (
-              <div key={bill.id} className="flex items-center justify-between p-5 bg-indigo-50/30 rounded-[1.5rem] border border-indigo-100">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-indigo-600 shadow-sm">
-                    <i className="fas fa-plug"></i>
-                  </div>
-                  <div>
-                    <p className="font-black text-sm text-slate-800">{bill.description}</p>
-                    <p className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest">Current Balance: NeilV Sync Active</p>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className="font-black text-sm text-slate-900">${(bill.amount + bill.accumulatedOverdue).toFixed(2)}</p>
-                  <span className="text-[8px] font-black text-emerald-500 uppercase tracking-widest bg-emerald-50 px-2 py-0.5 rounded">Verified</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Latest Ledger Activity */}
-      <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
-        <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em] mb-8">Recent Flow</h3>
-        <div className="space-y-4">
-          {transactions.slice(0, 5).map(t => (
-            <div key={t.id} className="flex items-center justify-between p-5 bg-slate-50 rounded-[1.5rem] group hover:bg-white hover:ring-2 hover:ring-indigo-50 transition-all border border-transparent">
-              <div className="flex items-center gap-5">
-                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-white ${t.type === 'income' ? 'bg-emerald-500 shadow-emerald-50' : 'bg-rose-500 shadow-rose-50'} shadow-lg`}>
-                  <i className={`fas ${t.type === 'income' ? 'fa-plus' : 'fa-minus'} text-sm`}></i>
+            <div key={name} className="p-6 bg-slate-50 border border-slate-100 rounded-[2rem] hover:bg-white hover:ring-2 hover:ring-indigo-100/50 transition-all flex items-center justify-between group">
+              <div className="flex items-center gap-4">
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-white text-lg transition-transform group-hover:scale-110 ${data.available ? 'bg-emerald-500' : 'bg-slate-800'}`}>
+                  <i className={`fas ${data.type === 'investment' ? 'fa-chart-pie' : data.type === 'credit_union' ? 'fa-users' : 'fa-building-columns'}`}></i>
                 </div>
                 <div>
-                  <p className="font-black text-sm text-slate-800">{t.description}</p>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    {t.institution || 'Ledger'} • {t.category} • {t.date}
-                  </p>
+                  <p className="font-black text-sm text-slate-800 truncate max-w-[120px]">{name}</p>
+                  <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest">{data.type.replace('_', ' ')}</p>
                 </div>
               </div>
-              <div className="flex items-center gap-6">
-                <p className={`font-black text-sm ${t.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>
-                  {t.type === 'income' ? '+' : '-'}${t.amount.toFixed(2)}
-                </p>
-                <button onClick={() => onDelete(t.id)} className="w-9 h-9 rounded-xl hover:bg-rose-50 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center">
-                  <i className="fas fa-trash-alt text-[11px]"></i>
-                </button>
+              <div className="text-right">
+                <p className="font-black text-base text-slate-900">${data.balance.toLocaleString()}</p>
+                <div className="flex items-center justify-end gap-1">
+                  <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse"></span>
+                  <span className="text-[8px] font-black text-slate-400 uppercase">Live</span>
+                </div>
               </div>
             </div>
           ))}

@@ -1,7 +1,6 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { AIAnalysisResult, CATEGORIES } from "../types";
-
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 const SINGLE_SCHEMA = {
   type: Type.OBJECT,
@@ -38,6 +37,7 @@ export const parseInputToTransaction = async (
   input: string | { data: string; mimeType: string },
   isMedia: boolean = false
 ): Promise<AIAnalysisResult | null> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
     const contents = isMedia 
       ? { parts: [{ inlineData: input as { data: string; mimeType: string } }, { text: "Extract transaction details with high precision. Identify the merchant/vendor name clearly. List every item found on the receipt with its name, price, and quantity. If it's a single receipt, return one object representing the entire purchase." }] }
@@ -63,6 +63,7 @@ export const parseInputToTransaction = async (
 export const parseStatementToTransactions = async (
   fileData: { data: string; mimeType: string }
 ): Promise<AIAnalysisResult[]> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',

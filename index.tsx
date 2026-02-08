@@ -8,19 +8,8 @@ if (!rootElement) {
   throw new Error("Could not find root element to mount to");
 }
 
-// Register Service Worker for PWA
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').then(
-      (registration) => {
-        console.log('SW registered: ', registration);
-      },
-      (registrationError) => {
-        console.log('SW registration failed: ', registrationError);
-      }
-    );
-  });
-}
+// Service worker registration removed to prevent "Could not establish connection" errors
+// which often occur in specific browser environments or with conflicting extensions.
 
 const root = ReactDOM.createRoot(rootElement);
 root.render(

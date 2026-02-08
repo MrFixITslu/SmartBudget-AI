@@ -80,13 +80,17 @@ export interface RecurringIncome {
   lastConfirmedDate?: string;
 }
 
-// New Event Planner Types
+// Event Planner Types
+export type EventItemCategory = 'Venue' | 'Catering' | 'Marketing' | 'Logistics' | 'Sponsorship' | 'Tickets' | 'Decor' | 'Other';
+
 export interface EventItem {
   id: string;
   description: string;
   amount: number;
   type: 'income' | 'expense';
+  category: EventItemCategory;
   notes?: string;
+  date?: string;
 }
 
 export interface BudgetEvent {
@@ -96,11 +100,16 @@ export interface BudgetEvent {
   items: EventItem[];
   notes?: string;
   status: 'planned' | 'active' | 'completed';
+  projectedBudget?: number;
 }
 
 export const CATEGORIES = [
   'Food', 'Transport', 'Housing', 'Entertainment', 'Utilities', 
   'Health', 'Shopping', 'Education', 'Personal', 'Income', 'Savings', 'Other', 'Investments'
+];
+
+export const EVENT_ITEM_CATEGORIES: EventItemCategory[] = [
+  'Venue', 'Catering', 'Marketing', 'Logistics', 'Sponsorship', 'Tickets', 'Decor', 'Other'
 ];
 
 export interface AIAnalysisResult {

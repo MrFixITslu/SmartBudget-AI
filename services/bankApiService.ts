@@ -2,10 +2,8 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { InstitutionType, Transaction, AIAnalysisResult } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
 /**
- * Since many regional banks (St. Lucia) don't have public REST APIs,
+ * Since many regional banks don't have public REST APIs,
  * this service acts as an "Intelligent Gateway" that mimics API behavior
  * using Gemini to parse document-based data or simulate live feeds.
  */
@@ -13,6 +11,7 @@ export const syncBankData = async (
   institution: string,
   lastSynced?: string
 ): Promise<AIAnalysisResult[]> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   // Simulating a network delay for API call
   await new Promise(resolve => setTimeout(resolve, 2000));
 
@@ -26,8 +25,7 @@ export const syncBankData = async (
       Simulate a JSON API response for ${institution}. 
       The last sync was ${lastSynced || 'never'}.
       ${specificContext}
-      Generate a list of 3-5 realistic recent transactions for a user in St. Lucia.
-      Use local currency format ($) but keep it as numbers.
+      Generate a list of 3-5 realistic recent transactions.
       Include diverse categories like 'Food', 'Transport', 'Shopping', 'Savings'.
     `;
 

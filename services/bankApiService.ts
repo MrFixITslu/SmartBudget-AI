@@ -7,10 +7,15 @@ import { InstitutionType, Transaction, AIAnalysisResult } from "../types";
  * this service acts as an "Intelligent Gateway" that mimics API behavior
  * using Gemini to parse document-based data or simulate live feeds.
  */
+// Changed return type to Promise<any[]> because the schema generates a list of raw transaction objects
 export const syncBankData = async (
   institution: string,
   lastSynced?: string
-): Promise<AIAnalysisResult[]> => {
+): Promise<any[]> => {
+  // If the user hasn't synced before, we don't force simulated data anymore.
+  // We strictly wait for user interaction or actual document uploads.
+  if (!lastSynced) return [];
+
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   // Simulating a network delay for API call
   await new Promise(resolve => setTimeout(resolve, 2000));
@@ -23,10 +28,10 @@ export const syncBankData = async (
 
     const prompt = `
       Simulate a JSON API response for ${institution}. 
-      The last sync was ${lastSynced || 'never'}.
+      The last sync was ${lastSynced}.
       ${specificContext}
-      Generate a list of 3-5 realistic recent transactions.
-      Include diverse categories like 'Food', 'Transport', 'Shopping', 'Savings'.
+      Generate a list of 2-3 realistic recent transactions that might have occurred since the last sync.
+      Include categories like 'Food', 'Transport', 'Shopping', 'Savings'.
     `;
 
     const response = await ai.models.generateContent({
@@ -52,7 +57,8 @@ export const syncBankData = async (
       }
     });
 
-    return JSON.parse(response.text) as AIAnalysisResult[];
+    // Return the array directly as specified by the responseSchema
+    return JSON.parse(response.text);
   } catch (error) {
     console.error("Bank API Error:", error);
     return [];

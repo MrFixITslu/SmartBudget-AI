@@ -94,7 +94,7 @@ const MagicInput: React.FC<Props> = ({ onSuccess, onBulkSuccess, onLoading }) =>
             value={input}
             onChange={(e) => setInput(e.target.value)}
             className="w-full bg-transparent px-3 py-2 text-slate-800 outline-none placeholder:text-slate-400"
-            placeholder="Log coffee, or upload BOSL statement..."
+            placeholder="Log coffee, or upload 1st National statement..."
           />
         </div>
         
@@ -136,7 +136,7 @@ const MagicInput: React.FC<Props> = ({ onSuccess, onBulkSuccess, onLoading }) =>
       />
 
       <div className="absolute -bottom-6 left-3 text-[10px] text-slate-400 flex gap-4 uppercase font-bold tracking-wider">
-        <span>BOSL Statements Supported</span>
+        <span>1st National Statements Supported</span>
         <i className="fas fa-check-circle text-indigo-400"></i>
       </div>
     </div>

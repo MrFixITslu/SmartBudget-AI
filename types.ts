@@ -48,6 +48,28 @@ export interface Transaction {
   lineItems?: LineItem[];
   recurringId?: string;
   savingGoalId?: string;
+  institution?: string;
+}
+
+export interface PortfolioUpdate {
+  symbol: string;
+  quantity: number;
+  provider: 'Binance' | 'Vanguard';
+}
+
+export interface AIAnalysisResult {
+  updateType: 'transaction' | 'portfolio';
+  transaction?: {
+    amount: number;
+    category: string;
+    description: string;
+    type: TransactionType;
+    notes?: string;
+    date?: string;
+    vendor?: string;
+    lineItems?: LineItem[];
+  };
+  portfolio?: PortfolioUpdate;
 }
 
 export interface SavingGoal {
@@ -80,19 +102,6 @@ export interface RecurringIncome {
   lastConfirmedDate?: string;
 }
 
-// Event Planner Types
-export type EventItemCategory = 'Venue' | 'Catering' | 'Marketing' | 'Logistics' | 'Sponsorship' | 'Tickets' | 'Decor' | 'Other';
-
-export interface EventItem {
-  id: string;
-  description: string;
-  amount: number;
-  type: 'income' | 'expense';
-  category: EventItemCategory;
-  notes?: string;
-  date?: string;
-}
-
 export interface BudgetEvent {
   id: string;
   name: string;
@@ -103,22 +112,24 @@ export interface BudgetEvent {
   projectedBudget?: number;
 }
 
+// Added date property to EventItem to fix object literal error in EventPlanner.tsx
+export interface EventItem {
+  id: string;
+  description: string;
+  amount: number;
+  type: 'income' | 'expense';
+  category: string;
+  notes?: string;
+  date: string;
+}
+
 export const CATEGORIES = [
   'Food', 'Transport', 'Housing', 'Entertainment', 'Utilities', 
   'Health', 'Shopping', 'Education', 'Personal', 'Income', 'Savings', 'Other', 'Investments'
 ];
 
-export const EVENT_ITEM_CATEGORIES: EventItemCategory[] = [
-  'Venue', 'Catering', 'Marketing', 'Logistics', 'Sponsorship', 'Tickets', 'Decor', 'Other'
+// Added EVENT_ITEM_CATEGORIES and EventItemCategory to fix missing exported member error
+export const EVENT_ITEM_CATEGORIES = [
+  'Venue', 'Catering', 'Decor', 'Entertainment', 'Staff', 'Marketing', 'Tickets', 'Donation', 'Other'
 ];
-
-export interface AIAnalysisResult {
-  amount: number;
-  category: string;
-  description: string;
-  type: TransactionType;
-  notes?: string;
-  date?: string;
-  vendor?: string;
-  lineItems?: LineItem[];
-}
+export type EventItemCategory = typeof EVENT_ITEM_CATEGORIES[number];

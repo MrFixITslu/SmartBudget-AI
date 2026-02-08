@@ -1,7 +1,7 @@
 
 {
-  "name": "SmartBudget AI",
-  "short_name": "SmartBudget",
+  "name": "Fire Finance Pro v0.5",
+  "short_name": "Fire Pro",
   "description": "Friction-less AI-powered personal finance tracking.",
   "start_url": "./",
   "display": "standalone",

@@ -18,7 +18,6 @@ const BankSyncModal: React.FC<Props> = ({ onSuccess, onClose }) => {
 
   const platforms = [
     { name: '1st National Bank St. Lucia', color: 'bg-emerald-600', icon: 'fa-landmark', type: 'bank' as const, apiType: 'Direct Connect' },
-    { name: 'Bank of St. Lucia', color: 'bg-blue-600', icon: 'fa-university', type: 'bank' as const, apiType: 'BOSL-API v2' },
     { name: 'Laborie Cooperative Credit Union', color: 'bg-teal-600', icon: 'fa-users-rectangle', type: 'credit_union' as const, apiType: 'Laborie-Connect' },
     { name: 'St. Lucia Workers Credit Union', color: 'bg-indigo-600', icon: 'fa-users', type: 'credit_union' as const, apiType: 'CU-Sync' },
     { name: 'Binance', color: 'bg-yellow-500', icon: 'fa-coins', type: 'investment' as const, apiType: 'REST API' },

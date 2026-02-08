@@ -25,7 +25,8 @@ const generateId = () => {
 
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    return sessionStorage.getItem('ff_auth') === 'true';
+    // Changed to localStorage to allow "remote login" persistence
+    return localStorage.getItem('ff_auth') === 'true';
   });
   const [activeTab, setActiveTab] = useState<'dashboard' | 'events'>('dashboard');
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
@@ -104,7 +105,7 @@ const App: React.FC = () => {
     checkKey();
   }, []);
 
-  // OVERDUE CHECKER: Runs on load to roll over missed payments
+  // OVERDUE CHECKER
   useEffect(() => {
     const now = new Date();
     let updated = false;
@@ -156,25 +157,21 @@ const App: React.FC = () => {
   const readilyAvailableFunds = useMemo(() => {
     const primaryBank = bankConnections.find(c => c.institution.includes('1st National'));
     const opening = primaryBank?.openingBalance || 0;
-    
-    // Include 1st National AND Cash in Hand as available liquidity
     const relevantHistory = transactions.filter(t => 
       t.institution === primaryBank?.institution || t.institution === 'Cash in Hand'
     );
-    
     const flow = relevantHistory.reduce((acc, t) => {
        if (t.type === 'income' || t.type === 'withdrawal') return acc + t.amount;
        if (t.type === 'expense') return acc - t.amount;
        return acc;
     }, 0);
-    
     return opening + flow;
   }, [transactions, bankConnections]);
 
   const handleLogin = (u: string, p: string): boolean => {
     if (u === atob(_U) && p === atob(_P)) {
       setIsAuthenticated(true);
-      sessionStorage.setItem('ff_auth', 'true');
+      localStorage.setItem('ff_auth', 'true');
       return true;
     }
     return false;
@@ -197,7 +194,6 @@ const App: React.FC = () => {
     } else if (item.updateType === 'transaction' && item.transaction) {
       addTransaction(item.transaction as Transaction);
     }
-    
     setPendingApprovals(prev => prev.filter((_, i) => i !== index));
     if (editingApprovalIndex === index) setEditingApprovalIndex(null);
   };
@@ -228,40 +224,31 @@ const App: React.FC = () => {
   };
 
   const addTransaction = (t: Omit<Transaction, 'id'>) => {
-    // Default to "Cash in Hand" if no institution is provided (One-off entries)
     const finalInstitution = t.institution || 'Cash in Hand';
     const newTransaction: Transaction = { ...t, id: generateId(), institution: finalInstitution };
     const transactionsToAdd: Transaction[] = [newTransaction];
-
-    // Detection for "Laborie Bump" logic - When saving expenses are paid
     const descLower = t.description.toLowerCase();
     const isSavingsTarget = descLower.includes('general saving') || descLower.includes('vacation saving');
-    
     if (isSavingsTarget && t.type === 'expense') {
       transactionsToAdd.push({
         id: generateId() + '-transfer',
         amount: t.amount,
         description: `Savings Transfer: ${t.description}`,
         category: 'Savings',
-        type: 'income', // Treated as income for the destination institution to increase balance
+        type: 'income',
         date: t.date,
         institution: 'Laborie Cooperative Credit Union'
       });
     }
-
     setTransactions(prev => [...transactionsToAdd, ...prev]);
-
-    // Recurring Payment Logics
     if (t.recurringId) {
        const targetExpense = recurringExpenses.find(r => r.id === t.recurringId);
        if (targetExpense) {
           const desc = targetExpense.description.toLowerCase();
           let targetGoalName = '';
-          
           if (desc.includes('general saving')) targetGoalName = 'general savings';
           else if (desc.includes('vacation saving')) targetGoalName = 'vacation';
           else if (targetExpense.category === 'Savings') targetGoalName = desc;
-
           if (targetGoalName) {
             setSavingGoals(prevGoals => prevGoals.map(goal => {
               if (goal.name.toLowerCase() === targetGoalName.toLowerCase()) {
@@ -271,7 +258,6 @@ const App: React.FC = () => {
             }));
           }
        }
-
        setRecurringExpenses(prev => prev.map(rec => {
           if (rec.id === t.recurringId) {
              const totalDue = rec.amount + rec.accumulatedOverdue;
@@ -285,7 +271,6 @@ const App: React.FC = () => {
           }
           return rec;
        }));
-
        setRecurringIncomes(prev => prev.map(inc => {
           if (inc.id === t.recurringId) {
              const nextDate = new Date(inc.nextConfirmationDate);
@@ -310,15 +295,10 @@ const App: React.FC = () => {
 
   const handleBankSuccess = async (institution: string, accountLastFour: string, openingBalance: number, institutionType: InstitutionType) => {
     const newConn: BankConnection = { 
-      institution, 
-      institutionType,
-      status: 'linked', 
-      accountLastFour, 
-      lastSynced: new Date().toLocaleTimeString(),
-      openingBalance
+      institution, institutionType, status: 'linked', accountLastFour, 
+      lastSynced: new Date().toLocaleTimeString(), openingBalance
     };
     setBankConnections(prev => [...prev.filter(c => c.institution !== institution), newConn]);
-
     if (institutionType !== 'investment') {
       setIsLoading(true);
       const newApiData = await syncBankData(institution);
@@ -326,13 +306,9 @@ const App: React.FC = () => {
         const pendingResults: AIAnalysisResult[] = newApiData.map((res: any) => ({
           updateType: 'transaction',
           transaction: {
-            amount: res.amount,
-            category: res.category,
-            description: res.description,
-            type: res.type,
-            date: res.date || new Date().toISOString().split('T')[0],
-            vendor: res.vendor,
-            institution: institution // Linked entries get the actual institution
+            amount: res.amount, category: res.category, description: res.description,
+            type: res.type, date: res.date || new Date().toISOString().split('T')[0],
+            vendor: res.vendor, institution: institution
           }
         }));
         setPendingApprovals(prev => [...prev, ...pendingResults]);
@@ -340,10 +316,7 @@ const App: React.FC = () => {
       setIsLoading(false);
     } else {
       const newInv: InvestmentAccount = {
-        id: generateId(),
-        provider: institution as any,
-        name: `${institution} Portfolio`,
-        holdings: []
+        id: generateId(), provider: institution as any, name: `${institution} Portfolio`, holdings: []
       };
       setInvestments(prev => [...prev.filter(i => i.provider !== institution), newInv]);
     }
@@ -398,45 +371,25 @@ const App: React.FC = () => {
       <main>
         {activeTab === 'dashboard' ? (
           <>
-            <VerificationQueue 
-              pendingItems={pendingApprovals}
-              onApprove={approveItem}
-              onDiscard={discardItem}
-              onEdit={setEditingApprovalIndex}
-              onDiscardAll={() => setPendingApprovals([])}
-            />
+            <VerificationQueue pendingItems={pendingApprovals} onApprove={approveItem} onDiscard={discardItem} onEdit={setEditingApprovalIndex} onDiscardAll={() => setPendingApprovals([])} />
             <Dashboard 
-              transactions={transactions} 
-              recurringExpenses={recurringExpenses}
-              recurringIncomes={recurringIncomes}
-              savingGoals={savingGoals}
-              investments={investments}
-              marketPrices={marketPrices}
-              bankConnections={bankConnections}
-              targetMargin={targetMargin}
-              onEdit={() => {}} 
-              onDelete={(id) => setTransactions(prev => prev.filter(t => t.id !== id))}
-              onPayRecurring={handlePayRecurring} 
-              onReceiveRecurringIncome={handleReceiveRecurringIncome}
-              onContributeSaving={handleContributeSaving}
-              onWithdrawSaving={handleWithdrawSaving}
+              transactions={transactions} recurringExpenses={recurringExpenses} recurringIncomes={recurringIncomes}
+              savingGoals={savingGoals} investments={investments} marketPrices={marketPrices}
+              bankConnections={bankConnections} targetMargin={targetMargin}
+              onEdit={() => {}} onDelete={(id) => setTransactions(prev => prev.filter(t => t.id !== id))}
+              onPayRecurring={handlePayRecurring} onReceiveRecurringIncome={handleReceiveRecurringIncome}
+              onContributeSaving={handleContributeSaving} onWithdrawSaving={handleWithdrawSaving}
               onWithdrawal={handleWithdrawal}
               onAddIncome={(amount, desc, notes) => addTransaction({ amount, description: desc, notes, type: 'income', category: 'Income', date: new Date().toISOString().split('T')[0] })}
             />
           </>
         ) : (
-          <EventPlanner 
-            events={events}
-            onAddEvent={(e) => setEvents(prev => [...prev, { ...e, id: generateId(), items: [] }])}
-            onDeleteEvent={(id) => setEvents(prev => prev.filter(e => e.id !== id))}
-            onUpdateEvent={(updated) => setEvents(prev => prev.map(e => e.id === updated.id ? updated : e))}
-          />
+          <EventPlanner events={events} onAddEvent={(e) => setEvents(prev => [...prev, { ...e, id: generateId(), items: [] }])} onDeleteEvent={(id) => setEvents(prev => prev.filter(e => e.id !== id))} onUpdateEvent={(updated) => setEvents(prev => prev.map(e => e.id === updated.id ? updated : e))} />
         )}
       </main>
 
       <BudgetAssistant transactions={transactions} investments={investments} marketPrices={marketPrices} availableFunds={readilyAvailableFunds} />
 
-      {/* Manual Entry Modal */}
       {showManualEntry && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-xl rounded-[3rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
@@ -450,13 +403,7 @@ const App: React.FC = () => {
               </button>
             </div>
             <div className="p-2">
-              <TransactionForm 
-                onAdd={(t) => {
-                  addTransaction(t);
-                  setShowManualEntry(false);
-                }} 
-                onCancel={() => setShowManualEntry(false)}
-              />
+              <TransactionForm onAdd={(t) => { addTransaction(t); setShowManualEntry(false); }} onCancel={() => setShowManualEntry(false)} />
             </div>
           </div>
         </div>
@@ -468,26 +415,10 @@ const App: React.FC = () => {
   );
 
   function handlePayRecurring(rec: RecurringExpense, amount: number) {
-    addTransaction({ 
-      amount, 
-      description: rec.description, 
-      category: rec.category, 
-      type: 'expense', 
-      date: new Date().toISOString().split('T')[0], 
-      recurringId: rec.id,
-      institution: '1st National Bank St. Lucia' 
-    });
+    addTransaction({ amount, description: rec.description, category: rec.category, type: 'expense', date: new Date().toISOString().split('T')[0], recurringId: rec.id, institution: '1st National Bank St. Lucia' });
   }
   function handleReceiveRecurringIncome(inc: RecurringIncome, amount: number) {
-    addTransaction({ 
-      amount, 
-      description: `Income: ${inc.description}`, 
-      category: inc.category, 
-      type: 'income', 
-      date: new Date().toISOString().split('T')[0], 
-      recurringId: inc.id,
-      institution: '1st National Bank St. Lucia'
-    });
+    addTransaction({ amount, description: `Income: ${inc.description}`, category: inc.category, type: 'income', date: new Date().toISOString().split('T')[0], recurringId: inc.id, institution: '1st National Bank St. Lucia' });
   }
   function handleContributeSaving(id: string, amount: number) {
     setSavingGoals(prev => prev.map(g => g.id === id ? { ...g, currentAmount: g.currentAmount + amount } : g));

@@ -107,12 +107,33 @@ const Dashboard: React.FC<Props> = ({
   const safetyMargin = totalMonthlyRecurringIncome - totalMonthlyRecurringExpenses - totalOverdue;
   const marginProgress = targetMargin > 0 ? Math.min(100, (safetyMargin / targetMargin) * 100) : 0;
 
+  // Logic for Daily Spend Limit until the 25th
+  const { daysUntil25th, dailySpendLimit } = useMemo(() => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth();
+    
+    // Target the 25th of this month, or next month if past 25th
+    let targetDate = new Date(year, month, 25);
+    if (now.getDate() >= 25) {
+      targetDate = new Date(year, month + 1, 25);
+    }
+    
+    const diffTime = targetDate.getTime() - now.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const safeDays = Math.max(1, diffDays);
+    
+    return {
+      daysUntil25th: safeDays,
+      dailySpendLimit: safetyMargin > 0 ? safetyMargin / safeDays : 0
+    };
+  }, [safetyMargin]);
+
   const manualTransactions = useMemo(() => 
     transactions.filter(t => !t.recurringId).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
     [transactions]
   );
 
-  // Dynamic Trend Analysis Logic
   const trendData = useMemo(() => {
     const expenses = transactions.filter(t => t.type === 'expense');
     const filtered = trendCategory === 'All' ? expenses : expenses.filter(t => t.category === trendCategory);
@@ -126,13 +147,12 @@ const Dashboard: React.FC<Props> = ({
       if (trendTimeframe === 'daily') {
         key = t.date;
       } else if (trendTimeframe === 'weekly') {
-        // Simple week key: Year-Wxx
         const firstDayOfYear = new Date(d.getFullYear(), 0, 1);
         const pastDaysOfYear = (d.getTime() - firstDayOfYear.getTime()) / 86400000;
         const weekNum = Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
         key = `${d.getFullYear()}-W${weekNum.toString().padStart(2, '0')}`;
       } else if (trendTimeframe === 'monthly') {
-        key = t.date.substring(0, 7); // YYYY-MM
+        key = t.date.substring(0, 7);
       } else {
         key = d.getFullYear().toString();
       }
@@ -143,7 +163,7 @@ const Dashboard: React.FC<Props> = ({
     return Object.entries(buckets)
       .map(([label, amount]) => ({ label, amount }))
       .sort((a, b) => a.label.localeCompare(b.label))
-      .slice(-12); // Show last 12 buckets
+      .slice(-12);
   }, [transactions, trendTimeframe, trendCategory]);
 
   const categorySpendData = useMemo(() => {
@@ -401,25 +421,25 @@ const Dashboard: React.FC<Props> = ({
         </div>
 
         <div className={`${safetyMargin >= 0 ? 'bg-indigo-600' : 'bg-rose-600'} p-8 rounded-[3rem] shadow-xl text-white flex flex-col justify-center transition-colors duration-500 relative overflow-hidden`}>
-           <p className="text-white/60 text-[10px] font-black uppercase tracking-widest mb-1">Monthly Net Margin</p>
-           <h3 className="text-4xl font-black mb-2">${safetyMargin.toLocaleString()}</h3>
+           <div className="absolute top-2 right-6 p-4 opacity-10">
+              <i className="fas fa-calendar-alt text-4xl"></i>
+           </div>
            
-           {targetMargin > 0 && (
-             <div className="mb-4">
-                <div className="flex justify-between text-[8px] font-black uppercase tracking-widest mb-1">
-                  <span className="text-white/40">Goal: ${targetMargin.toLocaleString()}</span>
-                  <span className={marginProgress >= 100 ? 'text-emerald-400' : 'text-white/60'}>
-                    {marginProgress.toFixed(0)}%
-                  </span>
-                </div>
-                <div className="h-1.5 w-full bg-black/20 rounded-full overflow-hidden">
-                  <div 
-                    className={`h-full transition-all duration-1000 ${marginProgress >= 100 ? 'bg-emerald-400' : 'bg-white/80'}`}
-                    style={{ width: `${marginProgress}%` }}
-                  ></div>
-                </div>
-             </div>
-           )}
+           <p className="text-white/60 text-[10px] font-black uppercase tracking-widest mb-1">Monthly Net Margin</p>
+           <h3 className="text-4xl font-black mb-4">${safetyMargin.toLocaleString()}</h3>
+           
+           <div className="bg-black/10 rounded-[2rem] p-4 border border-white/10 mb-6 backdrop-blur-sm">
+              <div className="flex justify-between items-center mb-1">
+                 <p className="text-[9px] text-white/50 font-black uppercase tracking-widest">Safe Daily Spend</p>
+                 <span className="bg-white/10 text-white text-[8px] px-2 py-0.5 rounded-full font-black uppercase tracking-widest">Limit</span>
+              </div>
+              <h4 className="text-2xl font-black text-white">
+                ${dailySpendLimit.toLocaleString('en-US', { maximumFractionDigits: 2 })}
+              </h4>
+              <p className="text-[9px] text-white/40 font-bold uppercase tracking-widest mt-1">
+                Budget for {daysUntil25th} days remaining
+              </p>
+           </div>
 
            <div className="border-t border-white/20 pt-4 mt-2">
               <div className="flex justify-between items-center mb-1">
@@ -427,13 +447,12 @@ const Dashboard: React.FC<Props> = ({
                  <p className="text-xs font-black text-white">${totalMonthlyRecurringExpenses.toLocaleString()}</p>
               </div>
               <p className="text-[8px] text-white/40 font-bold uppercase tracking-widest leading-relaxed">
-                {safetyMargin >= 0 ? 'Surplus Available' : 'Critical Deficit'}
+                {safetyMargin >= 0 ? `${daysUntil25th} days until next cycle (25th)` : 'CRITICAL DEFICIT UNTIL 25th'}
               </p>
            </div>
         </div>
       </div>
 
-      {/* Historical Spending Trend Section */}
       <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
           <div>

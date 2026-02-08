@@ -155,10 +155,19 @@ const App: React.FC = () => {
 
   const readilyAvailableFunds = useMemo(() => {
     const primaryBank = bankConnections.find(c => c.institution.includes('1st National'));
-    if (!primaryBank) return 0;
-    const opening = primaryBank.openingBalance || 0;
-    const history = transactions.filter(t => t.institution === primaryBank.institution);
-    const flow = history.reduce((acc, t) => (t.type === 'income' || t.type === 'withdrawal') ? acc + t.amount : acc - t.amount, 0);
+    const opening = primaryBank?.openingBalance || 0;
+    
+    // Include 1st National AND Cash in Hand as available liquidity
+    const relevantHistory = transactions.filter(t => 
+      t.institution === primaryBank?.institution || t.institution === 'Cash in Hand'
+    );
+    
+    const flow = relevantHistory.reduce((acc, t) => {
+       if (t.type === 'income' || t.type === 'withdrawal') return acc + t.amount;
+       if (t.type === 'expense') return acc - t.amount;
+       return acc;
+    }, 0);
+    
     return opening + flow;
   }, [transactions, bankConnections]);
 
@@ -219,18 +228,36 @@ const App: React.FC = () => {
   };
 
   const addTransaction = (t: Omit<Transaction, 'id'>) => {
-    const newTransaction: Transaction = { ...t, id: generateId() };
-    setTransactions(prev => [newTransaction, ...prev]);
+    // Default to "Cash in Hand" if no institution is provided (One-off entries)
+    const finalInstitution = t.institution || 'Cash in Hand';
+    const newTransaction: Transaction = { ...t, id: generateId(), institution: finalInstitution };
+    const transactionsToAdd: Transaction[] = [newTransaction];
+
+    // Detection for "Laborie Bump" logic - When saving expenses are paid
+    const descLower = t.description.toLowerCase();
+    const isSavingsTarget = descLower.includes('general saving') || descLower.includes('vacation saving');
+    
+    if (isSavingsTarget && t.type === 'expense') {
+      transactionsToAdd.push({
+        id: generateId() + '-transfer',
+        amount: t.amount,
+        description: `Savings Transfer: ${t.description}`,
+        category: 'Savings',
+        type: 'income', // Treated as income for the destination institution to increase balance
+        date: t.date,
+        institution: 'Laborie Cooperative Credit Union'
+      });
+    }
+
+    setTransactions(prev => [...transactionsToAdd, ...prev]);
 
     // Recurring Payment Logics
     if (t.recurringId) {
-       // Check for automated Savings Goal linkages
        const targetExpense = recurringExpenses.find(r => r.id === t.recurringId);
        if (targetExpense) {
           const desc = targetExpense.description.toLowerCase();
           let targetGoalName = '';
           
-          // Naming logic based on user request
           if (desc.includes('general saving')) targetGoalName = 'general savings';
           else if (desc.includes('vacation saving')) targetGoalName = 'vacation';
           else if (targetExpense.category === 'Savings') targetGoalName = desc;
@@ -245,7 +272,6 @@ const App: React.FC = () => {
           }
        }
 
-       // Bill Logic - State Update
        setRecurringExpenses(prev => prev.map(rec => {
           if (rec.id === t.recurringId) {
              const totalDue = rec.amount + rec.accumulatedOverdue;
@@ -260,7 +286,6 @@ const App: React.FC = () => {
           return rec;
        }));
 
-       // Income Logic - State Update
        setRecurringIncomes(prev => prev.map(inc => {
           if (inc.id === t.recurringId) {
              const nextDate = new Date(inc.nextConfirmationDate);
@@ -306,7 +331,8 @@ const App: React.FC = () => {
             description: res.description,
             type: res.type,
             date: res.date || new Date().toISOString().split('T')[0],
-            vendor: res.vendor
+            vendor: res.vendor,
+            institution: institution // Linked entries get the actual institution
           }
         }));
         setPendingApprovals(prev => [...prev, ...pendingResults]);
@@ -448,7 +474,8 @@ const App: React.FC = () => {
       category: rec.category, 
       type: 'expense', 
       date: new Date().toISOString().split('T')[0], 
-      recurringId: rec.id 
+      recurringId: rec.id,
+      institution: '1st National Bank St. Lucia' 
     });
   }
   function handleReceiveRecurringIncome(inc: RecurringIncome, amount: number) {
@@ -458,7 +485,8 @@ const App: React.FC = () => {
       category: inc.category, 
       type: 'income', 
       date: new Date().toISOString().split('T')[0], 
-      recurringId: inc.id 
+      recurringId: inc.id,
+      institution: '1st National Bank St. Lucia'
     });
   }
   function handleContributeSaving(id: string, amount: number) {

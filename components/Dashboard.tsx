@@ -1,6 +1,6 @@
 
 import React, { useMemo, useState } from 'react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, LineChart, Line, Legend } from 'recharts';
 import { Transaction, RecurringExpense, RecurringIncome, SavingGoal, InvestmentAccount, MarketPrice, BankConnection, CATEGORIES } from '../types';
 import { syncLucelecPortal } from '../services/bankApiService';
 
@@ -9,6 +9,7 @@ interface InstitutionalBalance {
   type: string;
   available: boolean;
   holdings?: any[];
+  isCash?: boolean;
 }
 
 interface Props {
@@ -30,11 +31,15 @@ interface Props {
   onAddIncome: (amount: number, description: string, notes: string) => void;
 }
 
+type Timeframe = 'daily' | 'weekly' | 'monthly' | 'yearly';
+
 const Dashboard: React.FC<Props> = ({ 
   transactions, investments, marketPrices, bankConnections, recurringExpenses, recurringIncomes, savingGoals, targetMargin, onWithdrawal, onDelete, onPayRecurring, onReceiveRecurringIncome
 }) => {
   const [paymentInputs, setPaymentInputs] = useState<Record<string, string>>({});
   const [isSyncingPortal, setIsSyncingPortal] = useState<string | null>(null);
+  const [trendTimeframe, setTrendTimeframe] = useState<Timeframe>('monthly');
+  const [trendCategory, setTrendCategory] = useState<string>('All');
 
   const institutionalBalances = useMemo<Record<string, InstitutionalBalance>>(() => {
     const balances: Record<string, InstitutionalBalance> = {};
@@ -47,6 +52,20 @@ const Dashboard: React.FC<Props> = ({
         available: conn.institution.includes('1st National') 
       };
     });
+
+    const cashHistory = transactions.filter(t => t.institution === 'Cash in Hand');
+    const cashFlow = cashHistory.reduce((acc, t) => {
+      if (t.type === 'income' || t.type === 'withdrawal') return acc + t.amount;
+      if (t.type === 'expense') return acc - t.amount;
+      return acc;
+    }, 0);
+    balances['Cash in Hand'] = {
+      balance: cashFlow,
+      type: 'cash',
+      available: true,
+      isCash: true
+    };
+
     investments.forEach(inv => {
       const liveVal = inv.holdings.reduce((hAcc, h) => {
         const live = marketPrices.find(m => m.symbol === h.symbol)?.price || h.purchasePrice;
@@ -63,7 +82,12 @@ const Dashboard: React.FC<Props> = ({
     return balances;
   }, [bankConnections, investments, transactions, marketPrices]);
 
-  const liquidFunds = useMemo(() => (institutionalBalances['1st National Bank St. Lucia'] as InstitutionalBalance | undefined)?.balance || 0, [institutionalBalances]);
+  const liquidFunds = useMemo(() => {
+    const primary = institutionalBalances['1st National Bank St. Lucia']?.balance || 0;
+    const cash = institutionalBalances['Cash in Hand']?.balance || 0;
+    return primary + cash;
+  }, [institutionalBalances]);
+
   const portfolioFunds = useMemo(() => (Object.values(institutionalBalances) as InstitutionalBalance[]).filter(b => b.type === 'investment').reduce((acc, b) => acc + b.balance, 0), [institutionalBalances]);
   const cryptoFunds = useMemo(() => (institutionalBalances['Binance'] as InstitutionalBalance | undefined)?.balance || 0, [institutionalBalances]);
   const netWorth: number = (Object.values(institutionalBalances) as InstitutionalBalance[]).reduce((acc: number, b) => acc + b.balance, 0);
@@ -83,37 +107,52 @@ const Dashboard: React.FC<Props> = ({
   const safetyMargin = totalMonthlyRecurringIncome - totalMonthlyRecurringExpenses - totalOverdue;
   const marginProgress = targetMargin > 0 ? Math.min(100, (safetyMargin / targetMargin) * 100) : 0;
 
-  // Ledger for one-off transactions (non-recurring)
   const manualTransactions = useMemo(() => 
     transactions.filter(t => !t.recurringId).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
     [transactions]
   );
 
-  const getCategoryIcon = (category: string) => {
-    switch (category.toLowerCase()) {
-      case 'food': return 'fa-utensils';
-      case 'transport': return 'fa-car';
-      case 'housing': return 'fa-home';
-      case 'entertainment': return 'fa-clapperboard';
-      case 'utilities': return 'fa-bolt';
-      case 'health': return 'fa-heartbeat';
-      case 'shopping': return 'fa-bag-shopping';
-      case 'education': return 'fa-graduation-cap';
-      case 'income': return 'fa-money-bill-wave';
-      case 'savings': return 'fa-piggy-bank';
-      case 'investments': return 'fa-chart-line';
-      default: return 'fa-receipt';
-    }
-  };
+  // Dynamic Trend Analysis Logic
+  const trendData = useMemo(() => {
+    const expenses = transactions.filter(t => t.type === 'expense');
+    const filtered = trendCategory === 'All' ? expenses : expenses.filter(t => t.category === trendCategory);
+    
+    const buckets: Record<string, number> = {};
+    
+    filtered.forEach(t => {
+      const d = new Date(t.date);
+      let key = '';
+      
+      if (trendTimeframe === 'daily') {
+        key = t.date;
+      } else if (trendTimeframe === 'weekly') {
+        // Simple week key: Year-Wxx
+        const firstDayOfYear = new Date(d.getFullYear(), 0, 1);
+        const pastDaysOfYear = (d.getTime() - firstDayOfYear.getTime()) / 86400000;
+        const weekNum = Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
+        key = `${d.getFullYear()}-W${weekNum.toString().padStart(2, '0')}`;
+      } else if (trendTimeframe === 'monthly') {
+        key = t.date.substring(0, 7); // YYYY-MM
+      } else {
+        key = d.getFullYear().toString();
+      }
+      
+      buckets[key] = (buckets[key] || 0) + t.amount;
+    });
 
-  // Monthly Spend Report - Average per Category
+    return Object.entries(buckets)
+      .map(([label, amount]) => ({ label, amount }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+      .slice(-12); // Show last 12 buckets
+  }, [transactions, trendTimeframe, trendCategory]);
+
   const categorySpendData = useMemo(() => {
     const expenses = transactions.filter(t => t.type === 'expense');
     const totals: Record<string, number> = {};
     const monthCounts: Record<string, Set<string>> = {};
 
     expenses.forEach(t => {
-      const month = t.date.substring(0, 7); // YYYY-MM
+      const month = t.date.substring(0, 7); 
       totals[t.category] = (totals[t.category] || 0) + t.amount;
       if (!monthCounts[t.category]) monthCounts[t.category] = new Set();
       monthCounts[t.category].add(month);
@@ -122,13 +161,12 @@ const Dashboard: React.FC<Props> = ({
     return CATEGORIES
       .map(cat => ({
         name: cat,
-        average: totals[cat] ? totals[cat] / monthCounts[cat].size : 0
+        average: totals[cat] ? totals[cat] / (monthCounts[cat]?.size || 1) : 0
       }))
       .filter(d => d.average > 0)
       .sort((a, b) => b.average - a.average);
   }, [transactions]);
 
-  // 12-Month Projection Logic (Savings & Spend)
   const projectionData = useMemo(() => {
     const data = [];
     const monthlyNet = totalMonthlyRecurringIncome - totalMonthlyRecurringExpenses;
@@ -149,7 +187,6 @@ const Dashboard: React.FC<Props> = ({
     return data;
   }, [liquidFunds, totalMonthlyRecurringIncome, totalMonthlyRecurringExpenses]);
 
-  // 25th Cycle Priority logic
   const cycleBills = useMemo(() => {
     return recurringExpenses.filter(bill => bill.dayOfMonth >= 25 || bill.accumulatedOverdue > 0);
   }, [recurringExpenses]);
@@ -186,9 +223,31 @@ const Dashboard: React.FC<Props> = ({
     setIsSyncingPortal(null);
   };
 
+  const handleDepositCash = (amount: number, target: string) => {
+    if (amount <= 0) return;
+    onWithdrawal('Cash in Hand', amount);
+    onReceiveRecurringIncome({ description: 'Cash Deposit', amount, category: 'Transfer', id: 'deposit' } as RecurringIncome, amount);
+  };
+
+  const getCategoryIcon = (category: string) => {
+    switch (category.toLowerCase()) {
+      case 'food': return 'fa-utensils';
+      case 'transport': return 'fa-car';
+      case 'housing': return 'fa-home';
+      case 'entertainment': return 'fa-clapperboard';
+      case 'utilities': return 'fa-bolt';
+      case 'health': return 'fa-heartbeat';
+      case 'shopping': return 'fa-bag-shopping';
+      case 'education': return 'fa-graduation-cap';
+      case 'income': return 'fa-money-bill-wave';
+      case 'savings': return 'fa-piggy-bank';
+      case 'investments': return 'fa-chart-line';
+      default: return 'fa-receipt';
+    }
+  };
+
   const renderIncomeCard = (income: RecurringIncome) => {
     const received = isIncomeReceivedInCycle(income);
-    
     return (
       <div key={income.id} className={`p-5 border-2 rounded-[2rem] transition-all ${received ? 'bg-emerald-50/30 border-emerald-100 opacity-60' : 'bg-white border-slate-100 shadow-sm'} flex items-center justify-between group`}>
         <div className="flex items-center gap-4">
@@ -320,7 +379,6 @@ const Dashboard: React.FC<Props> = ({
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      {/* Summary Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <div className="bg-slate-900 md:col-span-2 p-10 rounded-[3rem] shadow-2xl text-white relative overflow-hidden group">
           <div className="absolute top-0 right-0 p-16 opacity-[0.03] scale-150">
@@ -375,12 +433,90 @@ const Dashboard: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Financial Activity Feed (Non-Recurring) */}
+      {/* Historical Spending Trend Section */}
+      <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
+          <div>
+            <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em]">Spending Trends</h3>
+            <p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-widest">Interactive Cash Flow Analytics</p>
+          </div>
+          
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="bg-slate-100 p-1 rounded-xl flex gap-1">
+              {(['daily', 'weekly', 'monthly', 'yearly'] as Timeframe[]).map(tf => (
+                <button
+                  key={tf}
+                  onClick={() => setTrendTimeframe(tf)}
+                  className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${trendTimeframe === tf ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                  {tf}
+                </button>
+              ))}
+            </div>
+            
+            <div className="relative">
+              <select 
+                value={trendCategory}
+                onChange={(e) => setTrendCategory(e.target.value)}
+                className="pl-3 pr-8 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[9px] font-black uppercase tracking-widest text-slate-600 outline-none appearance-none cursor-pointer focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="All">All Categories</option>
+                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                <i className="fas fa-chevron-down text-[8px]"></i>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="h-[300px] w-full">
+          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+            <LineChart data={trendData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+              <XAxis 
+                dataKey="label" 
+                axisLine={false} 
+                tickLine={false} 
+                tick={{ fontSize: 9, fontWeight: 800, fill: '#94a3b8' }}
+                dy={10}
+              />
+              <YAxis 
+                axisLine={false} 
+                tickLine={false} 
+                tick={{ fontSize: 9, fontWeight: 800, fill: '#94a3b8' }}
+                tickFormatter={(val) => `$${val}`}
+              />
+              <Tooltip 
+                contentStyle={{ 
+                  borderRadius: '16px', 
+                  border: 'none', 
+                  boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)',
+                  fontSize: '11px',
+                  fontWeight: 'bold',
+                  textTransform: 'uppercase'
+                }}
+              />
+              <Line 
+                type="monotone" 
+                dataKey="amount" 
+                stroke="#6366f1" 
+                strokeWidth={4} 
+                dot={{ fill: '#6366f1', strokeWidth: 2, r: 4, stroke: '#fff' }}
+                activeDot={{ r: 6, strokeWidth: 0 }}
+                animationDuration={1500}
+                name="Expenditure"
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </section>
+
       <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
         <div className="flex justify-between items-center mb-10">
            <div>
               <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em]">Financial Activity Feed</h3>
-              <p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-widest">One-Off Spend & Income Ledger</p>
+              <p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-widest">Cash & Digital Transaction Ledger</p>
            </div>
            <div className="text-right">
               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Today's Flow</p>
@@ -402,7 +538,9 @@ const Dashboard: React.FC<Props> = ({
                        <div className="flex items-center gap-2">
                           <span className="text-[9px] font-black text-indigo-500 uppercase tracking-widest">{t.category}</span>
                           <span className="w-1 h-1 bg-slate-300 rounded-full"></span>
-                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{t.date}</span>
+                          <span className={`text-[8px] font-black uppercase tracking-widest ${t.institution === 'Cash in Hand' ? 'text-amber-500' : 'text-slate-400'}`}>
+                             {t.institution === 'Cash in Hand' ? 'Wallet' : t.institution}
+                          </span>
                        </div>
                     </div>
                  </div>
@@ -410,20 +548,13 @@ const Dashboard: React.FC<Props> = ({
                     <p className={`font-black text-base ${t.type === 'expense' ? 'text-slate-900' : 'text-emerald-600'}`}>
                        {t.type === 'expense' ? '-' : '+'}${t.amount.toFixed(2)}
                     </p>
-                    {t.vendor && <p className="text-[8px] font-black text-slate-300 uppercase truncate max-w-[80px]">{t.vendor}</p>}
+                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{t.date}</p>
                  </div>
               </div>
            ))}
-           {manualTransactions.length === 0 && (
-              <div className="py-20 text-center border-2 border-dashed border-slate-100 rounded-[3rem]">
-                 <i className="fas fa-ghost text-4xl text-slate-100 mb-4"></i>
-                 <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.2em]">Activity feed is currently silent</p>
-              </div>
-           )}
         </div>
       </section>
 
-      {/* Fiscal Projections Section */}
       <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
           <div>
@@ -496,7 +627,6 @@ const Dashboard: React.FC<Props> = ({
         </div>
       </section>
 
-      {/* Savings Goal Progress */}
       <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
         <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em] mb-10">Vault Progress (Linked Savings)</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
@@ -530,15 +660,9 @@ const Dashboard: React.FC<Props> = ({
               </div>
             );
           })}
-          {savingGoals.length === 0 && (
-            <div className="col-span-full py-10 text-center text-slate-300 uppercase font-black text-[10px] tracking-widest">
-               No savings goals configured in settings
-            </div>
-          )}
         </div>
       </section>
 
-      {/* Monthly Spend Report - Average per Category */}
       <section className="bg-slate-900 p-10 rounded-[3rem] shadow-2xl text-white overflow-hidden">
          <div className="flex items-center justify-between mb-8">
             <div>
@@ -589,14 +713,10 @@ const Dashboard: React.FC<Props> = ({
                      </div>
                   </div>
                ))}
-               {categorySpendData.length === 0 && (
-                  <p className="text-center py-20 text-white/20 font-black uppercase text-[10px] tracking-widest">No spend history available</p>
-               )}
             </div>
          </div>
       </section>
 
-      {/* 25th Cycle Center - Incomes & Obligations */}
       <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-10">
           <div>
@@ -617,7 +737,6 @@ const Dashboard: React.FC<Props> = ({
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-          {/* Expected Incomes Column */}
           <div className="space-y-6">
             <div className="flex items-center justify-between px-2">
               <h4 className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.2em]">Incoming Cash Flow</h4>
@@ -625,15 +744,9 @@ const Dashboard: React.FC<Props> = ({
             </div>
             <div className="space-y-4">
               {cycleIncomes.map(income => renderIncomeCard(income))}
-              {cycleIncomes.length === 0 && (
-                <div className="py-10 text-center bg-slate-50 border border-dashed border-slate-200 rounded-[2rem]">
-                   <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest">No 25th cycle incomes</p>
-                </div>
-              )}
             </div>
           </div>
 
-          {/* Pending Bills Column */}
           <div className="space-y-6">
             <div className="flex items-center justify-between px-2">
               <h4 className="text-[10px] font-black text-rose-600 uppercase tracking-[0.2em]">Cycle Obligations</h4>
@@ -641,17 +754,11 @@ const Dashboard: React.FC<Props> = ({
             </div>
             <div className="space-y-4">
               {cycleBills.map(bill => renderBillCard(bill, true))}
-              {cycleBills.length === 0 && (
-                <div className="py-10 text-center bg-slate-50 border border-dashed border-slate-200 rounded-[2rem]">
-                   <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest">Obligations cleared</p>
-                </div>
-              )}
             </div>
           </div>
         </div>
       </section>
 
-      {/* All Scheduled Expenses */}
       <section className="bg-slate-50 p-10 rounded-[3rem] border border-slate-200 shadow-inner">
          <div className="flex items-center justify-between mb-8">
             <div>
@@ -665,28 +772,52 @@ const Dashboard: React.FC<Props> = ({
          </div>
       </section>
 
-      {/* Institutional Vaults */}
       <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
         <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em] mb-10">Institutional Vaults</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           {(Object.entries(institutionalBalances) as [string, InstitutionalBalance][]).map(([name, data]) => (
-            <div key={name} className="p-6 bg-slate-50 border border-slate-100 rounded-[2rem] hover:bg-white hover:ring-2 hover:ring-indigo-100/50 transition-all flex items-center justify-between group">
-              <div className="flex items-center gap-4">
-                <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-white text-lg transition-transform group-hover:scale-110 ${data.available ? 'bg-emerald-500' : 'bg-slate-800'}`}>
-                  <i className={`fas ${data.type === 'investment' ? 'fa-chart-pie' : data.type === 'credit_union' ? 'fa-users' : 'fa-building-columns'}`}></i>
+            <div key={name} className={`p-6 bg-slate-50 border rounded-[2rem] transition-all flex flex-col gap-4 group ${data.isCash ? 'border-amber-200 ring-2 ring-amber-50' : 'border-slate-100'}`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-white text-lg transition-transform group-hover:scale-110 ${data.isCash ? 'bg-amber-500 shadow-amber-200' : data.available ? 'bg-emerald-500' : 'bg-slate-800'} shadow-lg`}>
+                    <i className={`fas ${data.isCash ? 'fa-wallet' : data.type === 'investment' ? 'fa-chart-pie' : data.type === 'credit_union' ? 'fa-users' : 'fa-building-columns'}`}></i>
+                  </div>
+                  <div>
+                    <p className="font-black text-sm text-slate-800 truncate max-w-[120px]">{name}</p>
+                    <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest">{data.type.replace('_', ' ')}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="font-black text-sm text-slate-800 truncate max-w-[120px]">{name}</p>
-                  <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest">{data.type.replace('_', ' ')}</p>
+                <div className="text-right">
+                  <p className={`font-black text-base ${data.balance >= 0 ? 'text-slate-900' : 'text-rose-600'}`}>${data.balance.toLocaleString()}</p>
+                  <div className="flex items-center justify-end gap-1">
+                    <span className={`w-1.5 h-1.5 ${data.isCash ? 'bg-amber-400' : 'bg-emerald-400'} rounded-full animate-pulse`}></span>
+                    <span className="text-[8px] font-black text-slate-400 uppercase">{data.isCash ? 'Physical' : 'Live'}</span>
+                  </div>
                 </div>
               </div>
-              <div className="text-right">
-                <p className="font-black text-base text-slate-900">${data.balance.toLocaleString()}</p>
-                <div className="flex items-center justify-end gap-1">
-                  <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse"></span>
-                  <span className="text-[8px] font-black text-slate-400 uppercase">Live</span>
+
+              {data.isCash && data.balance > 0 && (
+                <div className="flex gap-2 pt-2">
+                  <button 
+                    onClick={() => {
+                      const amt = prompt("Amount to deposit into 1st National?");
+                      if (amt && parseFloat(amt) > 0) handleDepositCash(parseFloat(amt), '1st National Bank St. Lucia');
+                    }}
+                    className="flex-1 py-2 bg-white border border-amber-200 text-amber-600 text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-amber-600 hover:text-white transition shadow-sm"
+                  >
+                    Deposit to Bank
+                  </button>
+                  <button 
+                    onClick={() => {
+                      const amt = prompt("Amount to deposit into Laborie?");
+                      if (amt && parseFloat(amt) > 0) handleDepositCash(parseFloat(amt), 'Laborie Cooperative Credit Union');
+                    }}
+                    className="flex-1 py-2 bg-white border border-teal-200 text-teal-600 text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-teal-600 hover:text-white transition shadow-sm"
+                  >
+                    To Credit Union
+                  </button>
                 </div>
-              </div>
+              )}
             </div>
           ))}
         </div>

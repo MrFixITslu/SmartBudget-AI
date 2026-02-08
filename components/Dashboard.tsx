@@ -1,7 +1,7 @@
 
 import React, { useMemo, useState } from 'react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Transaction, RecurringExpense, RecurringIncome, SavingGoal, InvestmentAccount, MarketPrice, BankConnection } from '../types';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts';
+import { Transaction, RecurringExpense, RecurringIncome, SavingGoal, InvestmentAccount, MarketPrice, BankConnection, CATEGORIES } from '../types';
 import { syncLucelecPortal } from '../services/bankApiService';
 
 interface InstitutionalBalance {
@@ -81,28 +81,48 @@ const Dashboard: React.FC<Props> = ({
   );
   const safetyMargin = totalMonthlyRecurringIncome - totalMonthlyRecurringExpenses - totalOverdue;
 
-  // 12-Month Projection Logic
+  // Monthly Spend Report - Average per Category
+  const categorySpendData = useMemo(() => {
+    const expenses = transactions.filter(t => t.type === 'expense');
+    const totals: Record<string, number> = {};
+    const monthCounts: Record<string, Set<string>> = {};
+
+    expenses.forEach(t => {
+      const month = t.date.substring(0, 7); // YYYY-MM
+      totals[t.category] = (totals[t.category] || 0) + t.amount;
+      if (!monthCounts[t.category]) monthCounts[t.category] = new Set();
+      monthCounts[t.category].add(month);
+    });
+
+    return CATEGORIES
+      .map(cat => ({
+        name: cat,
+        average: totals[cat] ? totals[cat] / monthCounts[cat].size : 0
+      }))
+      .filter(d => d.average > 0)
+      .sort((a, b) => b.average - a.average);
+  }, [transactions]);
+
+  // 12-Month Projection Logic (Savings & Spend)
   const projectionData = useMemo(() => {
     const data = [];
     const monthlyNet = totalMonthlyRecurringIncome - totalMonthlyRecurringExpenses;
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const currentMonthIdx = new Date().getMonth();
 
-    let runningNetWorth = netWorth;
     let runningSavings = liquidFunds;
 
     for (let i = 0; i < 12; i++) {
       const monthLabel = months[(currentMonthIdx + i) % 12];
       data.push({
         name: monthLabel,
-        ProjectedNetWorth: Math.round(runningNetWorth),
-        ProjectedSavings: Math.round(runningSavings)
+        ProjectedSavings: Math.round(runningSavings),
+        MonthlySpend: Math.round(totalMonthlyRecurringExpenses)
       });
-      runningNetWorth += monthlyNet;
       runningSavings += monthlyNet;
     }
     return data;
-  }, [netWorth, liquidFunds, totalMonthlyRecurringIncome, totalMonthlyRecurringExpenses]);
+  }, [liquidFunds, totalMonthlyRecurringIncome, totalMonthlyRecurringExpenses]);
 
   // 25th Cycle Priority logic
   const cycleBills = useMemo(() => {
@@ -297,12 +317,19 @@ const Dashboard: React.FC<Props> = ({
           </div>
         </div>
 
-        <div className={`${safetyMargin >= 0 ? 'bg-indigo-600' : 'bg-rose-600'} p-8 rounded-[3rem] shadow-xl text-white flex flex-col justify-center transition-colors duration-500`}>
+        <div className={`${safetyMargin >= 0 ? 'bg-indigo-600' : 'bg-rose-600'} p-8 rounded-[3rem] shadow-xl text-white flex flex-col justify-center transition-colors duration-500 relative overflow-hidden`}>
            <p className="text-white/60 text-[10px] font-black uppercase tracking-widest mb-1">Monthly Net Margin</p>
-           <h3 className="text-4xl font-black">${safetyMargin.toLocaleString()}</h3>
-           <p className="text-[9px] text-white/40 font-bold uppercase mt-4 tracking-widest leading-relaxed">
-             {safetyMargin >= 0 ? 'Monthly Net Surplus (Available)' : 'Monthly Net Deficit (Risk)'}
-           </p>
+           <h3 className="text-4xl font-black mb-4">${safetyMargin.toLocaleString()}</h3>
+           
+           <div className="border-t border-white/20 pt-4 mt-2">
+              <div className="flex justify-between items-center mb-1">
+                 <p className="text-[9px] text-white/50 font-black uppercase tracking-widest">Recurring Commitment</p>
+                 <p className="text-xs font-black text-white">${totalMonthlyRecurringExpenses.toLocaleString()}</p>
+              </div>
+              <p className="text-[8px] text-white/40 font-bold uppercase tracking-widest leading-relaxed">
+                {safetyMargin >= 0 ? 'Surplus Available' : 'Critical Deficit'}
+              </p>
+           </div>
         </div>
       </div>
 
@@ -310,17 +337,17 @@ const Dashboard: React.FC<Props> = ({
       <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
           <div>
-            <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em]">Fiscal Outlook (12 Months)</h3>
-            <p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-widest">Projected Net Worth & Savings Trends</p>
+            <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em]">Savings & Spend Outlook (12m)</h3>
+            <p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-widest">Projected Liquidity vs Fixed Burn Rate</p>
           </div>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 bg-indigo-600 rounded-full"></span>
-              <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Net Worth</span>
+              <span className="w-2.5 h-2.5 bg-emerald-500 rounded-full"></span>
+              <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Projected Savings</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 bg-emerald-400 rounded-full"></span>
-              <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Savings</span>
+              <span className="w-2.5 h-2.5 bg-slate-300 rounded-full"></span>
+              <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Monthly Spend</span>
             </div>
           </div>
         </div>
@@ -329,10 +356,6 @@ const Dashboard: React.FC<Props> = ({
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={projectionData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
               <defs>
-                <linearGradient id="colorNet" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.1}/>
-                  <stop offset="95%" stopColor="#4f46e5" stopOpacity={0}/>
-                </linearGradient>
                 <linearGradient id="colorSave" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#10b981" stopOpacity={0.1}/>
                   <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
@@ -360,16 +383,6 @@ const Dashboard: React.FC<Props> = ({
                   fontSize: '12px',
                   fontWeight: 'bold'
                 }}
-                itemStyle={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }}
-              />
-              <Area 
-                type="monotone" 
-                dataKey="ProjectedNetWorth" 
-                stroke="#4f46e5" 
-                strokeWidth={3}
-                fillOpacity={1} 
-                fill="url(#colorNet)" 
-                animationDuration={1500}
               />
               <Area 
                 type="monotone" 
@@ -380,9 +393,75 @@ const Dashboard: React.FC<Props> = ({
                 fill="url(#colorSave)" 
                 animationDuration={1500}
               />
+              <Area 
+                type="stepAfter" 
+                dataKey="MonthlySpend" 
+                stroke="#cbd5e1" 
+                strokeWidth={2}
+                strokeDasharray="5 5"
+                fill="none"
+              />
             </AreaChart>
           </ResponsiveContainer>
         </div>
+      </section>
+
+      {/* Monthly Spend Report - Average per Category */}
+      <section className="bg-slate-900 p-10 rounded-[3rem] shadow-2xl text-white overflow-hidden">
+         <div className="flex items-center justify-between mb-8">
+            <div>
+               <h3 className="font-black uppercase text-xs tracking-[0.3em] text-white/80">Monthly Category Analysis</h3>
+               <p className="text-[10px] text-white/40 font-bold uppercase mt-1 tracking-widest">Average Spend Distribution by Label</p>
+            </div>
+            <div className="w-10 h-10 bg-white/5 rounded-xl flex items-center justify-center border border-white/10">
+               <i className="fas fa-chart-bar text-indigo-400"></i>
+            </div>
+         </div>
+
+         <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+            <div className="h-[300px]">
+               <ResponsiveContainer width="100%" height="100%">
+                  <BarChart layout="vertical" data={categorySpendData} margin={{ left: 20, right: 30 }}>
+                     <XAxis type="number" hide />
+                     <YAxis 
+                        dataKey="name" 
+                        type="category" 
+                        axisLine={false} 
+                        tickLine={false} 
+                        tick={{ fontSize: 10, fontWeight: 800, fill: '#94a3b8' }} 
+                        width={80}
+                     />
+                     <Tooltip 
+                        cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                        contentStyle={{ borderRadius: '15px', background: '#0f172a', border: '1px solid #1e293b', color: '#fff' }}
+                     />
+                     <Bar dataKey="average" radius={[0, 10, 10, 0]} barSize={20}>
+                        {categorySpendData.map((entry, index) => (
+                           <Cell key={`cell-${index}`} fill={index === 0 ? '#4f46e5' : index === 1 ? '#6366f1' : '#818cf8'} />
+                        ))}
+                     </Bar>
+                  </BarChart>
+               </ResponsiveContainer>
+            </div>
+
+            <div className="space-y-4 max-h-[300px] overflow-y-auto no-scrollbar pr-2">
+               {categorySpendData.map((data, idx) => (
+                  <div key={data.name} className="flex items-center justify-between p-4 bg-white/5 border border-white/10 rounded-2xl group hover:bg-white/10 transition-colors">
+                     <div className="flex items-center gap-4">
+                        <div className="text-white/40 font-black text-[10px] w-4">{idx + 1}</div>
+                        <p className="font-black text-xs text-white/90 uppercase tracking-widest">{data.name}</p>
+                     </div>
+                     <div className="text-right">
+                        <p className="font-black text-xs text-indigo-400">${data.average.toFixed(2)}</p>
+                        <p className="text-[8px] font-bold text-white/30 uppercase tracking-widest">Monthly Avg</p>
+                     </div>
+                  </div>
+               ))}
+               {categorySpendData.length === 0 && (
+                  <p className="text-center py-20 text-white/20 font-black uppercase text-[10px] tracking-widest">No spend history available</p>
+               )}
+            </div>
+         </div>
       </section>
 
       {/* 25th Cycle Center - Incomes & Obligations */}

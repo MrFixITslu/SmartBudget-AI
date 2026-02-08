@@ -2,303 +2,227 @@
 import React, { useMemo, useState } from 'react';
 import { 
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip, 
-  AreaChart, Area, XAxis, YAxis, CartesianGrid
+  AreaChart, Area, XAxis, YAxis
 } from 'recharts';
-import { Transaction, CATEGORIES, RecurringExpense, SavingGoal } from '../types';
+import { Transaction, CATEGORIES, RecurringExpense, RecurringIncome, SavingGoal, InvestmentAccount, MarketPrice, BankConnection } from '../types';
 
 interface Props {
   transactions: Transaction[];
   recurringExpenses: RecurringExpense[];
+  recurringIncomes: RecurringIncome[];
   savingGoals: SavingGoal[];
+  investments: InvestmentAccount[];
+  marketPrices: MarketPrice[];
+  /* Added missing bankConnections prop */
+  bankConnections: BankConnection[];
   onEdit: (t: Transaction) => void;
   onDelete: (id: string) => void;
   onPayRecurring: (rec: RecurringExpense, amount: number) => void;
+  onReceiveRecurringIncome: (inc: RecurringIncome, amount: number) => void;
   onContributeSaving: (goalId: string, amount: number) => void;
   onWithdrawSaving: (goalId: string, amount: number) => void;
   onAddIncome: (amount: number, description: string, notes: string) => void;
 }
 
-const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#8b5cf6', '#06b6d4', '#d946ef', '#14b8a6', '#f97316'];
-
 const Dashboard: React.FC<Props> = ({ 
-  transactions, 
-  recurringExpenses, 
-  savingGoals, 
-  onEdit, 
-  onDelete, 
-  onPayRecurring,
-  onContributeSaving,
-  onWithdrawSaving,
-  onAddIncome
+  transactions, recurringExpenses, recurringIncomes, savingGoals, investments, marketPrices, bankConnections,
+  onEdit, onDelete, onPayRecurring, onReceiveRecurringIncome, onContributeSaving, onWithdrawSaving, onAddIncome
 }) => {
+  const [trendPeriod, setTrendPeriod] = useState<'daily' | 'monthly'>('monthly');
   const [payAmounts, setPayAmounts] = useState<Record<string, string>>({});
-  const [saveAmounts, setSaveAmounts] = useState<Record<string, string>>({});
-  const [withdrawAmounts, setWithdrawAmounts] = useState<Record<string, string>>({});
-  
-  // Extra Income State
-  const [extraIncomeAmount, setExtraIncomeAmount] = useState('');
-  const [extraIncomeDesc, setExtraIncomeDesc] = useState('');
-  const [extraIncomeNotes, setExtraIncomeNotes] = useState('');
+  const [incAmounts, setIncAmounts] = useState<Record<string, string>>({});
 
+  // Time-based filters
   const now = new Date();
-  
-  // Pay day is the 25th of every month
-  let cycleEnd = new Date(now.getFullYear(), now.getMonth(), 25);
-  if (now.getDate() >= 25) {
-    cycleEnd.setMonth(cycleEnd.getMonth() + 1);
-  }
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
 
-  const daysRemaining = Math.max(1, Math.ceil((cycleEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+  const thisMonthTransactions = useMemo(() => transactions.filter(t => {
+    const d = new Date(t.date);
+    return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+  }), [transactions, currentMonth, currentYear]);
 
-  const expenses = transactions.filter(t => t.type === 'expense');
-  const savings = transactions.filter(t => t.type === 'savings');
-  const income = transactions.filter(t => t.type === 'income');
-  const withdrawals = transactions.filter(t => t.type === 'withdrawal');
-
-  const totalInflow = income.reduce((acc, t) => acc + t.amount, 0) + withdrawals.reduce((acc, t) => acc + t.amount, 0);
-  const totalOutflow = expenses.reduce((acc, t) => acc + t.amount, 0) + savings.reduce((acc, t) => acc + t.amount, 0);
-  const balance = totalInflow - totalOutflow;
-
-  // Daily spending limit = total available divided by total days left before next pay day
-  const dailyAllowance = Math.max(0, balance / daysRemaining);
-
-  const cycleStart = new Date(cycleEnd);
-  cycleStart.setMonth(cycleStart.getMonth() - 1);
-
-  const cycleIncome = transactions
-    .filter(t => (t.type === 'income' || t.type === 'withdrawal') && new Date(t.date) >= cycleStart)
-    .reduce((acc, t) => acc + t.amount, 0);
-
-  const cycleSpending = transactions
-    .filter(t => (t.type === 'expense' || t.type === 'savings') && new Date(t.date) >= cycleStart)
-    .reduce((acc, t) => acc + t.amount, 0);
-
-  // Monthly Spending Trends
-  const trendData = useMemo(() => {
-    const months = [];
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date();
-      d.setMonth(d.getMonth() - i);
-      const monthLabel = d.toLocaleString('default', { month: 'short' });
-      
-      const monthlyTotal = transactions.filter(t => {
-        const tDate = new Date(t.date);
-        return (t.type === 'expense' || t.type === 'savings') && 
-               tDate.getMonth() === d.getMonth() && 
-               tDate.getFullYear() === d.getFullYear();
-      }).reduce((acc, t) => acc + t.amount, 0);
-      
-      months.push({ name: monthLabel, amount: Math.round(monthlyTotal) });
-    }
-    return months;
+  // Financial Summaries
+  const cashBalance = useMemo(() => {
+    const inflow = transactions.filter(t => t.type === 'income' || t.type === 'withdrawal').reduce((acc, t) => acc + t.amount, 0);
+    const outflow = transactions.filter(t => t.type === 'expense' || t.type === 'savings').reduce((acc, t) => acc + t.amount, 0);
+    return inflow - outflow;
   }, [transactions]);
 
-  // Category Analysis
-  const categoryStats = useMemo(() => {
-    return CATEGORIES.map(cat => {
-      const catExpenses = transactions.filter(t => t.category === cat && (t.type === 'expense' || t.type === 'savings'));
-      const currentMonthTotal = catExpenses
-        .filter(t => new Date(t.date) >= cycleStart)
-        .reduce((acc, t) => acc + t.amount, 0);
-      
-      const uniqueMonths = new Set(catExpenses.map(t => {
-        const d = new Date(t.date);
-        return `${d.getFullYear()}-${d.getMonth()}`;
-      })).size || 1;
-      
-      const average = catExpenses.reduce((acc, t) => acc + t.amount, 0) / uniqueMonths;
-      
-      return { 
-        name: cat, 
-        current: currentMonthTotal, 
-        average: Math.round(average),
-        diff: currentMonthTotal - average
+  const portfolioValue = useMemo(() => {
+    return investments.reduce((acc, inv) => {
+      return acc + inv.holdings.reduce((hAcc, h) => {
+        const live = marketPrices.find(m => m.symbol === h.symbol)?.price || h.purchasePrice;
+        return hAcc + (h.quantity * live);
+      }, 0);
+    }, 0);
+  }, [investments, marketPrices]);
+
+  const netWorth = cashBalance + portfolioValue;
+
+  // Personal Portfolio Performance for Ticker
+  const holdingPerformance = useMemo(() => {
+    return investments.flatMap(inv => inv.holdings.map(h => {
+      const live = marketPrices.find(m => m.symbol === h.symbol);
+      const currentPrice = live?.price || h.purchasePrice;
+      const gainLoss = (currentPrice - h.purchasePrice) * h.quantity;
+      const gainLossPerc = ((currentPrice - h.purchasePrice) / h.purchasePrice) * 100;
+      return {
+        symbol: h.symbol,
+        currentPrice,
+        avgCost: h.purchasePrice,
+        gainLoss,
+        gainLossPerc,
+        provider: inv.provider
       };
-    }).filter(d => d.current > 0 || d.average > 0);
-  }, [transactions, cycleStart]);
+    }));
+  }, [investments, marketPrices]);
 
-  const pieChartData = categoryStats
-    .filter(d => d.current > 0)
-    .map(d => ({ name: d.name, value: d.current }));
-
-  const handleQuickPay = (rec: RecurringExpense) => {
-    const rawValue = payAmounts[rec.id];
-    const amount = (rawValue === undefined || rawValue === '') ? rec.balance : parseFloat(rawValue);
-    if (isNaN(amount) || amount <= 0) return;
-    onPayRecurring(rec, amount);
-    setPayAmounts(prev => {
-      const next = { ...prev };
-      delete next[rec.id];
-      return next;
+  // Budget Analysis
+  const monthlySpendByCategory = useMemo(() => {
+    const map: Record<string, number> = {};
+    thisMonthTransactions.filter(t => t.type === 'expense').forEach(t => {
+      map[t.category] = (map[t.category] || 0) + t.amount;
     });
+    return map;
+  }, [thisMonthTransactions]);
+
+  const totalMonthlyExpense = useMemo(() => 
+    Object.values(monthlySpendByCategory).reduce((a, b) => a + b, 0), 
+    [monthlySpendByCategory]
+  );
+
+  const budgetAllocation: Record<string, number> = {
+    'Food': 500,
+    'Transport': 300,
+    'Entertainment': 200,
+    'Shopping': 400,
+    'Utilities': 250,
+    'Other': 300
   };
 
-  const handleLogIncome = () => {
-    const amount = parseFloat(extraIncomeAmount);
-    if (isNaN(amount) || amount <= 0 || !extraIncomeDesc) return;
-    onAddIncome(amount, extraIncomeDesc, extraIncomeNotes);
-    setExtraIncomeAmount('');
-    setExtraIncomeDesc('');
-    setExtraIncomeNotes('');
+  const getNextDueDate = (day: number, lastActionDateStr?: string) => {
+    const target = new Date(now.getFullYear(), now.getMonth(), day);
+    if (lastActionDateStr) {
+      const lastDate = new Date(lastActionDateStr);
+      if (lastDate.getMonth() === now.getMonth() && lastDate.getFullYear() === now.getFullYear()) {
+        target.setMonth(target.getMonth() + 1);
+      }
+    }
+    return target.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
   return (
-    <div className="space-y-6 pb-12">
-      {/* Primary Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-          <p className="text-slate-500 text-sm font-medium">Available Balance</p>
-          <p className={`text-2xl font-bold ${balance >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-            ${balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-          </p>
+    <div className="space-y-6">
+      {/* Real-time Ticker */}
+      <div className="bg-slate-900 rounded-2xl p-3 flex items-center gap-6 overflow-hidden shadow-xl border border-white/5">
+        <div className="flex items-center gap-2 shrink-0 border-r border-white/10 pr-4">
+          <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+          <span className="text-[10px] font-black text-white uppercase tracking-[0.2em]">Live Portfolio</span>
         </div>
-        <div className="bg-indigo-600 p-6 rounded-2xl shadow-lg shadow-indigo-100 text-white">
-          <div className="flex justify-between items-start">
-            <p className="text-indigo-100 text-xs font-bold uppercase tracking-wider">Daily Spending Limit</p>
-            <span className="text-[10px] bg-white/20 px-1.5 py-0.5 rounded uppercase">{daysRemaining}d left</span>
-          </div>
-          <p className="text-3xl font-black mt-1">
-            ${dailyAllowance.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-          </p>
-          <p className="text-[10px] text-indigo-200 mt-2 font-medium">Safe to spend per day until pay day.</p>
-        </div>
-        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-          <p className="text-slate-500 text-sm font-medium">Cycle Income</p>
-          <p className="text-2xl font-bold text-slate-800">
-            ${cycleIncome.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-          </p>
-        </div>
-        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-          <p className="text-slate-500 text-sm font-medium">Cycle Outgoings</p>
-          <p className="text-2xl font-bold text-slate-800">
-            ${cycleSpending.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-          </p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Additional Income Section */}
-        <section className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-between">
-          <div className="mb-4">
-            <h3 className="text-lg font-black flex items-center gap-2 text-slate-800">
-              <i className="fas fa-hand-holding-usd text-emerald-500"></i>
-              Log Additional Income
-            </h3>
-            <p className="text-slate-400 text-xs font-medium mt-1">Bonus, side gigs, or gifts</p>
-          </div>
-          <div className="space-y-3">
-            <div className="flex gap-3">
-              <input 
-                type="number"
-                placeholder="Amount"
-                className="w-32 p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 font-bold"
-                value={extraIncomeAmount}
-                onChange={e => setExtraIncomeAmount(e.target.value)}
-              />
-              <input 
-                type="text"
-                placeholder="Description (e.g. Side Gig)"
-                className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 font-bold"
-                value={extraIncomeDesc}
-                onChange={e => setExtraIncomeDesc(e.target.value)}
-              />
-            </div>
-            <textarea 
-              placeholder="Notes..."
-              className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-sm resize-none"
-              rows={2}
-              value={extraIncomeNotes}
-              onChange={e => setExtraIncomeNotes(e.target.value)}
-            />
-            <button 
-              onClick={handleLogIncome}
-              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-3 rounded-xl transition shadow-lg shadow-emerald-100 uppercase text-xs tracking-widest"
-            >
-              Add to Balance
-            </button>
-          </div>
-        </section>
-
-        {/* Bills Preview */}
-        <section className="bg-slate-900 p-6 rounded-[2rem] shadow-xl text-white flex flex-col justify-between">
-          <div className="flex justify-between items-start mb-4">
-            <div>
-              <h3 className="text-lg font-black flex items-center gap-2">
-                <i className="fas fa-receipt text-indigo-400"></i>
-                Monthly Bills
-              </h3>
-              <p className="text-slate-400 text-xs font-medium">Pending payments</p>
-            </div>
-            <div className="text-right">
-              <p className="text-[10px] text-slate-400 font-bold uppercase">Total Due</p>
-              <p className="text-xl font-black text-rose-400">
-                ${recurringExpenses.reduce((acc, r) => acc + r.balance, 0).toFixed(2)}
-              </p>
-            </div>
-          </div>
-          <div className="space-y-2 overflow-y-auto max-h-[160px] pr-2 custom-scrollbar">
-            {recurringExpenses.filter(r => r.balance > 0).map(rec => (
-              <div key={rec.id} className="flex items-center justify-between p-3 bg-slate-800 rounded-xl border border-slate-700">
-                <div>
-                  <p className="font-bold text-sm">{rec.description}</p>
-                  <p className="text-[10px] text-slate-500 font-bold">Due Day {rec.dayOfMonth}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-black text-rose-300 text-sm">${rec.balance.toFixed(2)}</span>
-                  <button onClick={() => handleQuickPay(rec)} className="p-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-[10px] font-black uppercase tracking-widest">Pay</button>
-                </div>
+        <div className="flex gap-10 whitespace-nowrap overflow-x-auto no-scrollbar py-1">
+          {holdingPerformance.length > 0 ? holdingPerformance.map((h, i) => (
+            <div key={`${h.symbol}-${i}`} className="flex items-center gap-3">
+              <div className="flex flex-col">
+                <span className="text-[11px] font-black text-indigo-400">{h.symbol}</span>
+                <span className="text-[8px] font-bold text-slate-500 uppercase tracking-tighter">{h.provider}</span>
               </div>
-            ))}
-            {recurringExpenses.filter(r => r.balance > 0).length === 0 && <p className="text-center text-slate-500 text-xs py-4">All bills paid for now!</p>}
-          </div>
-        </section>
+              <div className="flex flex-col items-end">
+                <span className="text-[11px] font-mono text-slate-100">${h.currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                <span className="text-[8px] font-bold text-slate-500 uppercase tracking-tighter">Cost: ${h.avgCost.toFixed(2)}</span>
+              </div>
+              <div className={`flex flex-col items-start ${h.gainLoss >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                <span className="text-[10px] font-black">
+                  {h.gainLoss >= 0 ? '+' : ''}${Math.abs(h.gainLoss).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                </span>
+                <span className="text-[9px] font-bold uppercase tracking-tighter">
+                  {h.gainLoss >= 0 ? '▲' : '▼'} {Math.abs(h.gainLossPerc).toFixed(2)}%
+                </span>
+              </div>
+            </div>
+          )) : marketPrices.map(m => (
+            <div key={m.symbol} className="flex items-center gap-2">
+              <span className="text-[11px] font-black text-indigo-400">{m.symbol}</span>
+              <span className="text-[11px] font-mono text-slate-300">${m.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              <span className={`text-[10px] font-bold ${m.change24h >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {m.change24h >= 0 ? '▲' : '▼'} {Math.abs(m.change24h).toFixed(2)}%
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
 
-      {/* Saving Goals Section */}
-      <section className="bg-emerald-900 p-8 rounded-[2.5rem] shadow-2xl text-white">
+      {/* Hero Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div className="bg-white p-7 rounded-[2rem] border border-slate-100 shadow-sm relative overflow-hidden group">
+          <div className="absolute top-0 right-0 p-5 opacity-5 group-hover:opacity-10 transition-opacity">
+            <i className="fas fa-wallet text-6xl"></i>
+          </div>
+          <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.15em] mb-1">Liquid Cash</p>
+          <p className={`text-3xl font-black ${cashBalance >= 0 ? 'text-slate-900' : 'text-rose-600'}`}>
+            ${cashBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+          </p>
+        </div>
+
+        <div className="bg-indigo-600 p-7 rounded-[2rem] shadow-xl shadow-indigo-100 text-white relative overflow-hidden">
+          <div className="absolute top-0 right-0 p-5 opacity-10">
+            <i className="fas fa-rocket text-6xl"></i>
+          </div>
+          <p className="text-indigo-100 text-[10px] font-black uppercase tracking-[0.15em] mb-1">Portfolios Value</p>
+          <p className="text-3xl font-black">
+            ${portfolioValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+          </p>
+          <div className="mt-3 flex gap-2">
+            {investments.map(i => (
+              <span key={i.id} className="text-[9px] font-black bg-white/20 px-2 py-0.5 rounded-full uppercase tracking-tighter">
+                {i.provider} Active
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-slate-900 p-7 rounded-[2rem] shadow-2xl text-white relative overflow-hidden group">
+          <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.15em] mb-1">Net Worth</p>
+          <p className="text-3xl font-black">
+            ${netWorth.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+          </p>
+          <p className="text-[10px] font-bold text-emerald-400 mt-2 uppercase">
+            <i className="fas fa-chart-line mr-1"></i> Tracking Live
+          </p>
+        </div>
+      </div>
+
+      {/* Monthly Budget Performance Tracking */}
+      <section className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h3 className="text-xl font-black flex items-center gap-2">
-              <i className="fas fa-piggy-bank text-emerald-400"></i>
-              Savings Progress
-            </h3>
+            <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.2em]">Budget Performance</h3>
+            <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">Monthly Spending Control</p>
           </div>
           <div className="text-right">
-            <p className="text-[10px] text-emerald-300/60 font-bold uppercase tracking-widest">Total Saved</p>
-            <p className="text-2xl font-black text-emerald-400">
-              ${savingGoals.reduce((acc, g) => acc + g.currentAmount, 0).toLocaleString()}
-            </p>
+            <p className="text-xs font-black text-slate-400 uppercase">Total Spent</p>
+            <p className="text-xl font-black text-slate-900">${totalMonthlyExpense.toLocaleString()}</p>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {savingGoals.map(goal => {
-            const percent = Math.min(100, (goal.currentAmount / goal.targetAmount) * 100);
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6">
+          {Object.entries(budgetAllocation).map(([cat, limit]) => {
+            const spent = monthlySpendByCategory[cat] || 0;
+            const percentage = Math.min(100, (spent / limit) * 100);
+            const isOver = spent > limit;
             return (
-              <div key={goal.id} className="p-5 bg-emerald-800/40 rounded-3xl border border-emerald-700/50 backdrop-blur-sm">
-                <div className="flex justify-between items-start mb-4">
-                  <div>
-                    <h4 className="font-bold text-emerald-50 text-lg">{goal.name}</h4>
-                    <p className="text-[10px] text-emerald-300 font-bold uppercase tracking-wider">{goal.category}</p>
-                  </div>
-                  <span className="text-xs font-black bg-emerald-500/30 text-emerald-200 px-2 py-1 rounded-lg">
-                    {percent.toFixed(0)}%
+              <div key={cat} className="space-y-2">
+                <div className="flex justify-between items-end">
+                  <span className="text-sm font-bold text-slate-700">{cat}</span>
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    <span className={isOver ? 'text-rose-600' : 'text-slate-600'}>${spent.toFixed(0)}</span> / ${limit}
                   </span>
                 </div>
-
-                <div className="space-y-4">
-                  <div>
-                    <div className="flex justify-between text-[10px] font-bold text-emerald-300 uppercase mb-2">
-                      <span>${goal.currentAmount.toLocaleString()} saved</span>
-                      <span>Target: ${goal.targetAmount.toLocaleString()}</span>
-                    </div>
-                    <div className="h-3 bg-emerald-900/50 rounded-full overflow-hidden border border-emerald-700/30">
-                      <div 
-                        className="h-full bg-emerald-400 transition-all duration-1000 rounded-full shadow-[0_0_10px_rgba(52,211,153,0.5)]"
-                        style={{ width: `${percent}%` }}
-                      />
-                    </div>
-                  </div>
+                <div className="h-3 bg-slate-100 rounded-full overflow-hidden flex">
+                  <div 
+                    className={`h-full transition-all duration-1000 ${isOver ? 'bg-rose-500' : percentage > 80 ? 'bg-amber-500' : 'bg-indigo-500'}`}
+                    style={{ width: `${percentage}%` }}
+                  ></div>
                 </div>
               </div>
             );
@@ -306,107 +230,246 @@ const Dashboard: React.FC<Props> = ({
         </div>
       </section>
 
-      {/* Monthly Trends & Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="font-bold text-slate-800">Monthly Trends</h3>
-            <span className="text-xs text-slate-400 font-medium">Last 6 Months (Outgoings)</span>
+      {/* Cashflow Actions */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <section className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
+          <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.2em] mb-6">Upcoming Income</h3>
+          <div className="space-y-4">
+            {recurringIncomes.map(inc => (
+              <div key={inc.id} className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100/50 flex flex-col gap-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 bg-white rounded-xl flex items-center justify-center text-emerald-500 shadow-sm">
+                      <i className="fas fa-hand-holding-usd"></i>
+                    </div>
+                    <div>
+                      <p className="font-bold text-xs text-slate-800">{inc.description}</p>
+                      <p className="text-[9px] text-slate-400 font-black uppercase">
+                        Due: {getNextDueDate(inc.dayOfMonth, inc.lastConfirmedDate)}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs font-black text-emerald-600">${inc.amount.toFixed(2)}</p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <input 
+                    type="number"
+                    step="0.01"
+                    className="flex-1 px-3 py-2 bg-white border border-emerald-100 rounded-xl text-xs font-black text-emerald-800 outline-none focus:ring-2 focus:ring-emerald-500"
+                    placeholder="Amount received..."
+                    value={incAmounts[inc.id] || inc.amount.toString()}
+                    onChange={(e) => setIncAmounts(prev => ({ ...prev, [inc.id]: e.target.value }))}
+                  />
+                  <button 
+                    onClick={() => {
+                      const amount = parseFloat(incAmounts[inc.id] || inc.amount.toString());
+                      onReceiveRecurringIncome(inc, amount);
+                    }}
+                    className="px-4 py-2 bg-emerald-600 text-white text-[10px] font-black uppercase rounded-xl hover:bg-emerald-700 transition shadow-lg shadow-emerald-100"
+                  >
+                    Confirm
+                  </button>
+                </div>
+              </div>
+            ))}
+            {recurringIncomes.length === 0 && (
+              <p className="text-center py-8 text-slate-300 font-bold uppercase text-[10px] tracking-widest">No Recurring Income</p>
+            )}
           </div>
-          <div style={{ height: 250, width: '100%', minHeight: 250 }} className="relative">
+        </section>
+
+        <section className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
+          <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.2em] mb-6">Upcoming Bills</h3>
+          <div className="space-y-4">
+            {recurringExpenses.map(rec => (
+              <div key={rec.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-200/50 flex flex-col gap-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 bg-white rounded-xl flex items-center justify-center text-slate-400 shadow-sm">
+                      <i className="fas fa-file-invoice-dollar"></i>
+                    </div>
+                    <div>
+                      <p className="font-bold text-xs text-slate-800">{rec.description}</p>
+                      <p className="text-[9px] text-slate-400 font-black uppercase">
+                        Due: {getNextDueDate(rec.dayOfMonth, rec.lastBilledDate)}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs font-black text-slate-800">${rec.balance.toFixed(2)}</p>
+                    {rec.balance !== rec.amount && (
+                      <p className="text-[8px] text-slate-400 uppercase font-black">of ${rec.amount}</p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <input 
+                    type="number"
+                    step="0.01"
+                    className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-black text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
+                    placeholder="Payment amount..."
+                    value={payAmounts[rec.id] || rec.balance.toString()}
+                    onChange={(e) => setPayAmounts(prev => ({ ...prev, [rec.id]: e.target.value }))}
+                  />
+                  <button 
+                    onClick={() => {
+                      const amount = parseFloat(payAmounts[rec.id] || rec.balance.toString());
+                      onPayRecurring(rec, amount);
+                    }}
+                    className="px-4 py-2 bg-indigo-600 text-white text-[10px] font-black uppercase rounded-xl hover:bg-indigo-700 transition shadow-lg shadow-indigo-100"
+                  >
+                    Pay
+                  </button>
+                </div>
+              </div>
+            ))}
+            {recurringExpenses.length === 0 && (
+              <p className="text-center py-8 text-slate-300 font-bold uppercase text-[10px] tracking-widest">No Bills Tracked</p>
+            )}
+          </div>
+        </section>
+      </div>
+
+      {/* Flow Trends */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <section className="lg:col-span-2 bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
+          <div className="flex items-center justify-between mb-8">
+            <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.2em]">Flow Trends</h3>
+            <div className="flex bg-slate-100 p-1 rounded-xl">
+              {['daily', 'monthly'].map(p => (
+                <button 
+                  key={p} 
+                  onClick={() => setTrendPeriod(p as any)}
+                  className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition ${trendPeriod === p ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400'}`}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={trendData}>
+              <AreaChart data={transactions.slice(-12).map(t => ({ name: t.date.slice(5), amount: t.amount }))}>
                 <defs>
-                  <linearGradient id="colorAmt" x1="0" y1="0" x2="0" y2="1">
+                  <linearGradient id="colorAmount" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#6366f1" stopOpacity={0.1}/>
                     <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#94a3b8'}} />
-                <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#94a3b8'}} />
-                <Tooltip 
-                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                />
-                <Area type="monotone" dataKey="amount" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorAmt)" />
+                <XAxis dataKey="name" hide />
+                <Tooltip />
+                <Area type="monotone" dataKey="amount" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorAmount)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
-        </div>
+        </section>
 
-        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col">
-          <h3 className="font-bold text-slate-800 mb-4">Expense Mix</h3>
-          {pieChartData.length > 0 ? (
-            <div className="flex-1 flex flex-col">
-              <div style={{ height: 200, width: '100%', minHeight: 200 }} className="relative">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={pieChartData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={60}
-                      outerRadius={80}
-                      paddingAngle={5}
-                      dataKey="value"
-                    >
-                      {pieChartData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="grid grid-cols-2 gap-2 mt-4">
-                {pieChartData.slice(0, 6).map((d, i) => (
-                  <div key={d.name} className="flex items-center text-[10px] text-slate-600 font-bold">
-                    <span className="w-2 h-2 rounded-full mr-2 shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }}></span>
-                    <span className="truncate uppercase tracking-tighter text-ellipsis">{d.name}</span>
-                  </div>
-                ))}
-              </div>
+        <section className="bg-slate-900 p-8 rounded-[2.5rem] text-white shadow-2xl">
+          <h3 className="font-black uppercase text-xs tracking-[0.2em] mb-8 text-center">Net Worth Spread</h3>
+          <div className="h-48 relative">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={[
+                    { name: 'Liquid', value: Math.max(0, cashBalance) },
+                    { name: 'Crypto/Stocks', value: portfolioValue }
+                  ]}
+                  innerRadius={55}
+                  outerRadius={75}
+                  paddingAngle={8}
+                  dataKey="value"
+                >
+                  <Cell fill="#6366f1" />
+                  <Cell fill="#f59e0b" />
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+              <p className="text-[9px] text-slate-400 font-black uppercase">Asset Mix</p>
+              <p className="text-lg font-black">{netWorth > 0 ? ((portfolioValue / netWorth) * 100).toFixed(0) : 0}%</p>
             </div>
-          ) : (
-            <div className="flex-1 flex items-center justify-center text-slate-400 italic text-xs">No transactions.</div>
-          )}
-        </div>
+          </div>
+          <div className="space-y-4 mt-6">
+             <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-indigo-500 rounded-full"></div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">Cash Reserve</span>
+                </div>
+                <span className="text-[11px] font-black">${cashBalance.toLocaleString()}</span>
+             </div>
+             <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-amber-500 rounded-full"></div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">Risk Assets</span>
+                </div>
+                <span className="text-[11px] font-black">${portfolioValue.toLocaleString()}</span>
+             </div>
+          </div>
+        </section>
       </div>
 
-      {/* Activity List */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-        <h3 className="font-bold text-slate-800 mb-4 uppercase text-xs tracking-widest">Recent Activity</h3>
-        <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
-          {transactions.slice(0, 20).map((t) => (
-            <div key={t.id} className="group flex items-start justify-between p-4 bg-slate-50 rounded-2xl hover:bg-white hover:ring-2 hover:ring-indigo-100 transition relative">
-              <div className="flex items-start gap-3 overflow-hidden">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white shrink-0 mt-0.5 ${t.type === 'income' ? 'bg-emerald-500' : t.type === 'savings' ? 'bg-teal-500' : t.type === 'withdrawal' ? 'bg-amber-500' : 'bg-slate-400'}`}>
-                  <i className={`fas ${t.type === 'income' ? 'fa-arrow-up' : t.type === 'savings' ? 'fa-piggy-bank' : t.type === 'withdrawal' ? 'fa-hand-holding-usd' : 'fa-arrow-down'}`}></i>
+      {/* Savings Progress */}
+      <section className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
+        <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.2em] mb-6">Savings Goals Progress</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6">
+          {savingGoals.map(goal => {
+            const perc = Math.min(100, (goal.currentAmount / goal.targetAmount) * 100);
+            return (
+              <div key={goal.id} className="group">
+                <div className="flex justify-between mb-2">
+                  <span className="text-sm font-bold text-slate-700">{goal.name}</span>
+                  <span className="text-xs font-black text-indigo-600">${goal.currentAmount.toLocaleString()} / ${goal.targetAmount.toLocaleString()}</span>
                 </div>
-                <div>
-                  <p className="font-bold text-slate-800 text-sm">{t.description}</p>
-                  <p className="text-[10px] text-slate-500 uppercase font-bold">{t.category} • {new Date(t.date).toLocaleDateString()}</p>
-                  {t.notes && (
-                    <p className="mt-1 text-xs text-slate-400 italic bg-slate-100 p-2 rounded-lg border border-slate-200/50">
-                      "{t.notes}"
-                    </p>
-                  )}
+                <div className="h-2 bg-slate-50 rounded-full overflow-hidden border border-slate-100">
+                  <div className="h-full bg-emerald-500 transition-all duration-1000" style={{ width: `${perc}%` }}></div>
                 </div>
               </div>
-              <div className="flex flex-col items-end gap-2">
-                <p className={`font-black shrink-0 ${ (t.type === 'income' || t.type === 'withdrawal') ? 'text-emerald-600' : 'text-rose-600'}`}>
-                  {(t.type === 'income' || t.type === 'withdrawal') ? '+' : '-'}${t.amount.toFixed(2)}
+            );
+          })}
+        </div>
+        {savingGoals.length === 0 && (
+          <p className="text-center py-8 text-slate-300 font-bold uppercase text-[10px] tracking-widest">No Active Savings Goals</p>
+        )}
+      </section>
+
+      {/* Ledger */}
+      <section className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
+        <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.2em] mb-8">Financial Ledger</h3>
+        <div className="space-y-4">
+          {transactions.slice(0, 10).map(t => (
+            <div key={t.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl group hover:bg-white hover:ring-2 hover:ring-indigo-100 transition shadow-sm">
+              <div className="flex items-center gap-4">
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white ${t.type === 'income' ? 'bg-emerald-500 shadow-emerald-100 shadow-lg' : 'bg-rose-500 shadow-rose-100 shadow-lg'}`}>
+                  <i className={`fas ${t.type === 'income' ? 'fa-arrow-up' : 'fa-arrow-down'}`}></i>
+                </div>
+                <div>
+                  <p className="font-black text-xs text-slate-800">{t.description}</p>
+                  <p className="text-[9px] font-bold text-slate-400 uppercase">{t.category} • {t.date}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                <p className={`font-black text-xs ${t.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                  {t.type === 'income' ? '+' : '-'}${t.amount.toFixed(2)}
                 </p>
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
-                  <button onClick={() => onEdit(t)} className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-indigo-600"><i className="fas fa-pen text-[10px]"></i></button>
-                  <button onClick={() => onDelete(t.id)} className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-rose-600"><i className="fas fa-trash text-[10px]"></i></button>
+                <div className="flex opacity-0 group-hover:opacity-100 transition">
+                  <button onClick={() => onDelete(t.id)} className="w-8 h-8 rounded-lg hover:bg-rose-50 text-slate-300 hover:text-rose-500 flex items-center justify-center">
+                    <i className="fas fa-trash-alt text-[10px]"></i>
+                  </button>
                 </div>
               </div>
             </div>
           ))}
-          {transactions.length === 0 && <p className="text-center text-slate-400 text-sm py-8 italic">No transactions yet.</p>}
+          {transactions.length === 0 && (
+            <div className="text-center py-12">
+               <i className="fas fa-receipt text-4xl text-slate-100 mb-4"></i>
+               <p className="text-slate-400 font-bold uppercase text-xs tracking-widest">No entries yet</p>
+            </div>
+          )}
         </div>
-      </div>
+      </section>
     </div>
   );
 };

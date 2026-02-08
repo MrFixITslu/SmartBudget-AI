@@ -1,9 +1,39 @@
 
 export type TransactionType = 'expense' | 'income' | 'savings' | 'withdrawal';
+export type InstitutionType = 'bank' | 'credit_union' | 'investment';
 
 export interface LineItem {
   name: string;
   price: number;
+  quantity?: number;
+}
+
+export interface BankConnection {
+  institution: string;
+  institutionType: InstitutionType;
+  status: 'linked' | 'unlinked' | 'syncing';
+  lastSynced?: string;
+  accountLastFour?: string;
+  openingBalance: number;
+}
+
+export interface Holding {
+  symbol: string;
+  quantity: number;
+  purchasePrice: number;
+}
+
+export interface InvestmentAccount {
+  id: string;
+  provider: 'Binance' | 'Vanguard';
+  name: string;
+  holdings: Holding[];
+}
+
+export interface MarketPrice {
+  symbol: string;
+  price: number;
+  change24h: number;
 }
 
 export interface Transaction {
@@ -16,13 +46,15 @@ export interface Transaction {
   notes?: string;
   vendor?: string;
   lineItems?: LineItem[];
-  recurringId?: string; // Links a transaction to a recurring template
-  savingGoalId?: string; // Links a transaction to a specific saving goal
+  recurringId?: string;
+  savingGoalId?: string;
 }
 
 export interface SavingGoal {
   id: string;
   name: string;
+  institution: string;
+  institutionType: 'bank' | 'credit_union';
   targetAmount: number;
   currentAmount: number;
   openingBalance: number;
@@ -35,29 +67,40 @@ export interface RecurringExpense {
   category: string;
   description: string;
   dayOfMonth: number;
-  balance: number; // Current outstanding balance for this bill
-  lastBilledDate?: string; // Track when we last added the monthly amount to balance
+  balance: number;
+  lastBilledDate?: string;
 }
 
-export interface Budget {
+export interface RecurringIncome {
+  id: string;
+  amount: number;
   category: string;
-  limit: number;
-  spent: number;
+  description: string;
+  dayOfMonth: number;
+  lastConfirmedDate?: string;
+}
+
+// New Event Planner Types
+export interface EventItem {
+  id: string;
+  description: string;
+  amount: number;
+  type: 'income' | 'expense';
+  notes?: string;
+}
+
+export interface BudgetEvent {
+  id: string;
+  name: string;
+  date: string;
+  items: EventItem[];
+  notes?: string;
+  status: 'planned' | 'active' | 'completed';
 }
 
 export const CATEGORIES = [
-  'Food',
-  'Transport',
-  'Housing',
-  'Entertainment',
-  'Utilities',
-  'Health',
-  'Shopping',
-  'Education',
-  'Personal',
-  'Income',
-  'Savings',
-  'Other'
+  'Food', 'Transport', 'Housing', 'Entertainment', 'Utilities', 
+  'Health', 'Shopping', 'Education', 'Personal', 'Income', 'Savings', 'Other', 'Investments'
 ];
 
 export interface AIAnalysisResult {

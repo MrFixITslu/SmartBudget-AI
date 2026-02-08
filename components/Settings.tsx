@@ -1,17 +1,25 @@
-
 import React, { useState } from 'react';
-import { CATEGORIES, RecurringExpense, SavingGoal } from '../types';
+import { CATEGORIES, RecurringExpense, RecurringIncome, SavingGoal, BankConnection } from '../types';
 
 interface Props {
   salary: number;
   onUpdateSalary: (val: number) => void;
   recurringExpenses: RecurringExpense[];
-  onAddRecurring: (item: Omit<RecurringExpense, 'id'>) => void;
+  onAddRecurring: (item: Omit<RecurringExpense, 'id' | 'balance'>) => void;
+  onUpdateRecurring: (item: RecurringExpense) => void;
   onDeleteRecurring: (id: string) => void;
+  recurringIncomes: RecurringIncome[];
+  onAddRecurringIncome: (item: Omit<RecurringIncome, 'id'>) => void;
+  onUpdateRecurringIncome: (item: RecurringIncome) => void;
+  onDeleteRecurringIncome: (id: string) => void;
   savingGoals: SavingGoal[];
   onAddSavingGoal: (item: Omit<SavingGoal, 'id' | 'currentAmount'>) => void;
   onDeleteSavingGoal: (id: string) => void;
+  onExportData: () => void;
+  onResetData: () => void;
   onClose: () => void;
+  currentBank: BankConnection;
+  onResetBank: () => void;
 }
 
 const Settings: React.FC<Props> = ({ 
@@ -19,60 +27,137 @@ const Settings: React.FC<Props> = ({
   onUpdateSalary, 
   recurringExpenses, 
   onAddRecurring, 
+  onUpdateRecurring,
   onDeleteRecurring,
+  recurringIncomes,
+  onAddRecurringIncome,
+  onUpdateRecurringIncome,
+  onDeleteRecurringIncome,
   savingGoals,
   onAddSavingGoal,
   onDeleteSavingGoal,
-  onClose 
+  onExportData,
+  onResetData,
+  onClose,
+  currentBank,
+  onResetBank
 }) => {
   const [tempSalary, setTempSalary] = useState(salary.toString());
   const [isSalarySaved, setIsSalarySaved] = useState(false);
   
-  // Recurring Expense State
-  const [newRecAmount, setNewRecAmount] = useState('');
-  const [newRecDesc, setNewRecDesc] = useState('');
-  const [newRecDay, setNewRecDay] = useState('1');
-  const [newRecCat, setNewRecCat] = useState(CATEGORIES[0]);
+  // Recurring Bill Form State
+  const [isAddingBill, setIsAddingBill] = useState(false);
+  const [editingBill, setEditingBill] = useState<RecurringExpense | null>(null);
+  const [billDesc, setBillDesc] = useState('');
+  const [billAmount, setBillAmount] = useState('');
+  const [billCategory, setBillCategory] = useState(CATEGORIES[0]);
+  const [billDay, setBillDay] = useState('1');
 
-  // Saving Goal State
-  const [newGoalName, setNewGoalName] = useState('');
-  const [newGoalTarget, setNewGoalTarget] = useState('');
-  const [newGoalOpening, setNewGoalOpening] = useState('0');
-  const [newGoalCat, setNewGoalCat] = useState(CATEGORIES[0]);
+  // Recurring Income Form State
+  const [isAddingIncome, setIsAddingIncome] = useState(false);
+  const [editingIncome, setEditingIncome] = useState<RecurringIncome | null>(null);
+  const [incDesc, setIncDesc] = useState('');
+  const [incAmount, setIncAmount] = useState('');
+  const [incCategory, setIncCategory] = useState('Income');
+  const [incDay, setIncDay] = useState('1');
 
-  const handleSalaryConfirm = () => {
-    const val = parseFloat(tempSalary) || 0;
-    onUpdateSalary(val);
-    setIsSalarySaved(true);
-    setTimeout(() => setIsSalarySaved(false), 2000);
+  // Savings Goal Form State
+  const [isAddingGoal, setIsAddingGoal] = useState(false);
+  const [goalName, setGoalName] = useState('');
+  const [goalInstitution, setGoalInstitution] = useState('');
+  const [goalInstitutionType, setGoalInstitutionType] = useState<'bank' | 'credit_union'>('bank');
+  const [goalTarget, setGoalTarget] = useState('');
+  const [goalOpening, setGoalOpening] = useState('0');
+
+  const resetBillForm = () => {
+    setBillDesc('');
+    setBillAmount('');
+    setBillCategory(CATEGORIES[0]);
+    setBillDay('1');
+    setIsAddingBill(false);
+    setEditingBill(null);
   };
 
-  const handleAddRec = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newRecAmount || !newRecDesc) return;
-    onAddRecurring({
-      amount: parseFloat(newRecAmount),
-      description: newRecDesc,
-      dayOfMonth: parseInt(newRecDay),
-      category: newRecCat,
-      balance: 0
-    });
-    setNewRecAmount('');
-    setNewRecDesc('');
+  const resetIncomeForm = () => {
+    setIncDesc('');
+    setIncAmount('');
+    setIncCategory('Income');
+    setIncDay('1');
+    setIsAddingIncome(false);
+    setEditingIncome(null);
   };
 
-  const handleAddGoal = (e: React.FormEvent) => {
+  const handleBillSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newGoalName || !newGoalTarget) return;
+    const amount = parseFloat(billAmount);
+    const day = parseInt(billDay);
+    if (isNaN(amount) || isNaN(day) || !billDesc) return;
+
+    if (editingBill) {
+      onUpdateRecurring({
+        ...editingBill,
+        description: billDesc,
+        amount: amount,
+        category: billCategory,
+        dayOfMonth: day,
+        balance: amount
+      });
+    } else {
+      onAddRecurring({
+        description: billDesc,
+        amount: amount,
+        category: billCategory,
+        dayOfMonth: day
+      });
+    }
+    resetBillForm();
+  };
+
+  const handleIncomeSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const amount = parseFloat(incAmount);
+    const day = parseInt(incDay);
+    if (isNaN(amount) || isNaN(day) || !incDesc) return;
+
+    if (editingIncome) {
+      onUpdateRecurringIncome({
+        ...editingIncome,
+        description: incDesc,
+        amount: amount,
+        category: incCategory,
+        dayOfMonth: day
+      });
+    } else {
+      onAddRecurringIncome({
+        description: incDesc,
+        amount: amount,
+        category: incCategory,
+        dayOfMonth: day
+      });
+    }
+    resetIncomeForm();
+  };
+
+  const handleGoalSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const target = parseFloat(goalTarget);
+    const opening = parseFloat(goalOpening);
+    if (isNaN(target) || !goalName) return;
+
     onAddSavingGoal({
-      name: newGoalName,
-      targetAmount: parseFloat(newGoalTarget),
-      openingBalance: parseFloat(newGoalOpening) || 0,
-      category: newGoalCat,
+      name: goalName,
+      institution: goalInstitution || (goalInstitutionType === 'bank' ? 'Commercial Bank' : 'Credit Union'),
+      institutionType: goalInstitutionType,
+      targetAmount: target,
+      openingBalance: isNaN(opening) ? 0 : opening,
+      category: 'Savings'
     });
-    setNewGoalName('');
-    setNewGoalTarget('');
-    setNewGoalOpening('0');
+
+    setGoalName('');
+    setGoalInstitution('');
+    setGoalTarget('');
+    setGoalOpening('0');
+    setIsAddingGoal(false);
   };
 
   return (
@@ -80,8 +165,8 @@ const Settings: React.FC<Props> = ({
       <div className="bg-white w-full max-w-2xl rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col">
         <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50">
           <div>
-            <h2 className="text-2xl font-black text-slate-800">Budget Settings</h2>
-            <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">Configure your financial foundation</p>
+            <h2 className="text-2xl font-black text-slate-800">Configurations</h2>
+            <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">Setup Your Accounts</p>
           </div>
           <button onClick={onClose} className="w-12 h-12 flex items-center justify-center bg-white border border-slate-200 rounded-2xl text-slate-400 hover:text-slate-800 transition shadow-sm">
             <i className="fas fa-times text-xl"></i>
@@ -89,155 +174,210 @@ const Settings: React.FC<Props> = ({
         </div>
 
         <div className="p-8 space-y-10 overflow-y-auto custom-scrollbar flex-1">
-          {/* Salary Section */}
-          <section className="bg-indigo-50/50 p-6 rounded-3xl border border-indigo-100/50">
-            <label className="block text-[10px] font-black text-indigo-900 mb-4 uppercase tracking-[0.2em]">Expected Monthly Salary</label>
-            <div className="flex gap-4">
-              <div className="relative flex-1">
-                <span className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 font-black text-xl">$</span>
-                <input 
-                  type="number"
-                  value={tempSalary}
-                  onChange={(e) => {
-                    setTempSalary(e.target.value);
-                    setIsSalarySaved(false);
-                  }}
-                  className="w-full pl-10 pr-6 py-4 bg-white border border-slate-200 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none text-xl font-black text-slate-800 transition"
-                  placeholder="0.00"
-                />
+          
+          {/* Recurring Incomes Section */}
+          <section>
+            <div className="flex justify-between items-end mb-6">
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Income Streams</label>
+                <h3 className="text-lg font-black text-slate-800">Recurring Incomes</h3>
               </div>
               <button 
-                onClick={handleSalaryConfirm}
-                className={`px-8 rounded-2xl font-black text-sm transition-all flex items-center gap-2 ${
-                  isSalarySaved 
-                  ? 'bg-emerald-500 text-white' 
-                  : 'bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95 shadow-xl shadow-indigo-200'
-                }`}
+                onClick={() => setIsAddingIncome(!isAddingIncome)}
+                className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition ${isAddingIncome ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}
               >
-                {isSalarySaved ? (
-                  <><i className="fas fa-check"></i> Confirmed</>
-                ) : (
-                  'Confirm Salary'
-                )}
+                {isAddingIncome ? 'Cancel' : 'Add Income'}
               </button>
             </div>
-            <p className="text-[10px] text-indigo-400 mt-4 font-bold uppercase flex items-center gap-2 tracking-wider">
-              <i className="fas fa-info-circle"></i>
-              Automatically added to balance on the 25th of every month.
-            </p>
-          </section>
 
-          {/* Recurring Expenses Section */}
-          <section>
-            <label className="block text-[10px] font-black text-slate-400 mb-6 uppercase tracking-[0.2em]">Monthly Bills & Subscriptions</label>
-            <form onSubmit={handleAddRec} className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-              <input 
-                type="text" 
-                placeholder="Bill name (e.g. Rent)" 
-                className="p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
-                value={newRecDesc}
-                onChange={e => setNewRecDesc(e.target.value)}
-              />
-              <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">$</span>
-                <input 
-                  type="number" 
-                  placeholder="Amount" 
-                  className="w-full pl-8 pr-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
-                  value={newRecAmount}
-                  onChange={e => setNewRecAmount(e.target.value)}
-                />
-              </div>
-              <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-2xl p-4">
-                <span className="text-[10px] text-slate-400 font-black uppercase tracking-tighter shrink-0">Due Day</span>
-                <input 
-                  type="number" 
-                  min="1" max="31"
-                  className="w-full bg-transparent text-sm font-bold outline-none"
-                  value={newRecDay}
-                  onChange={e => setNewRecDay(e.target.value)}
-                />
-              </div>
-              <button className="bg-slate-800 text-white rounded-2xl font-black text-xs hover:bg-slate-900 transition uppercase tracking-widest shadow-lg">
-                Add Recurring Bill
-              </button>
-            </form>
+            {isAddingIncome && (
+              <form onSubmit={handleIncomeSubmit} className="mb-6 p-6 bg-slate-50 border border-slate-200 rounded-[2rem] space-y-4 animate-in slide-in-from-top-4 duration-300">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="col-span-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Label</label>
+                    <input type="text" value={incDesc} onChange={(e) => setIncDesc(e.target.value)} placeholder="e.g. Salary" className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Amount</label>
+                    <input type="number" step="0.01" value={incAmount} onChange={(e) => setIncAmount(e.target.value)} placeholder="0.00" className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Day of Month</label>
+                    <input type="number" min="1" max="31" value={incDay} onChange={(e) => setIncDay(e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-sm" />
+                  </div>
+                </div>
+                <button type="submit" className="w-full py-3 bg-indigo-600 text-white font-black rounded-xl shadow-lg shadow-indigo-100 uppercase tracking-widest text-[10px]">
+                  {editingIncome ? 'Update Income' : 'Save Income'}
+                </button>
+              </form>
+            )}
 
             <div className="space-y-3">
-              {recurringExpenses.map(item => (
-                <div key={item.id} className="flex items-center justify-between p-4 border border-slate-100 rounded-2xl bg-white shadow-sm group">
-                  <div>
-                    <p className="font-black text-slate-800 text-sm">{item.description}</p>
-                    <p className="text-[10px] text-slate-400 uppercase font-bold">Due Day {item.dayOfMonth} • ${item.amount}/mo</p>
+              {recurringIncomes.map(inc => (
+                <div key={inc.id} className="flex items-center justify-between p-4 bg-emerald-50 border border-emerald-100 rounded-2xl">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-emerald-600 shadow-sm"><i className="fas fa-arrow-up"></i></div>
+                    <div><p className="font-black text-xs text-slate-800">{inc.description}</p><p className="text-[10px] text-slate-400 font-bold uppercase">Day {inc.dayOfMonth}</p></div>
                   </div>
-                  <button 
-                    onClick={() => onDeleteRecurring(item.id)}
-                    className="w-10 h-10 flex items-center justify-center text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition"
-                  >
-                    <i className="fas fa-trash-alt text-sm"></i>
-                  </button>
+                  <div className="flex items-center gap-4">
+                    <p className="font-black text-xs text-emerald-600">${inc.amount.toFixed(2)}</p>
+                    <button onClick={() => onDeleteRecurringIncome(inc.id)} className="text-slate-300 hover:text-rose-500"><i className="fas fa-trash-alt text-xs"></i></button>
+                  </div>
                 </div>
               ))}
             </div>
           </section>
 
-          {/* Saving Goals Section */}
+          {/* Recurring Bills Section */}
           <section>
-            <label className="block text-[10px] font-black text-slate-400 mb-6 uppercase tracking-[0.2em]">Financial Saving Goals</label>
-            <form onSubmit={handleAddGoal} className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-              <input 
-                type="text" 
-                placeholder="Goal name (e.g. New Car)" 
-                className="p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-emerald-500 font-bold"
-                value={newGoalName}
-                onChange={e => setNewGoalName(e.target.value)}
-              />
-              <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">$</span>
-                <input 
-                  type="number" 
-                  placeholder="Target Amount" 
-                  className="w-full pl-8 pr-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-emerald-500 font-bold"
-                  value={newGoalTarget}
-                  onChange={e => setNewGoalTarget(e.target.value)}
-                />
+            <div className="flex justify-between items-end mb-6">
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Expenses</label>
+                <h3 className="text-lg font-black text-slate-800">Recurring Bills</h3>
               </div>
-              <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">$</span>
-                <input 
-                  type="number" 
-                  placeholder="Opening Balance" 
-                  className="w-full pl-8 pr-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-emerald-500 font-bold"
-                  value={newGoalOpening}
-                  onChange={e => setNewGoalOpening(e.target.value)}
-                />
-              </div>
-              <button className="sm:col-span-2 bg-emerald-600 text-white py-4 rounded-2xl font-black text-xs hover:bg-emerald-700 transition uppercase tracking-widest shadow-lg shadow-emerald-100">
-                Create New Goal
+              <button 
+                onClick={() => setIsAddingBill(!isAddingBill)}
+                className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition ${isAddingBill ? 'bg-rose-50 text-rose-600' : 'bg-slate-100 text-slate-600'}`}
+              >
+                {isAddingBill ? 'Cancel' : 'Add Bill'}
               </button>
-            </form>
+            </div>
+
+            {isAddingBill && (
+              <form onSubmit={handleBillSubmit} className="mb-6 p-6 bg-slate-50 border border-slate-200 rounded-[2rem] space-y-4 animate-in slide-in-from-top-4 duration-300">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="col-span-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Bill Name</label>
+                    <input type="text" value={billDesc} onChange={(e) => setBillDesc(e.target.value)} placeholder="e.g. Electricity" className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Amount</label>
+                    <input type="number" step="0.01" value={billAmount} onChange={(e) => setBillAmount(e.target.value)} placeholder="0.00" className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Day of Month</label>
+                    <input type="number" min="1" max="31" value={billDay} onChange={(e) => setBillDay(e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-sm" />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Category</label>
+                    <select value={billCategory} onChange={(e) => setBillCategory(e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-sm">
+                      {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <button type="submit" className="w-full py-3 bg-slate-900 text-white font-black rounded-xl shadow-lg uppercase tracking-widest text-[10px]">
+                  {editingBill ? 'Update Bill' : 'Save Bill'}
+                </button>
+              </form>
+            )}
+
+            <div className="space-y-3">
+              {recurringExpenses.map(bill => (
+                <div key={bill.id} className="flex items-center justify-between p-4 bg-white border border-slate-200 rounded-2xl shadow-sm">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 shadow-sm"><i className="fas fa-file-invoice"></i></div>
+                    <div><p className="font-black text-xs text-slate-800">{bill.description}</p><p className="text-[10px] text-slate-400 font-bold uppercase">Day {bill.dayOfMonth} • {bill.category}</p></div>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <p className="font-black text-xs text-rose-600">${bill.amount.toFixed(2)}</p>
+                    <button onClick={() => onDeleteRecurring(bill.id)} className="text-slate-300 hover:text-rose-500"><i className="fas fa-trash-alt text-xs"></i></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Savings Goals Section */}
+          <section>
+            <div className="flex justify-between items-end mb-6">
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Wealth Building</label>
+                <h3 className="text-lg font-black text-slate-800">Savings & Vaults</h3>
+              </div>
+              <button 
+                onClick={() => setIsAddingGoal(!isAddingGoal)}
+                className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition ${isAddingGoal ? 'bg-rose-50 text-rose-600' : 'bg-indigo-50 text-indigo-600'}`}
+              >
+                {isAddingGoal ? 'Cancel' : 'New Goal'}
+              </button>
+            </div>
+
+            {isAddingGoal && (
+              <form onSubmit={handleGoalSubmit} className="mb-6 p-6 bg-indigo-50/50 border border-indigo-100 rounded-[2rem] space-y-4 animate-in slide-in-from-top-4 duration-300">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="col-span-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Goal Name</label>
+                    <input type="text" value={goalName} onChange={(e) => setGoalName(e.target.value)} placeholder="e.g. Rainy Day Fund" className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Type</label>
+                    <select 
+                      value={goalInstitutionType} 
+                      onChange={(e) => setGoalInstitutionType(e.target.value as any)}
+                      className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-sm"
+                    >
+                      <option value="bank">Commercial Bank</option>
+                      <option value="credit_union">Credit Union</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Institution Name</label>
+                    <input type="text" value={goalInstitution} onChange={(e) => setGoalInstitution(e.target.value)} placeholder="e.g. 1st National" className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Target Amount</label>
+                    <input type="number" value={goalTarget} onChange={(e) => setGoalTarget(e.target.value)} placeholder="0.00" className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Starting Balance</label>
+                    <input type="number" value={goalOpening} onChange={(e) => setGoalOpening(e.target.value)} placeholder="0.00" className="w-full p-3 bg-emerald-50 border border-emerald-100 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 font-black text-sm text-emerald-800" />
+                  </div>
+                </div>
+                <button type="submit" className="w-full py-3 bg-slate-900 text-white font-black rounded-xl shadow-lg uppercase tracking-widest text-[10px]">
+                  Save Savings Goal
+                </button>
+              </form>
+            )}
 
             <div className="space-y-3">
               {savingGoals.map(goal => (
-                <div key={goal.id} className="flex items-center justify-between p-4 border border-emerald-100 rounded-2xl bg-emerald-50/30 group">
-                  <div>
-                    <p className="font-black text-emerald-900 text-sm">{goal.name}</p>
-                    <p className="text-[10px] text-emerald-500 uppercase font-bold">Target: ${goal.targetAmount.toLocaleString()} • Starting: ${goal.openingBalance.toLocaleString()}</p>
+                <div key={goal.id} className="p-4 bg-white border border-slate-200 rounded-2xl flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 ${goal.institutionType === 'credit_union' ? 'bg-indigo-50 text-indigo-600' : 'bg-blue-50 text-blue-600'} rounded-xl flex items-center justify-center shadow-sm`}>
+                      <i className={`fas ${goal.institutionType === 'credit_union' ? 'fa-users' : 'fa-university'}`}></i>
+                    </div>
+                    <div>
+                      <p className="font-black text-xs text-slate-800">{goal.name}</p>
+                      <p className="text-[9px] text-slate-400 font-black uppercase">{goal.institution} • {goal.institutionType.replace('_', ' ')}</p>
+                    </div>
                   </div>
-                  <button 
-                    onClick={() => onDeleteSavingGoal(goal.id)}
-                    className="w-10 h-10 flex items-center justify-center text-emerald-200 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition"
-                  >
-                    <i className="fas fa-trash-alt text-sm"></i>
-                  </button>
+                  <div className="flex items-center gap-4">
+                    <div className="text-right">
+                      <p className="font-black text-xs text-indigo-600">${goal.currentAmount.toLocaleString()}</p>
+                      <p className="text-[8px] text-slate-400 font-bold uppercase">of ${goal.targetAmount.toLocaleString()}</p>
+                    </div>
+                    <button onClick={() => onDeleteSavingGoal(goal.id)} className="text-slate-300 hover:text-rose-500"><i className="fas fa-trash-alt text-[10px]"></i></button>
+                  </div>
                 </div>
               ))}
+              {savingGoals.length === 0 && (
+                <div className="text-center py-8 bg-slate-50 border border-dashed border-slate-200 rounded-3xl">
+                  <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">No Savings Configured</p>
+                </div>
+              )}
             </div>
           </section>
-        </div>
-        
-        <div className="p-8 bg-slate-50 border-t border-slate-100 text-center">
-          <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Pay day is set to the 25th of every month</p>
+
+          {/* Export / Danger Area */}
+          <section className="pt-6 border-t border-slate-100 grid grid-cols-2 gap-4">
+            <button onClick={onExportData} className="py-4 bg-slate-100 text-slate-600 font-black rounded-2xl text-[10px] uppercase tracking-widest hover:bg-slate-200 transition">
+              <i className="fas fa-download mr-2"></i> Export CSV
+            </button>
+            <button onClick={onResetData} className="py-4 bg-rose-50 text-rose-600 font-black rounded-2xl text-[10px] uppercase tracking-widest hover:bg-rose-100 transition">
+              <i className="fas fa-exclamation-triangle mr-2"></i> Reset App
+            </button>
+          </section>
+
         </div>
       </div>
     </div>

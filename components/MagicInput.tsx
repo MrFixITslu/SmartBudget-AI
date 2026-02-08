@@ -1,14 +1,15 @@
 
 import React, { useState, useRef } from 'react';
-import { parseInputToTransaction } from '../services/geminiService';
+import { parseInputToTransaction, parseStatementToTransactions } from '../services/geminiService';
 import { AIAnalysisResult } from '../types';
 
 interface Props {
   onSuccess: (data: AIAnalysisResult) => void;
+  onBulkSuccess: (data: AIAnalysisResult[]) => void;
   onLoading: (isLoading: boolean) => void;
 }
 
-const MagicInput: React.FC<Props> = ({ onSuccess, onLoading }) => {
+const MagicInput: React.FC<Props> = ({ onSuccess, onBulkSuccess, onLoading }) => {
   const [input, setInput] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -36,11 +37,20 @@ const MagicInput: React.FC<Props> = ({ onSuccess, onLoading }) => {
     const reader = new FileReader();
     reader.onloadend = async () => {
       const base64 = (reader.result as string).split(',')[1];
-      const result = await parseInputToTransaction({ data: base64, mimeType: file.type }, true);
-      if (result) onSuccess(result);
+      const fileData = { data: base64, mimeType: file.type };
+
+      if (file.type === 'application/pdf' || file.name.endsWith('.csv')) {
+        const results = await parseStatementToTransactions(fileData);
+        if (results.length > 0) onBulkSuccess(results);
+      } else {
+        const result = await parseInputToTransaction(fileData, true);
+        if (result) onSuccess(result);
+      }
       onLoading(false);
     };
     reader.readAsDataURL(file);
+    // Reset input
+    e.target.value = '';
   };
 
   const startRecording = async () => {
@@ -49,7 +59,6 @@ const MagicInput: React.FC<Props> = ({ onSuccess, onLoading }) => {
       const recorder = new MediaRecorder(stream);
       mediaRecorderRef.current = recorder;
       chunksRef.current = [];
-
       recorder.ondataavailable = (e) => chunksRef.current.push(e.data);
       recorder.onstop = async () => {
         const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
@@ -64,7 +73,6 @@ const MagicInput: React.FC<Props> = ({ onSuccess, onLoading }) => {
         reader.readAsDataURL(audioBlob);
         stream.getTracks().forEach(t => t.stop());
       };
-
       recorder.start();
       setIsRecording(true);
     } catch (err) {
@@ -86,7 +94,7 @@ const MagicInput: React.FC<Props> = ({ onSuccess, onLoading }) => {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             className="w-full bg-transparent px-3 py-2 text-slate-800 outline-none placeholder:text-slate-400"
-            placeholder="E.g. 'Coffee for 4.50' or use tools..."
+            placeholder="Log coffee, or upload BOSL statement..."
           />
         </div>
         
@@ -104,9 +112,9 @@ const MagicInput: React.FC<Props> = ({ onSuccess, onLoading }) => {
             type="button"
             onClick={() => fileInputRef.current?.click()}
             className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-slate-100 text-slate-500 transition"
-            title="Upload Receipt"
+            title="Upload Receipt or Statement"
           >
-            <i className="fas fa-camera"></i>
+            <i className="fas fa-file-import"></i>
           </button>
 
           <button
@@ -124,13 +132,12 @@ const MagicInput: React.FC<Props> = ({ onSuccess, onLoading }) => {
         ref={fileInputRef}
         onChange={handleFileUpload}
         className="hidden"
-        accept="image/*"
+        accept="image/*,application/pdf,.csv"
       />
 
       <div className="absolute -bottom-6 left-3 text-[10px] text-slate-400 flex gap-4 uppercase font-bold tracking-wider">
-        <span>Text</span>
-        <span>Voice</span>
-        <span>Receipts</span>
+        <span>BOSL Statements Supported</span>
+        <i className="fas fa-check-circle text-indigo-400"></i>
       </div>
     </div>
   );

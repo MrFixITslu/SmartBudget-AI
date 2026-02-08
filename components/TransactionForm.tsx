@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { CATEGORIES, Transaction, TransactionType, LineItem } from '../types';
 
@@ -130,11 +129,18 @@ const TransactionForm: React.FC<Props> = ({ onAdd, initialData, onCancel }) => {
 
       {lineItems.length > 0 && (
         <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-          <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Line Items Found</label>
-          <div className="space-y-1">
+          <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Item Breakdown</label>
+          <div className="space-y-1.5">
             {lineItems.map((item, idx) => (
-              <div key={idx} className="flex justify-between text-xs text-slate-600">
-                <span className="truncate">{item.name}</span>
+              <div key={idx} className="flex justify-between items-center text-xs text-slate-600">
+                <div className="flex gap-2 items-center">
+                  {item.quantity && (
+                    <span className="px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded-md font-bold text-[9px]">
+                      {item.quantity}x
+                    </span>
+                  )}
+                  <span className="truncate max-w-[150px]">{item.name}</span>
+                </div>
                 <span className="font-mono text-slate-400">${item.price.toFixed(2)}</span>
               </div>
             ))}

@@ -442,8 +442,8 @@ const Dashboard: React.FC<Props> = ({
           </div>
         </div>
         
-        <div className="h-[280px] w-full">
-          <ResponsiveContainer width="100%" height="100%">
+        <div className="h-[280px] w-full relative">
+          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
             <AreaChart data={projectionData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id="colorSave" x1="0" y1="0" x2="0" y2="1">
@@ -551,8 +551,8 @@ const Dashboard: React.FC<Props> = ({
          </div>
 
          <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-            <div className="h-[300px]">
-               <ResponsiveContainer width="100%" height="100%">
+            <div className="h-[300px] relative">
+               <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                   <BarChart layout="vertical" data={categorySpendData} margin={{ left: 20, right: 30 }}>
                      <XAxis type="number" hide />
                      <YAxis 

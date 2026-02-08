@@ -1,5 +1,6 @@
 
 import React, { useMemo, useState } from 'react';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Transaction, RecurringExpense, RecurringIncome, SavingGoal, InvestmentAccount, MarketPrice, BankConnection } from '../types';
 import { syncLucelecPortal } from '../services/bankApiService';
 
@@ -79,6 +80,29 @@ const Dashboard: React.FC<Props> = ({
     [recurringIncomes]
   );
   const safetyMargin = totalMonthlyRecurringIncome - totalMonthlyRecurringExpenses - totalOverdue;
+
+  // 12-Month Projection Logic
+  const projectionData = useMemo(() => {
+    const data = [];
+    const monthlyNet = totalMonthlyRecurringIncome - totalMonthlyRecurringExpenses;
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const currentMonthIdx = new Date().getMonth();
+
+    let runningNetWorth = netWorth;
+    let runningSavings = liquidFunds;
+
+    for (let i = 0; i < 12; i++) {
+      const monthLabel = months[(currentMonthIdx + i) % 12];
+      data.push({
+        name: monthLabel,
+        ProjectedNetWorth: Math.round(runningNetWorth),
+        ProjectedSavings: Math.round(runningSavings)
+      });
+      runningNetWorth += monthlyNet;
+      runningSavings += monthlyNet;
+    }
+    return data;
+  }, [netWorth, liquidFunds, totalMonthlyRecurringIncome, totalMonthlyRecurringExpenses]);
 
   // 25th Cycle Priority logic
   const cycleBills = useMemo(() => {
@@ -281,6 +305,85 @@ const Dashboard: React.FC<Props> = ({
            </p>
         </div>
       </div>
+
+      {/* Fiscal Projections Section */}
+      <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+          <div>
+            <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em]">Fiscal Outlook (12 Months)</h3>
+            <p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-widest">Projected Net Worth & Savings Trends</p>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 bg-indigo-600 rounded-full"></span>
+              <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Net Worth</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 bg-emerald-400 rounded-full"></span>
+              <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Savings</span>
+            </div>
+          </div>
+        </div>
+        
+        <div className="h-[280px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={projectionData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient id="colorNet" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.1}/>
+                  <stop offset="95%" stopColor="#4f46e5" stopOpacity={0}/>
+                </linearGradient>
+                <linearGradient id="colorSave" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.1}/>
+                  <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+              <XAxis 
+                dataKey="name" 
+                axisLine={false} 
+                tickLine={false} 
+                tick={{ fontSize: 10, fontWeight: 700, fill: '#94a3b8' }}
+                dy={10}
+              />
+              <YAxis 
+                axisLine={false} 
+                tickLine={false} 
+                tick={{ fontSize: 10, fontWeight: 700, fill: '#94a3b8' }}
+                tickFormatter={(value) => `$${value / 1000}k`}
+              />
+              <Tooltip 
+                contentStyle={{ 
+                  borderRadius: '20px', 
+                  border: 'none', 
+                  boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)',
+                  fontSize: '12px',
+                  fontWeight: 'bold'
+                }}
+                itemStyle={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }}
+              />
+              <Area 
+                type="monotone" 
+                dataKey="ProjectedNetWorth" 
+                stroke="#4f46e5" 
+                strokeWidth={3}
+                fillOpacity={1} 
+                fill="url(#colorNet)" 
+                animationDuration={1500}
+              />
+              <Area 
+                type="monotone" 
+                dataKey="ProjectedSavings" 
+                stroke="#10b981" 
+                strokeWidth={3}
+                fillOpacity={1} 
+                fill="url(#colorSave)" 
+                animationDuration={1500}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      </section>
 
       {/* 25th Cycle Center - Incomes & Obligations */}
       <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">

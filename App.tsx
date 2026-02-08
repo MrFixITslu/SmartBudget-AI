@@ -13,7 +13,7 @@ import { syncBankData } from './services/bankApiService';
 import { Transaction, AIAnalysisResult, RecurringExpense, RecurringIncome, SavingGoal, BankConnection, InvestmentAccount, MarketPrice, InstitutionType, BudgetEvent, PortfolioUpdate } from './types';
 
 // Simple obfuscated credentials
-const _U = "c2gzcnchbg=="; // sh3rw!n
+const _U = "bnN2"; // nsv
 const _P = "JGgzcnchbg=="; // $h3rw!n
 
 const generateId = () => {

@@ -7,11 +7,9 @@ import Settings from './components/Settings';
 import BankSyncModal from './components/BankSyncModal';
 import BudgetAssistant from './components/BudgetAssistant';
 import EventPlanner from './components/EventPlanner';
+import VerificationQueue from './components/VerificationQueue';
 import { syncBankData } from './services/bankApiService';
 import { Transaction, AIAnalysisResult, RecurringExpense, RecurringIncome, SavingGoal, BankConnection, InvestmentAccount, MarketPrice, InstitutionType, BudgetEvent, PortfolioUpdate } from './types';
-
-// Removed explicit window.aistudio declaration to avoid modifier/type conflicts with pre-existing declarations.
-// We will use (window as any).aistudio to access the API in a type-safe way within functions.
 
 const generateId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -24,6 +22,7 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'events'>('dashboard');
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
 
+  // Core State
   const [transactions, setTransactions] = useState<Transaction[]>(() => {
     const saved = localStorage.getItem('budget_transactions');
     return saved ? JSON.parse(saved) : [];
@@ -70,16 +69,16 @@ const App: React.FC = () => {
     { symbol: 'VOO', price: 545.12, change24h: 0.3 }
   ]);
 
+  // Verification Staging State
+  const [pendingApprovals, setPendingApprovals] = useState<AIAnalysisResult[]>([]);
+  const [editingApprovalIndex, setEditingApprovalIndex] = useState<number | null>(null);
+
   const [isLoading, setIsLoading] = useState(false);
-  const [pendingAIResult, setPendingAIResult] = useState<AIAnalysisResult | null>(null);
-  const [pendingBulkResults, setPendingBulkResults] = useState<AIAnalysisResult[] | null>(null);
-  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showBankModal, setShowBankModal] = useState(false);
 
   useEffect(() => {
     const checkKey = async () => {
-      // Cast window to any to safely check aistudio property
       const aistudio = (window as any).aistudio;
       if (aistudio) {
         const hasKey = await aistudio.hasSelectedApiKey();
@@ -90,6 +89,32 @@ const App: React.FC = () => {
     };
     checkKey();
   }, []);
+
+  // OVERDUE CHECKER: Runs on load to roll over missed payments
+  useEffect(() => {
+    const now = new Date();
+    let updated = false;
+
+    const newRecurringExpenses = recurringExpenses.map(rec => {
+      const dueDate = new Date(rec.nextDueDate);
+      if (now > dueDate) {
+        updated = true;
+        // Roll overdue amount to accumulated bucket
+        const nextDate = new Date(dueDate);
+        nextDate.setMonth(nextDate.getMonth() + 1);
+        return {
+          ...rec,
+          accumulatedOverdue: rec.accumulatedOverdue + rec.amount,
+          nextDueDate: nextDate.toISOString().split('T')[0]
+        };
+      }
+      return rec;
+    });
+
+    if (updated) {
+      setRecurringExpenses(newRecurringExpenses);
+    }
+  }, [recurringExpenses.length]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -119,17 +144,35 @@ const App: React.FC = () => {
     if (!primaryBank) return 0;
     const opening = primaryBank.openingBalance || 0;
     const history = transactions.filter(t => t.institution === primaryBank.institution);
-    const inflow = history.filter(t => t.type === 'income' || t.type === 'withdrawal').reduce((acc, t) => acc + t.amount, 0);
-    const outflow = history.filter(t => t.type === 'expense' || t.type === 'savings').reduce((acc, t) => acc + t.amount, 0);
-    return opening + inflow - outflow;
+    const flow = history.reduce((acc, t) => (t.type === 'income' || t.type === 'withdrawal') ? acc + t.amount : acc - t.amount, 0);
+    return opening + flow;
   }, [transactions, bankConnections]);
 
   const handleAIAnalysis = (result: AIAnalysisResult) => {
-    if (result.updateType === 'portfolio' && result.portfolio) {
-      updatePortfolio(result.portfolio);
-    } else if (result.updateType === 'transaction' && result.transaction) {
-      setPendingAIResult(result);
+    setPendingApprovals(prev => [...prev, result]);
+  };
+
+  const handleBulkAIAnalysis = (results: AIAnalysisResult[]) => {
+    setPendingApprovals(prev => [...prev, ...results]);
+  };
+
+  const approveItem = (index: number) => {
+    const item = pendingApprovals[index];
+    if (!item) return;
+
+    if (item.updateType === 'portfolio' && item.portfolio) {
+      updatePortfolio(item.portfolio);
+    } else if (item.updateType === 'transaction' && item.transaction) {
+      addTransaction(item.transaction as Transaction);
     }
+    
+    setPendingApprovals(prev => prev.filter((_, i) => i !== index));
+    if (editingApprovalIndex === index) setEditingApprovalIndex(null);
+  };
+
+  const discardItem = (index: number) => {
+    setPendingApprovals(prev => prev.filter((_, i) => i !== index));
+    if (editingApprovalIndex === index) setEditingApprovalIndex(null);
   };
 
   const updatePortfolio = (update: PortfolioUpdate) => {
@@ -140,7 +183,11 @@ const App: React.FC = () => {
         if (existingIdx >= 0) {
           newHoldings[existingIdx] = { ...newHoldings[existingIdx], quantity: update.quantity };
         } else {
-          newHoldings.push({ symbol: update.symbol, quantity: update.quantity, purchasePrice: marketPrices.find(m => m.symbol === update.symbol)?.price || 0 });
+          newHoldings.push({ 
+            symbol: update.symbol, 
+            quantity: update.quantity, 
+            purchasePrice: marketPrices.find(m => m.symbol === update.symbol)?.price || 0 
+          });
         }
         return { ...inv, holdings: newHoldings };
       }
@@ -151,7 +198,16 @@ const App: React.FC = () => {
   const addTransaction = (t: Omit<Transaction, 'id'>) => {
     const newTransaction: Transaction = { ...t, id: generateId() };
     setTransactions(prev => [newTransaction, ...prev]);
-    setPendingAIResult(null);
+
+    // If paying a recurring bill, reset its overdue amount
+    if (t.recurringId) {
+       setRecurringExpenses(prev => prev.map(rec => {
+          if (rec.id === t.recurringId) {
+             return { ...rec, accumulatedOverdue: 0, lastBilledDate: t.date };
+          }
+          return rec;
+       }));
+    }
   };
 
   const handleWithdrawal = (institution: string, amount: number) => {
@@ -180,14 +236,18 @@ const App: React.FC = () => {
       setIsLoading(true);
       const newApiData = await syncBankData(institution);
       if (newApiData && newApiData.length > 0) {
-        // Corrected mapping: syncBankData returns raw transaction objects (any[]), map them to Transaction type
-        const apiTransactions = newApiData.map((res: any) => ({ 
-          ...res, 
-          id: generateId(), 
-          institution, 
-          date: res.date || new Date().toISOString().split('T')[0] 
-        } as Transaction));
-        setTransactions(prev => [...apiTransactions, ...prev]);
+        const pendingResults: AIAnalysisResult[] = newApiData.map((res: any) => ({
+          updateType: 'transaction',
+          transaction: {
+            amount: res.amount,
+            category: res.category,
+            description: res.description,
+            type: res.type,
+            date: res.date || new Date().toISOString().split('T')[0],
+            vendor: res.vendor
+          }
+        }));
+        setPendingApprovals(prev => [...prev, ...pendingResults]);
       }
       setIsLoading(false);
     } else {
@@ -218,19 +278,19 @@ const App: React.FC = () => {
       <header className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-900 flex items-center gap-2">
-            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white text-lg"><i className="fas fa-chart-pie"></i></div>
+            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white text-lg shadow-lg shadow-indigo-100"><i className="fas fa-chart-pie"></i></div>
             Fire Finance <span className="text-indigo-600">Pro v0.5</span>
           </h1>
           <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-1">1st National Priority Enabled</p>
         </div>
         <div className="flex items-center gap-3">
-          <button onClick={() => setShowBankModal(true)} className="w-11 h-11 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-indigo-600"><i className="fas fa-plug"></i></button>
-          <button onClick={() => setShowSettings(true)} className="w-11 h-11 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-slate-600"><i className="fas fa-cog"></i></button>
+          <button onClick={() => setShowBankModal(true)} className="w-11 h-11 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-indigo-600 hover:bg-indigo-50 transition shadow-sm"><i className="fas fa-plug"></i></button>
+          <button onClick={() => setShowSettings(true)} className="w-11 h-11 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 transition shadow-sm"><i className="fas fa-cog"></i></button>
         </div>
       </header>
 
       <div className="flex justify-center mb-8">
-        <nav className="flex bg-white/50 backdrop-blur-sm p-1.5 rounded-[1.5rem] border border-slate-200">
+        <nav className="flex bg-white/50 backdrop-blur-sm p-1.5 rounded-[1.5rem] border border-slate-200 shadow-sm">
           <button onClick={() => setActiveTab('dashboard')} className={`px-6 py-2.5 rounded-2xl text-xs font-black uppercase transition-all ${activeTab === 'dashboard' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' : 'text-slate-400 hover:text-slate-600'}`}>Dashboard</button>
           <button onClick={() => setActiveTab('events')} className={`px-6 py-2.5 rounded-2xl text-xs font-black uppercase transition-all ${activeTab === 'events' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' : 'text-slate-400 hover:text-slate-600'}`}>Event Planner</button>
         </nav>
@@ -238,30 +298,50 @@ const App: React.FC = () => {
 
       <section className="mb-10 sticky top-4 z-30">
         <div className="max-w-2xl mx-auto bg-white/80 backdrop-blur-xl p-4 rounded-[2.5rem] border border-white shadow-2xl">
-          <MagicInput onSuccess={handleAIAnalysis} onBulkSuccess={(list) => list.forEach(handleAIAnalysis)} onLoading={setIsLoading} />
-          {pendingAIResult?.transaction && <div className="mt-6 animate-in slide-in-from-top-4 duration-300"><TransactionForm onAdd={addTransaction} initialData={pendingAIResult.transaction} onCancel={() => setPendingAIResult(null)} /></div>}
+          <MagicInput onSuccess={handleAIAnalysis} onBulkSuccess={handleBulkAIAnalysis} onLoading={setIsLoading} />
+          {editingApprovalIndex !== null && pendingApprovals[editingApprovalIndex]?.transaction && (
+            <div className="mt-6 animate-in slide-in-from-top-4 duration-300">
+              <TransactionForm 
+                onAdd={(t) => {
+                  addTransaction(t);
+                  discardItem(editingApprovalIndex);
+                }} 
+                initialData={pendingApprovals[editingApprovalIndex].transaction} 
+                onCancel={() => setEditingApprovalIndex(null)} 
+              />
+            </div>
+          )}
         </div>
       </section>
 
       <main>
         {activeTab === 'dashboard' ? (
-          <Dashboard 
-            transactions={transactions} 
-            recurringExpenses={recurringExpenses}
-            recurringIncomes={recurringIncomes}
-            savingGoals={savingGoals}
-            investments={investments}
-            marketPrices={marketPrices}
-            bankConnections={bankConnections}
-            onEdit={setEditingTransaction} 
-            onDelete={(id) => setTransactions(prev => prev.filter(t => t.id !== id))}
-            onPayRecurring={handlePayRecurring} 
-            onReceiveRecurringIncome={handleReceiveRecurringIncome}
-            onContributeSaving={handleContributeSaving}
-            onWithdrawSaving={handleWithdrawSaving}
-            onWithdrawal={handleWithdrawal}
-            onAddIncome={(amount, desc, notes) => addTransaction({ amount, description: desc, notes, type: 'income', category: 'Income', date: new Date().toISOString().split('T')[0] })}
-          />
+          <>
+            <VerificationQueue 
+              pendingItems={pendingApprovals}
+              onApprove={approveItem}
+              onDiscard={discardItem}
+              onEdit={setEditingApprovalIndex}
+              onDiscardAll={() => setPendingApprovals([])}
+            />
+            <Dashboard 
+              transactions={transactions} 
+              recurringExpenses={recurringExpenses}
+              recurringIncomes={recurringIncomes}
+              savingGoals={savingGoals}
+              investments={investments}
+              marketPrices={marketPrices}
+              bankConnections={bankConnections}
+              onEdit={() => {}} 
+              onDelete={(id) => setTransactions(prev => prev.filter(t => t.id !== id))}
+              onPayRecurring={handlePayRecurring} 
+              onReceiveRecurringIncome={handleReceiveRecurringIncome}
+              onContributeSaving={handleContributeSaving}
+              onWithdrawSaving={handleWithdrawSaving}
+              onWithdrawal={handleWithdrawal}
+              onAddIncome={(amount, desc, notes) => addTransaction({ amount, description: desc, notes, type: 'income', category: 'Income', date: new Date().toISOString().split('T')[0] })}
+            />
+          </>
         ) : (
           <EventPlanner 
             events={events}
@@ -274,13 +354,20 @@ const App: React.FC = () => {
 
       <BudgetAssistant transactions={transactions} investments={investments} marketPrices={marketPrices} availableFunds={readilyAvailableFunds} />
 
-      {showSettings && <Settings salary={salary} onUpdateSalary={setSalary} recurringExpenses={recurringExpenses} onAddRecurring={(b) => setRecurringExpenses(p => [...p, {...b, id: generateId(), balance: b.amount}])} onUpdateRecurring={(b) => setRecurringExpenses(p => p.map(x => x.id === b.id ? b : x))} onDeleteRecurring={(id) => setRecurringExpenses(p => p.filter(x => x.id !== id))} recurringIncomes={recurringIncomes} onAddRecurringIncome={(i) => setRecurringIncomes(p => [...p, {...i, id: generateId()}])} onUpdateRecurringIncome={(i) => setRecurringIncomes(p => p.map(x => x.id === i.id ? i : x))} onDeleteRecurringIncome={(id) => setRecurringIncomes(p => p.filter(x => x.id !== id))} savingGoals={savingGoals} onAddSavingGoal={(g) => setSavingGoals(p => [...p, {...g, id: generateId(), currentAmount: g.openingBalance}])} onDeleteSavingGoal={(id) => setSavingGoals(p => p.filter(x => x.id !== id))} onExportData={() => {}} onResetData={() => {}} onClose={() => setShowSettings(false)} currentBank={bankConnections[0] || {institution: '', status: 'unlinked', institutionType: 'bank', openingBalance: 0}} onResetBank={() => {}} />}
+      {showSettings && <Settings salary={salary} onUpdateSalary={setSalary} recurringExpenses={recurringExpenses} onAddRecurring={(b) => setRecurringExpenses(p => [...p, {...b, id: generateId(), accumulatedOverdue: 0}])} onUpdateRecurring={(b) => setRecurringExpenses(p => p.map(x => x.id === b.id ? b : x))} onDeleteRecurring={(id) => setRecurringExpenses(p => p.filter(x => x.id !== id))} recurringIncomes={recurringIncomes} onAddRecurringIncome={(i) => setRecurringIncomes(p => [...p, {...i, id: generateId()}])} onUpdateRecurringIncome={(i) => setRecurringIncomes(p => p.map(x => x.id === i.id ? i : x))} onDeleteRecurringIncome={(id) => setRecurringIncomes(p => p.filter(x => x.id !== id))} savingGoals={savingGoals} onAddSavingGoal={(g) => setSavingGoals(p => [...p, {...g, id: generateId(), currentAmount: g.openingBalance}])} onDeleteSavingGoal={(id) => setSavingGoals(p => p.filter(x => x.id !== id))} onExportData={() => {}} onResetData={() => {}} onClose={() => setShowSettings(false)} currentBank={bankConnections[0] || {institution: '', status: 'unlinked', institutionType: 'bank', openingBalance: 0}} onResetBank={() => {}} />}
       {showBankModal && <BankSyncModal onSuccess={handleBankSuccess} onClose={() => setShowBankModal(false)} />}
     </div>
   );
 
   function handlePayRecurring(rec: RecurringExpense, amount: number) {
-    addTransaction({ amount, description: `Bill: ${rec.description}`, category: rec.category, type: 'expense', date: new Date().toISOString().split('T')[0], recurringId: rec.id });
+    addTransaction({ 
+      amount, 
+      description: `Bill: ${rec.description}`, 
+      category: rec.category, 
+      type: 'expense', 
+      date: new Date().toISOString().split('T')[0], 
+      recurringId: rec.id 
+    });
   }
   function handleReceiveRecurringIncome(inc: RecurringIncome, amount: number) {
     addTransaction({ amount, description: `Income: ${inc.description}`, category: inc.category, type: 'income', date: new Date().toISOString().split('T')[0], recurringId: inc.id });

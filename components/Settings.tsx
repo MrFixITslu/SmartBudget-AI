@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { CATEGORIES, RecurringExpense, RecurringIncome, SavingGoal, BankConnection } from '../types';
 
@@ -5,7 +6,7 @@ interface Props {
   salary: number;
   onUpdateSalary: (val: number) => void;
   recurringExpenses: RecurringExpense[];
-  onAddRecurring: (item: Omit<RecurringExpense, 'id' | 'balance'>) => void;
+  onAddRecurring: (item: Omit<RecurringExpense, 'id' | 'accumulatedOverdue'>) => void;
   onUpdateRecurring: (item: RecurringExpense) => void;
   onDeleteRecurring: (id: string) => void;
   recurringIncomes: RecurringIncome[];
@@ -23,8 +24,6 @@ interface Props {
 }
 
 const Settings: React.FC<Props> = ({ 
-  salary, 
-  onUpdateSalary, 
   recurringExpenses, 
   onAddRecurring, 
   onUpdateRecurring,
@@ -38,20 +37,17 @@ const Settings: React.FC<Props> = ({
   onDeleteSavingGoal,
   onExportData,
   onResetData,
-  onClose,
-  currentBank,
-  onResetBank
+  onClose
 }) => {
-  const [tempSalary, setTempSalary] = useState(salary.toString());
-  const [isSalarySaved, setIsSalarySaved] = useState(false);
-  
   // Recurring Bill Form State
   const [isAddingBill, setIsAddingBill] = useState(false);
   const [editingBill, setEditingBill] = useState<RecurringExpense | null>(null);
   const [billDesc, setBillDesc] = useState('');
   const [billAmount, setBillAmount] = useState('');
-  const [billCategory, setBillCategory] = useState(CATEGORIES[0]);
+  const [billCategory, setBillCategory] = useState('Utilities');
   const [billDay, setBillDay] = useState('1');
+  const [billDueDate, setBillDueDate] = useState(new Date().toISOString().split('T')[0]);
+  const [externalSync, setExternalSync] = useState(false);
 
   // Recurring Income Form State
   const [isAddingIncome, setIsAddingIncome] = useState(false);
@@ -60,6 +56,7 @@ const Settings: React.FC<Props> = ({
   const [incAmount, setIncAmount] = useState('');
   const [incCategory, setIncCategory] = useState('Income');
   const [incDay, setIncDay] = useState('1');
+  const [incConfirmDate, setIncConfirmDate] = useState(new Date().toISOString().split('T')[0]);
 
   // Savings Goal Form State
   const [isAddingGoal, setIsAddingGoal] = useState(false);
@@ -72,8 +69,10 @@ const Settings: React.FC<Props> = ({
   const resetBillForm = () => {
     setBillDesc('');
     setBillAmount('');
-    setBillCategory(CATEGORIES[0]);
+    setBillCategory('Utilities');
     setBillDay('1');
+    setBillDueDate(new Date().toISOString().split('T')[0]);
+    setExternalSync(false);
     setIsAddingBill(false);
     setEditingBill(null);
   };
@@ -83,6 +82,7 @@ const Settings: React.FC<Props> = ({
     setIncAmount('');
     setIncCategory('Income');
     setIncDay('1');
+    setIncConfirmDate(new Date().toISOString().split('T')[0]);
     setIsAddingIncome(false);
     setEditingIncome(null);
   };
@@ -100,14 +100,19 @@ const Settings: React.FC<Props> = ({
         amount: amount,
         category: billCategory,
         dayOfMonth: day,
-        balance: amount
+        nextDueDate: billDueDate,
+        externalSyncEnabled: externalSync,
+        externalPortalUrl: externalSync ? 'https://myaccount.lucelec.com/app/login.jsp' : undefined
       });
     } else {
       onAddRecurring({
         description: billDesc,
         amount: amount,
         category: billCategory,
-        dayOfMonth: day
+        dayOfMonth: day,
+        nextDueDate: billDueDate,
+        externalSyncEnabled: externalSync,
+        externalPortalUrl: externalSync ? 'https://myaccount.lucelec.com/app/login.jsp' : undefined
       });
     }
     resetBillForm();
@@ -125,14 +130,16 @@ const Settings: React.FC<Props> = ({
         description: incDesc,
         amount: amount,
         category: incCategory,
-        dayOfMonth: day
+        dayOfMonth: day,
+        nextConfirmationDate: incConfirmDate
       });
     } else {
       onAddRecurringIncome({
         description: incDesc,
         amount: amount,
         category: incCategory,
-        dayOfMonth: day
+        dayOfMonth: day,
+        nextConfirmationDate: incConfirmDate
       });
     }
     resetIncomeForm();
@@ -166,7 +173,7 @@ const Settings: React.FC<Props> = ({
         <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50">
           <div>
             <h2 className="text-2xl font-black text-slate-800">Configurations</h2>
-            <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">Setup Your Accounts</p>
+            <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">Setup Due Dates & Syncs</p>
           </div>
           <button onClick={onClose} className="w-12 h-12 flex items-center justify-center bg-white border border-slate-200 rounded-2xl text-slate-400 hover:text-slate-800 transition shadow-sm">
             <i className="fas fa-times text-xl"></i>
@@ -202,8 +209,8 @@ const Settings: React.FC<Props> = ({
                     <input type="number" step="0.01" value={incAmount} onChange={(e) => setIncAmount(e.target.value)} placeholder="0.00" className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-sm" />
                   </div>
                   <div>
-                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Day of Month</label>
-                    <input type="number" min="1" max="31" value={incDay} onChange={(e) => setIncDay(e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-sm" />
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Confirm Due Date</label>
+                    <input type="date" value={incConfirmDate} onChange={(e) => setIncConfirmDate(e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-sm" />
                   </div>
                 </div>
                 <button type="submit" className="w-full py-3 bg-indigo-600 text-white font-black rounded-xl shadow-lg shadow-indigo-100 uppercase tracking-widest text-[10px]">
@@ -217,7 +224,10 @@ const Settings: React.FC<Props> = ({
                 <div key={inc.id} className="flex items-center justify-between p-4 bg-emerald-50 border border-emerald-100 rounded-2xl">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-emerald-600 shadow-sm"><i className="fas fa-arrow-up"></i></div>
-                    <div><p className="font-black text-xs text-slate-800">{inc.description}</p><p className="text-[10px] text-slate-400 font-bold uppercase">Day {inc.dayOfMonth}</p></div>
+                    <div>
+                      <p className="font-black text-xs text-slate-800">{inc.description}</p>
+                      <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Due: {inc.nextConfirmationDate}</p>
+                    </div>
                   </div>
                   <div className="flex items-center gap-4">
                     <p className="font-black text-xs text-emerald-600">${inc.amount.toFixed(2)}</p>
@@ -248,21 +258,27 @@ const Settings: React.FC<Props> = ({
                 <div className="grid grid-cols-2 gap-4">
                   <div className="col-span-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Bill Name</label>
-                    <input type="text" value={billDesc} onChange={(e) => setBillDesc(e.target.value)} placeholder="e.g. Electricity" className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-sm" />
+                    <input type="text" value={billDesc} onChange={(e) => setBillDesc(e.target.value)} placeholder="e.g. Electricity (Lucelec)" className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-sm" />
                   </div>
                   <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Amount</label>
                     <input type="number" step="0.01" value={billAmount} onChange={(e) => setBillAmount(e.target.value)} placeholder="0.00" className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-sm" />
                   </div>
                   <div>
-                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Day of Month</label>
-                    <input type="number" min="1" max="31" value={billDay} onChange={(e) => setBillDay(e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-sm" />
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Payment Due Date</label>
+                    <input type="date" value={billDueDate} onChange={(e) => setBillDueDate(e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-sm" />
                   </div>
-                  <div className="col-span-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Category</label>
-                    <select value={billCategory} onChange={(e) => setBillCategory(e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-sm">
-                      {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
+                  <div className="col-span-2 flex items-center gap-3 p-4 bg-white border border-slate-100 rounded-2xl">
+                     <input 
+                       type="checkbox" 
+                       id="extSync"
+                       checked={externalSync}
+                       onChange={(e) => setExternalSync(e.target.checked)}
+                       className="w-5 h-5 accent-indigo-600"
+                     />
+                     <label htmlFor="extSync" className="text-xs font-black text-slate-600 uppercase tracking-widest cursor-pointer">
+                        Link to LUCELEC Portal (NeilV)
+                     </label>
                   </div>
                 </div>
                 <button type="submit" className="w-full py-3 bg-slate-900 text-white font-black rounded-xl shadow-lg uppercase tracking-widest text-[10px]">
@@ -273,13 +289,28 @@ const Settings: React.FC<Props> = ({
 
             <div className="space-y-3">
               {recurringExpenses.map(bill => (
-                <div key={bill.id} className="flex items-center justify-between p-4 bg-white border border-slate-200 rounded-2xl shadow-sm">
+                <div key={bill.id} className={`flex items-center justify-between p-4 bg-white border ${bill.accumulatedOverdue > 0 ? 'border-rose-200' : 'border-slate-200'} rounded-2xl shadow-sm`}>
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 shadow-sm"><i className="fas fa-file-invoice"></i></div>
-                    <div><p className="font-black text-xs text-slate-800">{bill.description}</p><p className="text-[10px] text-slate-400 font-bold uppercase">Day {bill.dayOfMonth} • {bill.category}</p></div>
+                    <div className={`w-10 h-10 ${bill.accumulatedOverdue > 0 ? 'bg-rose-50 text-rose-500' : 'bg-slate-50 text-slate-400'} rounded-xl flex items-center justify-center shadow-sm`}>
+                      <i className="fas fa-file-invoice"></i>
+                    </div>
+                    <div>
+                      <p className="font-black text-xs text-slate-800">
+                        {bill.description}
+                        {bill.externalSyncEnabled && <i className="fas fa-link ml-2 text-[8px] text-indigo-400"></i>}
+                      </p>
+                      <p className={`text-[10px] font-bold uppercase tracking-wider ${bill.accumulatedOverdue > 0 ? 'text-rose-400' : 'text-slate-400'}`}>
+                        Due: {bill.nextDueDate} {bill.accumulatedOverdue > 0 && `• OVERDUE`}
+                      </p>
+                    </div>
                   </div>
                   <div className="flex items-center gap-4">
-                    <p className="font-black text-xs text-rose-600">${bill.amount.toFixed(2)}</p>
+                    <div className="text-right">
+                      <p className={`font-black text-xs ${bill.accumulatedOverdue > 0 ? 'text-rose-600' : 'text-slate-900'}`}>
+                        ${(bill.amount + bill.accumulatedOverdue).toFixed(2)}
+                      </p>
+                      {bill.accumulatedOverdue > 0 && <p className="text-[8px] font-black text-rose-300 uppercase">Includes ${bill.accumulatedOverdue} debt</p>}
+                    </div>
                     <button onClick={() => onDeleteRecurring(bill.id)} className="text-slate-300 hover:text-rose-500"><i className="fas fa-trash-alt text-xs"></i></button>
                   </div>
                 </div>
@@ -360,11 +391,6 @@ const Settings: React.FC<Props> = ({
                   </div>
                 </div>
               ))}
-              {savingGoals.length === 0 && (
-                <div className="text-center py-8 bg-slate-50 border border-dashed border-slate-200 rounded-3xl">
-                  <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">No Savings Configured</p>
-                </div>
-              )}
             </div>
           </section>
 

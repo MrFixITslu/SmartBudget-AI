@@ -89,8 +89,11 @@ export interface RecurringExpense {
   category: string;
   description: string;
   dayOfMonth: number;
-  balance: number;
+  nextDueDate: string; // ISO Date String
+  accumulatedOverdue: number; // Sum of past missed payments
   lastBilledDate?: string;
+  externalPortalUrl?: string; // e.g. LUCELEC
+  externalSyncEnabled?: boolean;
 }
 
 export interface RecurringIncome {
@@ -99,6 +102,7 @@ export interface RecurringIncome {
   category: string;
   description: string;
   dayOfMonth: number;
+  nextConfirmationDate: string; // ISO Date String
   lastConfirmedDate?: string;
 }
 
@@ -112,7 +116,6 @@ export interface BudgetEvent {
   projectedBudget?: number;
 }
 
-// Added date property to EventItem to fix object literal error in EventPlanner.tsx
 export interface EventItem {
   id: string;
   description: string;
@@ -128,7 +131,6 @@ export const CATEGORIES = [
   'Health', 'Shopping', 'Education', 'Personal', 'Income', 'Savings', 'Other', 'Investments'
 ];
 
-// Added EVENT_ITEM_CATEGORIES and EventItemCategory to fix missing exported member error
 export const EVENT_ITEM_CATEGORIES = [
   'Venue', 'Catering', 'Decor', 'Entertainment', 'Staff', 'Marketing', 'Tickets', 'Donation', 'Other'
 ];

@@ -22,12 +22,17 @@ const TransactionForm: React.FC<Props> = ({ onAdd, initialData, onCancel }) => {
   const validate = () => {
     const newErrors: Record<string, string> = {};
     const amt = parseFloat(amount);
+    
+    // Strict positive validation
     if (isNaN(amt) || amt <= 0) {
-      newErrors.amount = "Amount must be greater than 0";
+      newErrors.amount = "Enter a positive number";
     }
-    if (!desc.trim()) {
-      newErrors.description = "Description is required";
+    
+    // Non-whitespace description validation
+    if (!desc || !desc.trim()) {
+      newErrors.description = "Description cannot be empty";
     }
+    
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -54,6 +59,12 @@ const TransactionForm: React.FC<Props> = ({ onAdd, initialData, onCancel }) => {
     setVendor('');
     setLineItems([]);
     setErrors({});
+  };
+
+  const setQuickDate = (offset: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() + offset);
+    setDate(d.toISOString().split('T')[0]);
   };
 
   return (
@@ -83,22 +94,28 @@ const TransactionForm: React.FC<Props> = ({ onAdd, initialData, onCancel }) => {
             step="0.01"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
-            className={`w-full p-4 bg-slate-50 border ${errors.amount ? 'border-rose-300 ring-2 ring-rose-50' : 'border-slate-100'} rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none font-black text-slate-800 text-lg`}
+            className={`w-full p-4 bg-slate-50 border ${errors.amount ? 'border-rose-300 ring-2 ring-rose-50' : 'border-slate-100'} rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none font-black text-slate-800 text-lg transition-all`}
             placeholder="0.00"
             required
             aria-invalid={errors.amount ? "true" : "false"}
           />
-          {errors.amount && <p className="text-[9px] font-bold text-rose-500 mt-1 ml-1">{errors.amount}</p>}
+          {errors.amount && <p className="text-[9px] font-bold text-rose-500 mt-1 ml-1 animate-pulse">{errors.amount}</p>}
         </div>
         <div>
           <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Date</label>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-slate-800 text-sm"
-            required
-          />
+          <div className="relative">
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-slate-800 text-sm"
+              required
+            />
+            <div className="flex gap-2 mt-2 ml-1">
+              <button type="button" onClick={() => setQuickDate(0)} className="text-[8px] font-black uppercase tracking-widest bg-slate-100 px-2 py-1 rounded hover:bg-indigo-100 hover:text-indigo-600 transition">Today</button>
+              <button type="button" onClick={() => setQuickDate(-1)} className="text-[8px] font-black uppercase tracking-widest bg-slate-100 px-2 py-1 rounded hover:bg-indigo-100 hover:text-indigo-600 transition">Yesterday</button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -115,13 +132,18 @@ const TransactionForm: React.FC<Props> = ({ onAdd, initialData, onCancel }) => {
         </div>
         <div>
           <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Category</label>
-          <select
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none font-black text-slate-700 text-sm appearance-none"
-          >
-            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
+          <div className="relative">
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none font-black text-slate-700 text-sm appearance-none cursor-pointer"
+            >
+              {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+              <i className="fas fa-chevron-down text-[10px]"></i>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -131,11 +153,11 @@ const TransactionForm: React.FC<Props> = ({ onAdd, initialData, onCancel }) => {
           type="text"
           value={desc}
           onChange={(e) => setDesc(e.target.value)}
-          className={`w-full p-4 bg-slate-50 border ${errors.description ? 'border-rose-300 ring-2 ring-rose-50' : 'border-slate-100'} rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-slate-800 text-sm`}
+          className={`w-full p-4 bg-slate-50 border ${errors.description ? 'border-rose-300 ring-2 ring-rose-50' : 'border-slate-100'} rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-slate-800 text-sm transition-all`}
           placeholder="What was this for?"
           required
         />
-        {errors.description && <p className="text-[9px] font-bold text-rose-500 mt-1 ml-1">{errors.description}</p>}
+        {errors.description && <p className="text-[9px] font-bold text-rose-500 mt-1 ml-1 animate-pulse">{errors.description}</p>}
       </div>
 
       {lineItems.length > 0 && (

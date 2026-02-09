@@ -30,6 +30,20 @@
             50% { opacity: 0.7; }
         }
         .animate-pulse-soft { animation: pulse-soft 3s infinite; }
+
+        /* Marquee Animation for Market Ticker */
+        @keyframes marquee {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-50%); }
+        }
+        .animate-marquee {
+            display: flex;
+            width: max-content;
+            animation: marquee 40s linear infinite;
+        }
+        .animate-marquee:hover {
+            animation-play-state: paused;
+        }
     </style>
 <script type="importmap">
 {

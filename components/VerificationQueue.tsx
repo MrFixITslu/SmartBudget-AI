@@ -25,12 +25,7 @@ const VerificationQueue: React.FC<Props> = ({ pendingItems, onApprove, onDiscard
             <p className="text-[9px] text-slate-400 font-bold uppercase">{pendingItems.length} Items Awaiting Review</p>
           </div>
         </div>
-        <button 
-          onClick={onDiscardAll}
-          className="text-[9px] font-black text-rose-500 uppercase tracking-widest hover:bg-rose-50 px-3 py-1.5 rounded-lg transition"
-        >
-          Discard All
-        </button>
+        <button onClick={onDiscardAll} className="text-[9px] font-black text-rose-500 uppercase tracking-widest hover:bg-rose-50 px-3 py-1.5 rounded-lg transition">Discard All</button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -42,49 +37,16 @@ const VerificationQueue: React.FC<Props> = ({ pendingItems, onApprove, onDiscard
                   <i className={`fas ${item.updateType === 'portfolio' ? 'fa-chart-line' : 'fa-receipt'}`}></i>
                 </div>
                 <div>
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                    {item.updateType === 'portfolio' ? 'Portfolio Adjustment' : 'Suggested Transaction'}
-                  </p>
-                  <p className="font-black text-sm text-slate-800">
-                    {item.updateType === 'portfolio' 
-                      ? `${item.portfolio?.provider}: Update ${item.portfolio?.symbol}`
-                      : item.transaction?.description || 'Extracted Entry'}
-                  </p>
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{item.updateType === 'portfolio' ? 'Portfolio Adjustment' : 'Suggested Transaction'}</p>
+                  <p className="font-black text-sm text-slate-800">{item.updateType === 'portfolio' ? `${item.portfolio?.provider}: Update ${item.portfolio?.symbol}` : item.transaction?.description || 'Extracted Entry'}</p>
                 </div>
               </div>
-              <p className="font-black text-slate-900">
-                {item.updateType === 'portfolio' 
-                  ? `${item.portfolio?.quantity}`
-                  : `$${item.transaction?.amount.toFixed(2)}`}
-              </p>
+              <p className="font-black text-slate-900">{item.updateType === 'portfolio' ? `${item.portfolio?.quantity || 0}` : `$${(item.transaction?.amount || 0).toFixed(2)}`}</p>
             </div>
-
-            {item.updateType === 'transaction' && item.transaction?.vendor && (
-              <div className="mb-4 px-3 py-2 bg-slate-50 rounded-xl border border-slate-100">
-                <p className="text-[8px] font-black text-slate-400 uppercase">Merchant Confidence</p>
-                <p className="text-[10px] font-bold text-slate-600">{item.transaction.vendor}</p>
-              </div>
-            )}
-
             <div className="flex gap-2">
-              <button 
-                onClick={() => onApprove(idx)}
-                className="flex-1 py-3 bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest rounded-xl shadow-lg hover:bg-slate-800 transition active:scale-95"
-              >
-                {item.updateType === 'portfolio' ? 'Sync Portfolio' : 'Quick Approve'}
-              </button>
-              <button 
-                onClick={() => onEdit(idx)}
-                className="px-4 py-3 bg-slate-100 text-slate-600 text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-slate-200 transition"
-              >
-                Edit
-              </button>
-              <button 
-                onClick={() => onDiscard(idx)}
-                className="w-12 py-3 bg-rose-50 text-rose-500 rounded-xl hover:bg-rose-100 transition"
-              >
-                <i className="fas fa-trash-alt"></i>
-              </button>
+              <button onClick={() => onApprove(idx)} className="flex-1 py-3 bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest rounded-xl shadow-lg hover:bg-slate-800 transition active:scale-95">{item.updateType === 'portfolio' ? 'Sync Portfolio' : 'Quick Approve'}</button>
+              <button onClick={() => onEdit(idx)} className="px-4 py-3 bg-slate-100 text-slate-600 text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-slate-200 transition">Edit</button>
+              <button onClick={() => onDiscard(idx)} className="w-12 py-3 bg-rose-50 text-rose-500 rounded-xl hover:bg-rose-100 transition"><i className="fas fa-trash-alt"></i></button>
             </div>
           </div>
         ))}

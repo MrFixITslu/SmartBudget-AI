@@ -16,6 +16,31 @@ import { Transaction, AIAnalysisResult, RecurringExpense, RecurringIncome, Savin
 const _U = "bnN2"; // nsv
 const _P = "JGgzcnchbg=="; // $h3rw!n
 
+const STORAGE_KEYS = {
+  TRANSACTIONS: 'budget_transactions',
+  RECURRING_EXPENSES: 'budget_recurring',
+  RECURRING_INCOMES: 'budget_recurring_incomes',
+  SAVINGS_GOALS: 'budget_savings_goals',
+  SALARY: 'budget_salary',
+  TARGET_MARGIN: 'budget_target_margin',
+  CATEGORY_LIMITS: 'budget_category_limits',
+  BANK_CONNECTIONS: 'budget_bank_conns',
+  INVESTMENTS: 'budget_investments',
+  EVENTS: 'budget_events',
+  REMINDERS: 'budget_reminders_enabled',
+  AUTH: 'ff_auth'
+};
+
+const safeParse = (key: string, fallback: any) => {
+  try {
+    const saved = localStorage.getItem(key);
+    return saved ? JSON.parse(saved) : fallback;
+  } catch (e) {
+    console.error(`Error parsing ${key}:`, e);
+    return fallback;
+  }
+};
+
 const generateId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
     return crypto.randomUUID();
@@ -25,103 +50,44 @@ const generateId = () => {
 
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    // Persistent auth using localStorage for "Auto Login"
-    return localStorage.getItem('ff_auth') === 'true';
+    return localStorage.getItem(STORAGE_KEYS.AUTH) === 'true';
   });
   const [activeTab, setActiveTab] = useState<'dashboard' | 'events'>('dashboard');
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
 
-  // Core State
-  const [transactions, setTransactions] = useState<Transaction[]>(() => {
-    const saved = localStorage.getItem('budget_transactions');
-    return saved ? JSON.parse(saved) : [];
-  });
-  
-  const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>(() => {
-    const saved = localStorage.getItem('budget_recurring');
-    return saved ? JSON.parse(saved) : [];
-  });
-
-  const [recurringIncomes, setRecurringIncomes] = useState<RecurringIncome[]>(() => {
-    const saved = localStorage.getItem('budget_recurring_incomes');
-    return saved ? JSON.parse(saved) : [];
-  });
-  
-  const [savingGoals, setSavingGoals] = useState<SavingGoal[]>(() => {
-    const saved = localStorage.getItem('budget_savings_goals');
-    return saved ? JSON.parse(saved) : [];
-  });
-  
-  const [salary, setSalary] = useState<number>(() => {
-    const saved = localStorage.getItem('budget_salary');
-    return saved ? parseFloat(saved) : 0;
-  });
-
-  const [targetMargin, setTargetMargin] = useState<number>(() => {
-    const saved = localStorage.getItem('budget_target_margin');
-    return saved ? parseFloat(saved) : 0;
-  });
-
-  const [categoryBudgets, setCategoryBudgets] = useState<Record<string, number>>(() => {
-    const saved = localStorage.getItem('budget_category_limits');
-    return saved ? JSON.parse(saved) : {};
-  });
-
-  const [bankConnections, setBankConnections] = useState<BankConnection[]>(() => {
-    const saved = localStorage.getItem('budget_bank_conns');
-    return saved ? JSON.parse(saved) : [];
-  });
-
-  const [investments, setInvestments] = useState<InvestmentAccount[]>(() => {
-    const saved = localStorage.getItem('budget_investments');
-    return saved ? JSON.parse(saved) : [];
-  });
-
-  const [events, setEvents] = useState<BudgetEvent[]>(() => {
-    const saved = localStorage.getItem('budget_events');
-    return saved ? JSON.parse(saved) : [];
-  });
+  // Core State - Loaded from LocalStorage
+  const [transactions, setTransactions] = useState<Transaction[]>(() => safeParse(STORAGE_KEYS.TRANSACTIONS, []));
+  const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>(() => safeParse(STORAGE_KEYS.RECURRING_EXPENSES, []));
+  const [recurringIncomes, setRecurringIncomes] = useState<RecurringIncome[]>(() => safeParse(STORAGE_KEYS.RECURRING_INCOMES, []));
+  const [savingGoals, setSavingGoals] = useState<SavingGoal[]>(() => safeParse(STORAGE_KEYS.SAVINGS_GOALS, []));
+  const [salary, setSalary] = useState<number>(() => parseFloat(localStorage.getItem(STORAGE_KEYS.SALARY) || '0'));
+  const [targetMargin, setTargetMargin] = useState<number>(() => parseFloat(localStorage.getItem(STORAGE_KEYS.TARGET_MARGIN) || '0'));
+  const [categoryBudgets, setCategoryBudgets] = useState<Record<string, number>>(() => safeParse(STORAGE_KEYS.CATEGORY_LIMITS, {}));
+  const [bankConnections, setBankConnections] = useState<BankConnection[]>(() => safeParse(STORAGE_KEYS.BANK_CONNECTIONS, []));
+  const [investments, setInvestments] = useState<InvestmentAccount[]>(() => safeParse(STORAGE_KEYS.INVESTMENTS, []));
+  const [events, setEvents] = useState<BudgetEvent[]>(() => safeParse(STORAGE_KEYS.EVENTS, []));
 
   // Notification State
   const [remindersEnabled, setRemindersEnabled] = useState<boolean>(() => {
-    return localStorage.getItem('budget_reminders_enabled') === 'true';
+    return localStorage.getItem(STORAGE_KEYS.REMINDERS) === 'true';
   });
 
   const [marketPrices, setMarketPrices] = useState<MarketPrice[]>([
     { symbol: 'BTC', price: 92450.00, change24h: 1.2 },
     { symbol: 'ETH', price: 2850.50, change24h: -0.5 },
-    { symbol: 'VOO', price: 545.12, change24h: 0.3 }
+    { symbol: 'SOL', price: 145.20, change24h: 2.1 },
+    { symbol: 'VOO', price: 545.12, change24h: 0.3 },
+    { symbol: 'VOOG', price: 310.45, change24h: 0.45 }
   ]);
 
-  // Verification Staging State
   const [pendingApprovals, setPendingApprovals] = useState<AIAnalysisResult[]>([]);
   const [editingApprovalIndex, setEditingApprovalIndex] = useState<number | null>(null);
-
   const [isLoading, setIsLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showBankModal, setShowBankModal] = useState(false);
   const [showManualEntry, setShowManualEntry] = useState(false);
 
-  useEffect(() => {
-    const handleRemoteLogin = () => {
-      const hash = window.location.hash;
-      if (hash.includes('u=') && hash.includes('p=')) {
-        const params = new URLSearchParams(hash.substring(1));
-        const u = params.get('u');
-        const p = params.get('p');
-        if (u && p) {
-          const success = handleLogin(u, p);
-          if (success) {
-            window.history.replaceState(null, "", window.location.pathname + window.location.search);
-          }
-        }
-      }
-    };
-    handleRemoteLogin();
-    window.addEventListener('hashchange', handleRemoteLogin);
-    return () => window.removeEventListener('hashchange', handleRemoteLogin);
-  }, []);
-
+  // Key Selection Check
   useEffect(() => {
     const checkKey = async () => {
       const aistudio = (window as any).aistudio;
@@ -135,64 +101,72 @@ const App: React.FC = () => {
     checkKey();
   }, []);
 
-  // DAILY NOTIFICATION REMINDER LOGIC
+  // Auth Handling
   useEffect(() => {
-    if (remindersEnabled && isAuthenticated) {
+    const handleRemoteLogin = () => {
+      const hash = window.location.hash;
+      if (hash.includes('u=') && hash.includes('p=')) {
+        const params = new URLSearchParams(hash.substring(1));
+        const u = params.get('u');
+        const p = params.get('p');
+        if (u && p) {
+          if (handleLogin(u, p)) {
+            window.history.replaceState(null, "", window.location.pathname + window.location.search);
+          }
+        }
+      }
+    };
+    handleRemoteLogin();
+    window.addEventListener('hashchange', handleRemoteLogin);
+    return () => window.removeEventListener('hashchange', handleRemoteLogin);
+  }, []);
+
+  // Auto-Save Effects (Persistence)
+  useEffect(() => { localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions)); }, [transactions]);
+  useEffect(() => { localStorage.setItem(STORAGE_KEYS.RECURRING_EXPENSES, JSON.stringify(recurringExpenses)); }, [recurringExpenses]);
+  useEffect(() => { localStorage.setItem(STORAGE_KEYS.RECURRING_INCOMES, JSON.stringify(recurringIncomes)); }, [recurringIncomes]);
+  useEffect(() => { localStorage.setItem(STORAGE_KEYS.SALARY, salary.toString()); }, [salary]);
+  useEffect(() => { localStorage.setItem(STORAGE_KEYS.TARGET_MARGIN, targetMargin.toString()); }, [targetMargin]);
+  useEffect(() => { localStorage.setItem(STORAGE_KEYS.CATEGORY_LIMITS, JSON.stringify(categoryBudgets)); }, [categoryBudgets]);
+  useEffect(() => { localStorage.setItem(STORAGE_KEYS.SAVINGS_GOALS, JSON.stringify(savingGoals)); }, [savingGoals]);
+  useEffect(() => { localStorage.setItem(STORAGE_KEYS.BANK_CONNECTIONS, JSON.stringify(bankConnections)); }, [bankConnections]);
+  useEffect(() => { localStorage.setItem(STORAGE_KEYS.INVESTMENTS, JSON.stringify(investments)); }, [investments]);
+  useEffect(() => { localStorage.setItem(STORAGE_KEYS.EVENTS, JSON.stringify(events)); }, [events]);
+  useEffect(() => { localStorage.setItem(STORAGE_KEYS.REMINDERS, remindersEnabled.toString()); }, [remindersEnabled]);
+
+  // Notifications
+  useEffect(() => {
+    if (remindersEnabled && isAuthenticated && ("Notification" in window)) {
       const lastNotifyDate = localStorage.getItem('budget_last_notify_date');
       const today = new Date().toISOString().split('T')[0];
       
       if (lastNotifyDate !== today) {
-        if ("Notification" in window) {
-          if (Notification.permission === "granted") {
-            new Notification("Fire Finance Pro", {
-              body: "Time to update your daily ledger! Any new coffee or utility bills?",
-              icon: "https://cdn-icons-png.flaticon.com/512/2654/2654504.png"
-            });
-            localStorage.setItem('budget_last_notify_date', today);
-          } else if (Notification.permission !== "denied") {
-            Notification.requestPermission().then(permission => {
-              if (permission === "granted") {
-                new Notification("Fire Finance Pro", {
-                  body: "Reminders enabled! We'll ping you daily to keep your budget on track.",
-                });
-                localStorage.setItem('budget_last_notify_date', today);
-              }
-            });
-          }
+        if (window.Notification.permission === "granted") {
+          new window.Notification("Fire Finance Pro", {
+            body: "Time to update your daily ledger! Any new coffee or utility bills?",
+            icon: "https://cdn-icons-png.flaticon.com/512/2654/2654504.png"
+          });
+          localStorage.setItem('budget_last_notify_date', today);
+        } else if (window.Notification.permission !== "denied") {
+          window.Notification.requestPermission().then(permission => {
+            if (permission === "granted") {
+              new window.Notification("Fire Finance Pro", {
+                body: "Reminders enabled! We'll ping you daily to keep your budget on track.",
+              });
+              localStorage.setItem('budget_last_notify_date', today);
+            }
+          });
         }
       }
     }
   }, [remindersEnabled, isAuthenticated]);
 
-  // OVERDUE CHECKER
-  useEffect(() => {
-    const now = new Date();
-    let updated = false;
-
-    const newRecurringExpenses = recurringExpenses.map(rec => {
-      const dueDate = new Date(rec.nextDueDate);
-      if (now > dueDate) {
-        updated = true;
-        const nextDate = new Date(dueDate);
-        nextDate.setMonth(nextDate.getMonth() + 1);
-        return {
-          ...rec,
-          accumulatedOverdue: rec.accumulatedOverdue + rec.amount,
-          nextDueDate: nextDate.toISOString().split('T')[0]
-        };
-      }
-      return rec;
-    });
-
-    if (updated) {
-      setRecurringExpenses(newRecurringExpenses);
-    }
-  }, [recurringExpenses.length]);
-
+  // Market Price Simulation
   useEffect(() => {
     const interval = setInterval(() => {
       setMarketPrices(prev => prev.map(p => {
-        const drift = (Math.random() - 0.48) * (p.symbol === 'BTC' ? 40 : 0.4);
+        const isCrypto = ['BTC', 'ETH', 'SOL'].includes(p.symbol);
+        const drift = (Math.random() - 0.48) * (isCrypto ? (p.symbol === 'BTC' ? 40 : 2) : 0.2);
         return { 
           ...p, 
           price: Math.max(0, p.price + drift),
@@ -202,18 +176,6 @@ const App: React.FC = () => {
     }, 5000);
     return () => clearInterval(interval);
   }, []);
-
-  useEffect(() => { localStorage.setItem('budget_transactions', JSON.stringify(transactions)); }, [transactions]);
-  useEffect(() => { localStorage.setItem('budget_recurring', JSON.stringify(recurringExpenses)); }, [recurringExpenses]);
-  useEffect(() => { localStorage.setItem('budget_recurring_incomes', JSON.stringify(recurringIncomes)); }, [recurringIncomes]);
-  useEffect(() => { localStorage.setItem('budget_salary', salary.toString()); }, [salary]);
-  useEffect(() => { localStorage.setItem('budget_target_margin', targetMargin.toString()); }, [targetMargin]);
-  useEffect(() => { localStorage.setItem('budget_category_limits', JSON.stringify(categoryBudgets)); }, [categoryBudgets]);
-  useEffect(() => { localStorage.setItem('budget_savings_goals', JSON.stringify(savingGoals)); }, [savingGoals]);
-  useEffect(() => { localStorage.setItem('budget_bank_conns', JSON.stringify(bankConnections)); }, [bankConnections]);
-  useEffect(() => { localStorage.setItem('budget_investments', JSON.stringify(investments)); }, [investments]);
-  useEffect(() => { localStorage.setItem('budget_events', JSON.stringify(events)); }, [events]);
-  useEffect(() => { localStorage.setItem('budget_reminders_enabled', remindersEnabled.toString()); }, [remindersEnabled]);
 
   const readilyAvailableFunds = useMemo(() => {
     const primaryBank = bankConnections.find(c => c.institution.includes('1st National'));
@@ -232,7 +194,7 @@ const App: React.FC = () => {
   const handleLogin = (u: string, p: string): boolean => {
     if (u === atob(_U) && p === atob(_P)) {
       setIsAuthenticated(true);
-      localStorage.setItem('ff_auth', 'true');
+      localStorage.setItem(STORAGE_KEYS.AUTH, 'true');
       return true;
     }
     return false;
@@ -240,8 +202,43 @@ const App: React.FC = () => {
 
   const handleLogout = () => {
     setIsAuthenticated(false);
-    localStorage.removeItem('ff_auth');
+    localStorage.removeItem(STORAGE_KEYS.AUTH);
     setShowSettings(false);
+  };
+
+  const handleExportData = () => {
+    const data: Record<string, any> = {};
+    Object.values(STORAGE_KEYS).forEach(key => {
+      const val = localStorage.getItem(key);
+      if (val) {
+        try {
+          data[key] = JSON.parse(val);
+        } catch {
+          data[key] = val;
+        }
+      }
+    });
+
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `fire-finance-backup-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleResetData = () => {
+    if (window.confirm("Are you absolutely sure you want to reset all your financial data? This cannot be undone.")) {
+      Object.values(STORAGE_KEYS).forEach(key => {
+        if (key !== STORAGE_KEYS.AUTH) {
+          localStorage.removeItem(key);
+        }
+      });
+      window.location.reload();
+    }
   };
 
   const handleAIAnalysis = (result: AIAnalysisResult) => {
@@ -299,44 +296,12 @@ const App: React.FC = () => {
     const newTransaction: Transaction = { ...t, id: generateId(), institution: finalInstitution };
     const transactionsToAdd: Transaction[] = [newTransaction];
     
-    // Auto-handling of savings logic
-    const descLower = t.description.toLowerCase();
-    const isSavingsTarget = descLower.includes('general saving') || descLower.includes('vacation saving');
-    if (isSavingsTarget && t.type === 'expense') {
-      transactionsToAdd.push({
-        id: generateId() + '-transfer',
-        amount: t.amount,
-        description: `Savings Transfer: ${t.description}`,
-        category: 'Savings',
-        type: 'income',
-        date: t.date,
-        institution: 'Laborie Cooperative Credit Union'
-      });
-    }
-
     setTransactions(prev => [...transactionsToAdd, ...prev]);
 
-    // Handle updates for recurring items
     if (t.recurringId) {
-       const targetExpense = recurringExpenses.find(r => r.id === t.recurringId);
-       if (targetExpense) {
-          const desc = targetExpense.description.toLowerCase();
-          let targetGoalName = '';
-          if (desc.includes('general saving')) targetGoalName = 'general savings';
-          else if (desc.includes('vacation saving')) targetGoalName = 'vacation';
-          else if (targetExpense.category === 'Savings') targetGoalName = desc;
-          if (targetGoalName) {
-            setSavingGoals(prevGoals => prevGoals.map(goal => {
-              if (goal.name.toLowerCase() === targetGoalName.toLowerCase()) {
-                return { ...goal, currentAmount: goal.currentAmount + t.amount };
-              }
-              return goal;
-            }));
-          }
-       }
        setRecurringExpenses(prev => prev.map(rec => {
           if (rec.id === t.recurringId) {
-             const totalDue = rec.amount + rec.accumulatedOverdue;
+             const totalDue = rec.amount + (rec.accumulatedOverdue || 0);
              if (t.amount >= totalDue) {
                 const dueDate = new Date(rec.nextDueDate);
                 dueDate.setMonth(dueDate.getMonth() + 1);
@@ -398,10 +363,8 @@ const App: React.FC = () => {
     }
   };
 
-  if (!isAuthenticated) {
-    return <Login onLogin={handleLogin} />;
-  }
-
+  if (!isAuthenticated) return <Login onLogin={handleLogin} />;
+  
   if (hasApiKey === false) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 text-center">
@@ -440,12 +403,7 @@ const App: React.FC = () => {
 
       <section className="mb-10 sticky top-4 z-30">
         <div className="max-w-2xl mx-auto bg-white/80 backdrop-blur-xl p-4 rounded-[2.5rem] border border-white shadow-2xl">
-          <MagicInput 
-            onSuccess={handleAIAnalysis} 
-            onBulkSuccess={handleBulkAIAnalysis} 
-            onLoading={setIsLoading} 
-            onManualEntry={() => setShowManualEntry(true)} 
-          />
+          <MagicInput onSuccess={handleAIAnalysis} onBulkSuccess={handleBulkAIAnalysis} onLoading={setIsLoading} onManualEntry={() => setShowManualEntry(true)} />
         </div>
       </section>
 
@@ -484,52 +442,24 @@ const App: React.FC = () => {
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-xl rounded-[3rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <div>
-                <h2 className="text-xl font-black text-slate-800">Record Transaction</h2>
-                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Manual Ledger Entry</p>
-              </div>
-              <button onClick={() => setShowManualEntry(false)} className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-slate-400 hover:text-slate-800 transition">
-                <i className="fas fa-times"></i>
-              </button>
+              <div><h2 className="text-xl font-black text-slate-800">Record Transaction</h2><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Manual Ledger Entry</p></div>
+              <button onClick={() => setShowManualEntry(false)} className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-slate-400 hover:text-slate-800 transition"><i className="fas fa-times"></i></button>
             </div>
-            <div className="p-2">
-              <TransactionForm 
-                bankConnections={bankConnections}
-                onAdd={(t) => { addTransaction(t); setShowManualEntry(false); }} 
-                onCancel={() => setShowManualEntry(false)} 
-              />
-            </div>
+            <div className="p-2"><TransactionForm bankConnections={bankConnections} onAdd={(t) => { addTransaction(t); setShowManualEntry(false); }} onCancel={() => setShowManualEntry(false)} /></div>
           </div>
         </div>
       )}
 
       {showSettings && (
         <Settings 
-          salary={salary} 
-          onUpdateSalary={setSalary} 
-          targetMargin={targetMargin} 
-          onUpdateTargetMargin={setTargetMargin}
-          categoryBudgets={categoryBudgets}
-          onUpdateCategoryBudgets={setCategoryBudgets}
-          recurringExpenses={recurringExpenses} 
-          onAddRecurring={(b) => setRecurringExpenses(p => [...p, {...b, id: generateId(), accumulatedOverdue: 0}])} 
-          onUpdateRecurring={(b) => setRecurringExpenses(p => p.map(x => x.id === b.id ? b : x))} 
-          onDeleteRecurring={(id) => setRecurringExpenses(p => p.filter(x => x.id !== id))} 
-          recurringIncomes={recurringIncomes} 
-          onAddRecurringIncome={(i) => setRecurringIncomes(p => [...p, {...i, id: generateId()}])} 
-          onUpdateRecurringIncome={(i) => setRecurringIncomes(p => p.map(x => x.id === i.id ? i : x))} 
-          onDeleteRecurringIncome={(id) => setRecurringIncomes(p => p.filter(x => x.id !== id))} 
-          savingGoals={savingGoals} 
-          onAddSavingGoal={(g) => setSavingGoals(p => [...p, {...g, id: generateId(), currentAmount: g.openingBalance}])} 
-          onDeleteSavingGoal={(id) => setSavingGoals(p => p.filter(x => x.id !== id))} 
-          onExportData={() => {}} 
-          onResetData={() => {}} 
-          onClose={() => setShowSettings(false)} 
-          onLogout={handleLogout}
-          remindersEnabled={remindersEnabled}
-          onToggleReminders={setRemindersEnabled}
-          currentBank={bankConnections[0] || {institution: '', status: 'unlinked', institutionType: 'bank', openingBalance: 0}} 
-          onResetBank={() => {}} 
+          salary={salary} onUpdateSalary={setSalary} targetMargin={targetMargin} onUpdateTargetMargin={setTargetMargin}
+          categoryBudgets={categoryBudgets} onUpdateCategoryBudgets={setCategoryBudgets}
+          recurringExpenses={recurringExpenses} onAddRecurring={(b) => setRecurringExpenses(p => [...p, {...b, id: generateId(), accumulatedOverdue: 0}])} onUpdateRecurring={(b) => setRecurringExpenses(p => p.map(x => x.id === b.id ? b : x))} onDeleteRecurring={(id) => setRecurringExpenses(p => p.filter(x => x.id !== id))} 
+          recurringIncomes={recurringIncomes} onAddRecurringIncome={(i) => setRecurringIncomes(p => [...p, {...i, id: generateId()}])} onUpdateRecurringIncome={(i) => setRecurringIncomes(p => p.map(x => x.id === i.id ? i : x))} onDeleteRecurringIncome={(id) => setRecurringIncomes(p => p.filter(x => x.id !== id))} 
+          savingGoals={savingGoals} onAddSavingGoal={(g) => setSavingGoals(p => [...p, {...g, id: generateId(), currentAmount: g.openingBalance}])} onDeleteSavingGoal={(id) => setSavingGoals(p => p.filter(x => x.id !== id))} 
+          onExportData={handleExportData} onResetData={handleResetData} onClose={() => setShowSettings(false)} onLogout={handleLogout}
+          remindersEnabled={remindersEnabled} onToggleReminders={setRemindersEnabled}
+          currentBank={bankConnections[0] || {institution: '', status: 'unlinked', institutionType: 'bank', openingBalance: 0}} onResetBank={() => {}} 
         />
       )}
       {showBankModal && <BankSyncModal onSuccess={handleBankSuccess} onClose={() => setShowBankModal(false)} />}

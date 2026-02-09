@@ -46,6 +46,15 @@ const Dashboard: React.FC<Props> = ({
 
   const currentMonth = useMemo(() => new Date().toISOString().substring(0, 7), []);
 
+  const cycleStartDate = useMemo(() => {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 25);
+    if (now.getDate() < 25) {
+      start.setMonth(start.getMonth() - 1);
+    }
+    return start;
+  }, []);
+
   const institutionalBalances = useMemo<Record<string, InstitutionalBalance>>(() => {
     const balances: Record<string, InstitutionalBalance> = {};
     bankConnections.forEach(conn => {
@@ -161,26 +170,49 @@ const Dashboard: React.FC<Props> = ({
   const cycleIncomeTotal = useMemo(() => cycleIncomes.reduce((acc, i) => acc + i.amount, 0), [cycleIncomes]);
 
   const isBillPaidInCycle = (bill: RecurringExpense) => {
-    const now = new Date();
-    return new Date(bill.nextDueDate) > now && (bill.accumulatedOverdue || 0) === 0;
+    return transactions.some(t => 
+      t.recurringId === bill.id && 
+      new Date(t.date) >= cycleStartDate && 
+      t.type === 'expense'
+    );
   };
 
   const isIncomeReceivedInCycle = (income: RecurringIncome) => {
-    const now = new Date();
-    return new Date(income.nextConfirmationDate) > now;
+    return transactions.some(t => 
+      t.recurringId === income.id && 
+      new Date(t.date) >= cycleStartDate && 
+      t.type === 'income'
+    );
   };
+
+  const settlementProgress = useMemo(() => {
+    const totalItems = cycleBills.length + cycleIncomes.length;
+    if (totalItems === 0) return 0;
+    const settledIncomes = cycleIncomes.filter(isIncomeReceivedInCycle).length;
+    const settledBills = cycleBills.filter(isBillPaidInCycle).length;
+    return ((settledIncomes + settledBills) / totalItems) * 100;
+  }, [cycleBills, cycleIncomes, transactions, cycleStartDate]);
 
   const handleSyncLucelec = async (id: string) => { setIsSyncingPortal(id); await syncLucelecPortal(); setIsSyncingPortal(null); };
 
   const renderIncomeCard = (income: RecurringIncome) => {
     const received = isIncomeReceivedInCycle(income);
     return (
-      <div key={income.id} className={`p-5 border-2 rounded-[2rem] transition-all ${received ? 'bg-emerald-50/30 border-emerald-100 opacity-60' : 'bg-white border-slate-100 shadow-sm'} flex items-center justify-between group`}>
+      <div key={income.id} className={`p-5 border-2 rounded-[2rem] transition-all ${received ? 'bg-emerald-50/30 border-emerald-100 opacity-60 scale-[0.98]' : 'bg-white border-slate-100 shadow-sm'} flex items-center justify-between group`}>
         <div className="flex items-center gap-4">
-          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-lg ${received ? 'bg-slate-200 text-slate-400' : 'bg-emerald-500 text-white shadow-lg'}`}><i className="fas fa-hand-holding-dollar"></i></div>
-          <div><p className={`font-black text-sm ${received ? 'text-slate-400' : 'text-slate-800'}`}>{income.description}</p><p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{received ? `Expected next: ${income.nextConfirmationDate}` : `Expected on the ${income.dayOfMonth}th`}</p></div>
+          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-lg ${received ? 'bg-slate-200 text-slate-400' : 'bg-emerald-500 text-white shadow-lg shadow-emerald-100 animate-pulse-soft'}`}><i className="fas fa-hand-holding-dollar"></i></div>
+          <div>
+            <p className={`font-black text-sm ${received ? 'text-slate-400' : 'text-slate-800'}`}>{income.description}</p>
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{received ? `Cleared on Cycle Start` : `Expected: the ${income.dayOfMonth}th`}</p>
+          </div>
         </div>
-        <div className="flex items-center gap-6"><div className="text-right"><p className={`font-black text-base ${received ? 'text-slate-300' : 'text-emerald-600'}`}>+${income.amount.toFixed(2)}</p>{received && <span className="text-[8px] font-black text-emerald-500 uppercase tracking-widest bg-emerald-50 px-2 py-0.5 rounded">Settled</span>}</div>{!received && <button onClick={() => onReceiveRecurringIncome(income, income.amount)} className="px-4 py-2 bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-slate-900 transition-all shadow-md active:scale-95">Confirm</button>}</div>
+        <div className="flex items-center gap-6">
+          <div className="text-right">
+            <p className={`font-black text-base ${received ? 'text-slate-300' : 'text-emerald-600'}`}>+${income.amount.toFixed(2)}</p>
+            {received ? <span className="text-[8px] font-black text-emerald-500 uppercase tracking-widest bg-emerald-50 px-2 py-0.5 rounded">Settled</span> : <span className="text-[8px] font-black text-amber-500 uppercase tracking-widest bg-amber-50 px-2 py-0.5 rounded">Pending</span>}
+          </div>
+          {!received && <button onClick={() => onReceiveRecurringIncome(income, income.amount)} className="px-4 py-2 bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-slate-900 transition-all shadow-md active:scale-95">Confirm</button>}
+        </div>
       </div>
     );
   };
@@ -190,22 +222,26 @@ const Dashboard: React.FC<Props> = ({
     const totalToPay = bill.amount + (bill.accumulatedOverdue || 0);
     const currentInput = paymentInputs[bill.id] || totalToPay.toString();
     return (
-      <div key={bill.id} className={`p-6 border-2 transition-all duration-300 ${paid ? 'bg-slate-50/50 border-slate-100 opacity-70 grayscale-[0.5]' : (bill.accumulatedOverdue || 0) > 0 ? 'bg-white border-rose-100 shadow-xl shadow-rose-50/20' : 'bg-white border-slate-100 shadow-sm'} rounded-[2.5rem] group relative`}>
-        {paid && <div className="absolute top-4 right-6 flex items-center gap-2 text-[8px] font-black text-emerald-500 uppercase tracking-[0.2em] border border-emerald-200 px-3 py-1.5 rounded-full bg-emerald-50 shadow-sm animate-in fade-in zoom-in"><i className="fas fa-check-circle"></i> Settled</div>}
+      <div key={bill.id} className={`p-6 border-2 transition-all duration-300 ${paid ? 'bg-slate-50/50 border-slate-100 opacity-70 scale-[0.98] grayscale-[0.5]' : (bill.accumulatedOverdue || 0) > 0 ? 'bg-white border-rose-100 shadow-xl shadow-rose-50/20' : 'bg-white border-slate-100 shadow-sm'} rounded-[2.5rem] group relative`}>
+        {paid && <div className="absolute top-4 right-6 flex items-center gap-2 text-[8px] font-black text-emerald-500 uppercase tracking-[0.2em] border border-emerald-200 px-3 py-1.5 rounded-full bg-emerald-50 shadow-sm animate-in fade-in zoom-in"><i className="fas fa-check-circle"></i> Paid</div>}
         <div className={`flex flex-col ${isCompact ? 'lg:flex-col' : 'lg:flex-row lg:items-center'} justify-between gap-6`}>
-          <div className="flex items-center gap-5"><div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-xl shadow-lg transition-all duration-500 ${paid ? 'bg-slate-200 text-slate-400' : (bill.accumulatedOverdue || 0) > 0 ? 'bg-rose-500 text-white rotate-3' : 'bg-indigo-600 text-white'}`}><i className={`fas ${bill.externalSyncEnabled ? 'fa-plug' : 'fa-file-invoice'}`}></i></div><div><p className={`font-black text-base ${paid ? 'text-slate-400' : 'text-slate-800'} flex items-center gap-2`}>{bill.description}{bill.externalSyncEnabled && !paid && <button onClick={() => handleSyncLucelec(bill.id)} disabled={isSyncingPortal === bill.id} className={`text-[8px] px-2 py-1 rounded font-black uppercase transition-all ${isSyncingPortal === bill.id ? 'bg-amber-100 text-amber-600 animate-pulse' : 'bg-indigo-50 text-indigo-500 hover:bg-indigo-600 hover:text-white'}`}>{isSyncingPortal === bill.id ? 'Syncing...' : 'Sync NeilV'}</button>}</p><p className={`text-[10px] font-black uppercase tracking-widest ${paid ? 'text-slate-300' : (bill.accumulatedOverdue || 0) > 0 ? 'text-rose-500' : 'text-slate-400'}`}>{paid ? `Next: ${bill.nextDueDate}` : `Due: the ${bill.dayOfMonth}th • $${bill.amount} Base`}</p></div></div>
+          <div className="flex items-center gap-5">
+            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-xl shadow-lg transition-all duration-500 ${paid ? 'bg-slate-200 text-slate-400' : (bill.accumulatedOverdue || 0) > 0 ? 'bg-rose-500 text-white rotate-3' : 'bg-indigo-600 text-white animate-pulse-soft'}`}><i className={`fas ${bill.externalSyncEnabled ? 'fa-plug' : 'fa-file-invoice'}`}></i></div>
+            <div>
+              <p className={`font-black text-base ${paid ? 'text-slate-400' : 'text-slate-800'} flex items-center gap-2`}>{bill.description}{bill.externalSyncEnabled && !paid && <button onClick={() => handleSyncLucelec(bill.id)} disabled={isSyncingPortal === bill.id} className={`text-[8px] px-2 py-1 rounded font-black uppercase transition-all ${isSyncingPortal === bill.id ? 'bg-amber-100 text-amber-600 animate-pulse' : 'bg-indigo-50 text-indigo-500 hover:bg-indigo-600 hover:text-white'}`}>{isSyncingPortal === bill.id ? 'Syncing...' : 'Sync NeilV'}</button>}</p>
+              <p className={`text-[10px] font-black uppercase tracking-widest ${paid ? 'text-slate-300' : (bill.accumulatedOverdue || 0) > 0 ? 'text-rose-500' : 'text-slate-400'}`}>{paid ? `Settled for Cycle` : `Due: the ${bill.dayOfMonth}th • $${bill.amount} Base`}</p>
+            </div>
+          </div>
           <div className="flex flex-wrap items-center gap-4 lg:gap-8"><div className="text-right min-w-[100px]"><p className={`text-xl font-black transition-colors ${paid ? 'text-slate-300' : (bill.accumulatedOverdue || 0) > 0 ? 'text-rose-600' : 'text-slate-900'}`}>${totalToPay.toFixed(2)}</p><p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Required</p></div><div className={`flex items-center gap-2 p-2 rounded-2xl border transition-all ${paid ? 'bg-slate-100 border-transparent' : 'bg-slate-50 border-slate-200'}`}><input type="number" step="0.01" disabled={paid} className={`w-24 px-3 py-2 border-none rounded-xl text-xs font-black outline-none transition-all ${paid ? 'bg-transparent text-slate-300' : 'bg-white focus:ring-2 focus:ring-indigo-500 text-slate-800'}`} value={paid ? '0.00' : currentInput} onChange={(e) => setPaymentInputs(prev => ({ ...prev, [bill.id]: e.target.value }))} /><button disabled={paid} onClick={() => { const amt = parseFloat(currentInput); if (!isNaN(amt) && amt > 0) { onPayRecurring(bill, amt); setPaymentInputs(prev => { const next = {...prev}; delete next[bill.id]; return next; }); } }} className={`px-5 py-2.5 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all shadow-lg active:scale-95 ${paid ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none' : 'bg-indigo-600 text-white hover:bg-slate-900'}`}>{paid ? 'Paid' : (parseFloat(currentInput) >= totalToPay ? 'Full Pay' : 'Partial')}</button></div></div>
         </div>
       </div>
     );
   };
 
-  // Helper component for the scrolling ticker
   const MarketTicker = ({ prices }: { prices: MarketPrice[] }) => {
     return (
       <div className="w-full bg-white/40 backdrop-blur-md border border-slate-200/60 overflow-hidden py-3 mb-8 rounded-[1.5rem] shadow-sm">
         <div className="animate-marquee whitespace-nowrap flex items-center gap-12">
-          {/* Double the list for seamless loop */}
           {[...prices, ...prices].map((p, idx) => (
             <div key={idx} className="flex items-center gap-3">
                <div className="w-6 h-6 rounded-lg bg-slate-900 flex items-center justify-center text-[8px] font-black text-white">
@@ -228,7 +264,6 @@ const Dashboard: React.FC<Props> = ({
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      {/* Real-time Market Ticker */}
       <MarketTicker prices={marketPrices} />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
@@ -273,22 +308,26 @@ const Dashboard: React.FC<Props> = ({
       </section>
 
       <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-10">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
           <div>
             <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em]">Monthly Checklist & P&L Summary</h3>
             <p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-widest">Verify All Recurring Incomes & Monthly Bills</p>
           </div>
           <div className="flex items-center gap-6">
              <div className="text-right">
-                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Monthly Net</p>
-                <p className={`text-sm font-black ${(cycleIncomeTotal - cycleBillTotal) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                  ${(cycleIncomeTotal - cycleBillTotal).toLocaleString()}
+                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Settlement Progress</p>
+                <p className={`text-sm font-black ${settlementProgress >= 100 ? 'text-emerald-600' : 'text-indigo-600'}`}>
+                  {settlementProgress.toFixed(0)}% Cleared
                 </p>
              </div>
              <div className="w-10 h-10 bg-slate-900 text-white rounded-xl flex items-center justify-center">
                 <i className="fas fa-calendar-check"></i>
              </div>
           </div>
+        </div>
+        
+        <div className="w-full h-2 bg-slate-100 rounded-full mb-10 overflow-hidden">
+          <div className="h-full bg-emerald-500 transition-all duration-1000" style={{ width: `${settlementProgress}%` }}></div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">

@@ -31,28 +31,6 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'events'>('dashboard');
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
 
-  // REMOTE LOGIN HANDLER
-  useEffect(() => {
-    const handleRemoteLogin = () => {
-      const hash = window.location.hash;
-      if (hash.includes('u=') && hash.includes('p=')) {
-        const params = new URLSearchParams(hash.substring(1));
-        const u = params.get('u');
-        const p = params.get('p');
-        if (u && p) {
-          const success = handleLogin(u, p);
-          if (success) {
-            // Clear hash after successful remote login
-            window.history.replaceState(null, "", window.location.pathname + window.location.search);
-          }
-        }
-      }
-    };
-    handleRemoteLogin();
-    window.addEventListener('hashchange', handleRemoteLogin);
-    return () => window.removeEventListener('hashchange', handleRemoteLogin);
-  }, []);
-
   // Core State
   const [transactions, setTransactions] = useState<Transaction[]>(() => {
     const saved = localStorage.getItem('budget_transactions');
@@ -84,6 +62,11 @@ const App: React.FC = () => {
     return saved ? parseFloat(saved) : 0;
   });
 
+  const [categoryBudgets, setCategoryBudgets] = useState<Record<string, number>>(() => {
+    const saved = localStorage.getItem('budget_category_limits');
+    return saved ? JSON.parse(saved) : {};
+  });
+
   const [bankConnections, setBankConnections] = useState<BankConnection[]>(() => {
     const saved = localStorage.getItem('budget_bank_conns');
     return saved ? JSON.parse(saved) : [];
@@ -97,6 +80,11 @@ const App: React.FC = () => {
   const [events, setEvents] = useState<BudgetEvent[]>(() => {
     const saved = localStorage.getItem('budget_events');
     return saved ? JSON.parse(saved) : [];
+  });
+
+  // Notification State
+  const [remindersEnabled, setRemindersEnabled] = useState<boolean>(() => {
+    return localStorage.getItem('budget_reminders_enabled') === 'true';
   });
 
   const [marketPrices, setMarketPrices] = useState<MarketPrice[]>([
@@ -115,6 +103,26 @@ const App: React.FC = () => {
   const [showManualEntry, setShowManualEntry] = useState(false);
 
   useEffect(() => {
+    const handleRemoteLogin = () => {
+      const hash = window.location.hash;
+      if (hash.includes('u=') && hash.includes('p=')) {
+        const params = new URLSearchParams(hash.substring(1));
+        const u = params.get('u');
+        const p = params.get('p');
+        if (u && p) {
+          const success = handleLogin(u, p);
+          if (success) {
+            window.history.replaceState(null, "", window.location.pathname + window.location.search);
+          }
+        }
+      }
+    };
+    handleRemoteLogin();
+    window.addEventListener('hashchange', handleRemoteLogin);
+    return () => window.removeEventListener('hashchange', handleRemoteLogin);
+  }, []);
+
+  useEffect(() => {
     const checkKey = async () => {
       const aistudio = (window as any).aistudio;
       if (aistudio) {
@@ -126,6 +134,35 @@ const App: React.FC = () => {
     };
     checkKey();
   }, []);
+
+  // DAILY NOTIFICATION REMINDER LOGIC
+  useEffect(() => {
+    if (remindersEnabled && isAuthenticated) {
+      const lastNotifyDate = localStorage.getItem('budget_last_notify_date');
+      const today = new Date().toISOString().split('T')[0];
+      
+      if (lastNotifyDate !== today) {
+        if ("Notification" in window) {
+          if (Notification.permission === "granted") {
+            new Notification("Fire Finance Pro", {
+              body: "Time to update your daily ledger! Any new coffee or utility bills?",
+              icon: "https://cdn-icons-png.flaticon.com/512/2654/2654504.png"
+            });
+            localStorage.setItem('budget_last_notify_date', today);
+          } else if (Notification.permission !== "denied") {
+            Notification.requestPermission().then(permission => {
+              if (permission === "granted") {
+                new Notification("Fire Finance Pro", {
+                  body: "Reminders enabled! We'll ping you daily to keep your budget on track.",
+                });
+                localStorage.setItem('budget_last_notify_date', today);
+              }
+            });
+          }
+        }
+      }
+    }
+  }, [remindersEnabled, isAuthenticated]);
 
   // OVERDUE CHECKER
   useEffect(() => {
@@ -171,10 +208,12 @@ const App: React.FC = () => {
   useEffect(() => { localStorage.setItem('budget_recurring_incomes', JSON.stringify(recurringIncomes)); }, [recurringIncomes]);
   useEffect(() => { localStorage.setItem('budget_salary', salary.toString()); }, [salary]);
   useEffect(() => { localStorage.setItem('budget_target_margin', targetMargin.toString()); }, [targetMargin]);
+  useEffect(() => { localStorage.setItem('budget_category_limits', JSON.stringify(categoryBudgets)); }, [categoryBudgets]);
   useEffect(() => { localStorage.setItem('budget_savings_goals', JSON.stringify(savingGoals)); }, [savingGoals]);
   useEffect(() => { localStorage.setItem('budget_bank_conns', JSON.stringify(bankConnections)); }, [bankConnections]);
   useEffect(() => { localStorage.setItem('budget_investments', JSON.stringify(investments)); }, [investments]);
   useEffect(() => { localStorage.setItem('budget_events', JSON.stringify(events)); }, [events]);
+  useEffect(() => { localStorage.setItem('budget_reminders_enabled', remindersEnabled.toString()); }, [remindersEnabled]);
 
   const readilyAvailableFunds = useMemo(() => {
     const primaryBank = bankConnections.find(c => c.institution.includes('1st National'));
@@ -423,6 +462,7 @@ const App: React.FC = () => {
               marketPrices={marketPrices}
               bankConnections={bankConnections} 
               targetMargin={targetMargin}
+              categoryBudgets={categoryBudgets}
               onEdit={updateTransaction} 
               onDelete={(id) => setTransactions(prev => prev.filter(t => t.id !== id))}
               onPayRecurring={handlePayRecurring} 
@@ -468,7 +508,9 @@ const App: React.FC = () => {
           salary={salary} 
           onUpdateSalary={setSalary} 
           targetMargin={targetMargin} 
-          onUpdateTargetMargin={setTargetMargin} 
+          onUpdateTargetMargin={setTargetMargin}
+          categoryBudgets={categoryBudgets}
+          onUpdateCategoryBudgets={setCategoryBudgets}
           recurringExpenses={recurringExpenses} 
           onAddRecurring={(b) => setRecurringExpenses(p => [...p, {...b, id: generateId(), accumulatedOverdue: 0}])} 
           onUpdateRecurring={(b) => setRecurringExpenses(p => p.map(x => x.id === b.id ? b : x))} 
@@ -484,6 +526,8 @@ const App: React.FC = () => {
           onResetData={() => {}} 
           onClose={() => setShowSettings(false)} 
           onLogout={handleLogout}
+          remindersEnabled={remindersEnabled}
+          onToggleReminders={setRemindersEnabled}
           currentBank={bankConnections[0] || {institution: '', status: 'unlinked', institutionType: 'bank', openingBalance: 0}} 
           onResetBank={() => {}} 
         />

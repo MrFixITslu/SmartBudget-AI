@@ -22,6 +22,7 @@ interface Props {
   marketPrices: MarketPrice[];
   bankConnections: BankConnection[];
   targetMargin: number;
+  categoryBudgets: Record<string, number>;
   onEdit: (t: Transaction) => void;
   onDelete: (id: string) => void;
   onPayRecurring: (rec: RecurringExpense, amount: number) => void;
@@ -35,7 +36,7 @@ interface Props {
 type Timeframe = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
 const Dashboard: React.FC<Props> = ({ 
-  transactions, investments, marketPrices, bankConnections, recurringExpenses, recurringIncomes, savingGoals, targetMargin, onWithdrawal, onDelete, onPayRecurring, onReceiveRecurringIncome, onEdit
+  transactions, investments, marketPrices, bankConnections, recurringExpenses, recurringIncomes, savingGoals, targetMargin, categoryBudgets, onWithdrawal, onDelete, onPayRecurring, onReceiveRecurringIncome, onEdit
 }) => {
   const [paymentInputs, setPaymentInputs] = useState<Record<string, string>>({});
   const [isSyncingPortal, setIsSyncingPortal] = useState<string | null>(null);
@@ -108,14 +109,54 @@ const Dashboard: React.FC<Props> = ({
   );
   const safetyMargin = totalMonthlyRecurringIncome - totalMonthlyRecurringExpenses - totalOverdue;
 
-  // Calculate Days until 25th for Safe Spend
+  // Monthly Budget Analytics
+  const currentMonth = new Date().toISOString().substring(0, 7);
+  const currentMonthTransactions = useMemo(() => 
+    transactions.filter(t => t.date.startsWith(currentMonth) && t.type === 'expense'),
+    [transactions, currentMonth]
+  );
+
+  const categorySpendActual = useMemo(() => {
+    const totals: Record<string, number> = {};
+    currentMonthTransactions.forEach(t => {
+      totals[t.category] = (totals[t.category] || 0) + t.amount;
+    });
+    return totals;
+  }, [currentMonthTransactions]);
+
+  const budgetProgressItems = useMemo(() => {
+    // FIX: Explicitly cast Object.entries to fix "unknown" type errors in filter and division operations
+    return (Object.entries(categoryBudgets) as [string, number][])
+      .filter(([_, limit]) => limit > 0)
+      .map(([cat, limit]) => {
+        const actual = categorySpendActual[cat] || 0;
+        return {
+          category: cat,
+          limit,
+          actual,
+          percent: Math.min(100, (actual / limit) * 100)
+        };
+      })
+      .sort((a, b) => b.percent - a.percent);
+  }, [categoryBudgets, categorySpendActual]);
+
+  const totalBudgetAllocated = useMemo(() => 
+    // FIX: Explicitly cast Object.values to fix "unknown" type error in addition operation
+    (Object.values(categoryBudgets) as number[]).reduce((acc, v) => acc + v, 0),
+    [categoryBudgets]
+  );
+
+  const remainingBudgetOverall = useMemo(() => {
+    return budgetProgressItems.reduce((acc, item) => acc + Math.max(0, item.limit - item.actual), 0);
+  }, [budgetProgressItems]);
+
+  // Safe Spend calculation including flexible budgets
   const { daysUntil25th, dailySpendLimit } = useMemo(() => {
     const now = new Date();
     const year = now.getFullYear();
     const month = now.getMonth();
     
     let target = new Date(year, month, 25);
-    // If today is past the 25th, target the 25th of next month
     if (now.getDate() >= 25) {
       target = new Date(year, month + 1, 25);
     }
@@ -124,11 +165,17 @@ const Dashboard: React.FC<Props> = ({
     const diffDays = Math.ceil(diff / (1000 * 60 * 60 * 24));
     const safeDays = Math.max(1, diffDays);
     
+    // We base daily spend on the safety margin MINUS whatever is still left in our flexible budgets
+    const usableMargin = safetyMargin - totalBudgetAllocated;
+    // However, if we've already spent some of that budget, we should add back what's already recorded
+    // Usable = (Margin - Budgets) + RemainingBudget? 
+    // Simplified: Safe spend is whatever is left in the margin after all bills and ALL budget allocations.
+    
     return {
       daysUntil25th: safeDays,
-      dailySpendLimit: safetyMargin > 0 ? safetyMargin / safeDays : 0
+      dailySpendLimit: usableMargin > 0 ? usableMargin / safeDays : 0
     };
-  }, [safetyMargin]);
+  }, [safetyMargin, totalBudgetAllocated]);
 
   const manualTransactions = useMemo(() => 
     transactions.filter(t => !t.recurringId).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
@@ -161,25 +208,6 @@ const Dashboard: React.FC<Props> = ({
       .sort((a, b) => a.label.localeCompare(b.label))
       .slice(-12);
   }, [transactions, trendTimeframe, trendCategory]);
-
-  const categorySpendData = useMemo(() => {
-    const expenses = transactions.filter(t => t.type === 'expense');
-    const totals: Record<string, number> = {};
-    const monthCounts: Record<string, Set<string>> = {};
-    expenses.forEach(t => {
-      const month = t.date.substring(0, 7); 
-      totals[t.category] = (totals[t.category] || 0) + t.amount;
-      if (!monthCounts[t.category]) monthCounts[t.category] = new Set();
-      monthCounts[t.category].add(month);
-    });
-    return CATEGORIES
-      .map(cat => ({
-        name: cat,
-        average: totals[cat] ? totals[cat] / (monthCounts[cat]?.size || 1) : 0
-      }))
-      .filter(d => d.average > 0)
-      .sort((a, b) => b.average - a.average);
-  }, [transactions]);
 
   const projectionData = useMemo(() => {
     const data = [];
@@ -417,111 +445,141 @@ const Dashboard: React.FC<Props> = ({
               <i className="fas fa-calendar-alt text-4xl"></i>
            </div>
            
-           <p className="text-white/60 text-[10px] font-black uppercase tracking-widest mb-1">Monthly Net Margin</p>
+           <p className="text-white text-[10px] font-black uppercase tracking-widest mb-1">Monthly Net Margin</p>
            <h3 className="text-4xl font-black mb-4">${safetyMargin.toLocaleString()}</h3>
            
            <div className="bg-black/10 rounded-[2rem] p-4 border border-white/10 mb-6 backdrop-blur-sm shadow-inner">
               <div className="flex justify-between items-center mb-1">
-                 <p className="text-[9px] text-white/50 font-black uppercase tracking-widest">Safe Daily Spend</p>
+                 <p className="text-[9px] text-white font-black uppercase tracking-widest">Safe Daily Spend</p>
                  <span className="bg-white/20 text-white text-[8px] px-2 py-0.5 rounded-full font-black uppercase tracking-widest">Limit</span>
               </div>
               <h4 className="text-2xl font-black text-white">
                 ${dailySpendLimit.toLocaleString('en-US', { maximumFractionDigits: 2 })}
               </h4>
-              <p className="text-[9px] text-white/40 font-bold uppercase tracking-widest mt-1">
+              <p className="text-[9px] text-white font-bold uppercase tracking-widest mt-1">
                 Allocated for {daysUntil25th} days until 25th
               </p>
            </div>
 
            <div className="border-t border-white/20 pt-4 mt-2">
               <div className="flex justify-between items-center mb-1">
-                 <p className="text-[9px] text-white/50 font-black uppercase tracking-widest">Settlement Countdown</p>
+                 <p className="text-[9px] text-white font-black uppercase tracking-widest">Settlement Countdown</p>
                  <p className="text-xs font-black text-white">{daysUntil25th} Days Left</p>
               </div>
-              <p className="text-[8px] text-white/40 font-bold uppercase tracking-widest leading-relaxed">
+              <p className="text-[8px] text-white font-bold uppercase tracking-widest leading-relaxed">
                 Stay under limit to ensure surplus at cycle end.
               </p>
            </div>
         </div>
       </div>
 
-      <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
-          <div>
-            <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em]">Spending Trends</h3>
-            <p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-widest">Interactive Cash Flow Analytics</p>
-          </div>
-          
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="bg-slate-100 p-1 rounded-xl flex gap-1">
-              {(['daily', 'weekly', 'monthly', 'yearly'] as Timeframe[]).map(tf => (
-                <button
-                  key={tf}
-                  onClick={() => setTrendTimeframe(tf)}
-                  className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${trendTimeframe === tf ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                >
-                  {tf}
-                </button>
-              ))}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <section className="lg:col-span-2 bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
+            <div>
+              <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em]">Spending Trends</h3>
+              <p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-widest">Interactive Cash Flow Analytics</p>
             </div>
             
-            <div className="relative">
-              <select 
-                value={trendCategory}
-                onChange={(e) => setTrendCategory(e.target.value)}
-                className="pl-3 pr-8 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[9px] font-black uppercase tracking-widest text-slate-600 outline-none appearance-none cursor-pointer focus:ring-2 focus:ring-indigo-500"
-              >
-                <option value="All">All Categories</option>
-                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-              <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-                <i className="fas fa-chevron-down text-[8px]"></i>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="bg-slate-100 p-1 rounded-xl flex gap-1">
+                {(['daily', 'weekly', 'monthly', 'yearly'] as Timeframe[]).map(tf => (
+                  <button
+                    key={tf}
+                    onClick={() => setTrendTimeframe(tf)}
+                    className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${trendTimeframe === tf ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                  >
+                    {tf}
+                  </button>
+                ))}
               </div>
             </div>
           </div>
-        </div>
 
-        <div className="h-[300px] w-full">
-          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-            <LineChart data={trendData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis 
-                dataKey="label" 
-                axisLine={false} 
-                tickLine={false} 
-                tick={{ fontSize: 9, fontWeight: 800, fill: '#94a3b8' }}
-                dy={10}
-              />
-              <YAxis 
-                axisLine={false} 
-                tickLine={false} 
-                tick={{ fontSize: 9, fontWeight: 800, fill: '#94a3b8' }}
-                tickFormatter={(val) => `$${val}`}
-              />
-              <Tooltip 
-                contentStyle={{ 
-                  borderRadius: '16px', 
-                  border: 'none', 
-                  boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)',
-                  fontSize: '11px',
-                  fontWeight: 'bold',
-                  textTransform: 'uppercase'
-                }}
-              />
-              <Line 
-                type="monotone" 
-                dataKey="amount" 
-                stroke="#6366f1" 
-                strokeWidth={4} 
-                dot={{ fill: '#6366f1', strokeWidth: 2, r: 4, stroke: '#fff' }}
-                activeDot={{ r: 6, strokeWidth: 0 }}
-                animationDuration={1500}
-                name="Expenditure"
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      </section>
+          <div className="h-[300px] w-full">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+              <LineChart data={trendData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis 
+                  dataKey="label" 
+                  axisLine={false} 
+                  tickLine={false} 
+                  tick={{ fontSize: 9, fontWeight: 800, fill: '#94a3b8' }}
+                  dy={10}
+                />
+                <YAxis 
+                  axisLine={false} 
+                  tickLine={false} 
+                  tick={{ fontSize: 9, fontWeight: 800, fill: '#94a3b8' }}
+                  tickFormatter={(val) => `$${val}`}
+                />
+                <Tooltip 
+                  contentStyle={{ 
+                    borderRadius: '16px', 
+                    border: 'none', 
+                    boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)',
+                    fontSize: '11px',
+                    fontWeight: 'bold',
+                    textTransform: 'uppercase'
+                  }}
+                />
+                <Line 
+                  type="monotone" 
+                  dataKey="amount" 
+                  stroke="#6366f1" 
+                  strokeWidth={4} 
+                  dot={{ fill: '#6366f1', strokeWidth: 2, r: 4, stroke: '#fff' }}
+                  activeDot={{ r: 6, strokeWidth: 0 }}
+                  animationDuration={1500}
+                  name="Expenditure"
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </section>
+
+        <section className="bg-slate-900 p-10 rounded-[3rem] shadow-2xl text-white overflow-hidden flex flex-col">
+          <div className="flex items-center justify-between mb-8">
+            <div>
+              <h3 className="font-black uppercase text-xs tracking-[0.3em] text-white/80">Active Budgets</h3>
+              <p className="text-[10px] text-white/40 font-bold uppercase mt-1 tracking-widest">Progress on Category Limits</p>
+            </div>
+            <div className="w-10 h-10 bg-white/5 rounded-xl flex items-center justify-center border border-white/10">
+              <i className="fas fa-bullseye text-indigo-400"></i>
+            </div>
+          </div>
+
+          <div className="flex-1 space-y-6 overflow-y-auto no-scrollbar pr-1">
+            {budgetProgressItems.map(item => (
+              <div key={item.category} className="space-y-2">
+                <div className="flex justify-between items-end">
+                  <div>
+                    <p className="text-[10px] font-black text-white/90 uppercase tracking-widest">{item.category}</p>
+                    <p className="text-[9px] text-white/40 font-bold uppercase">${item.actual.toFixed(2)} spent</p>
+                  </div>
+                  <div className="text-right">
+                    <p className={`text-xs font-black ${item.percent >= 90 ? 'text-rose-400' : 'text-indigo-400'}`}>${(item.limit - item.actual).toFixed(2)} left</p>
+                    <p className="text-[9px] text-white/40 font-bold uppercase">{item.percent.toFixed(0)}% used</p>
+                  </div>
+                </div>
+                <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden border border-white/5">
+                  <div 
+                    className={`h-full transition-all duration-1000 ease-out ${item.percent >= 90 ? 'bg-rose-500' : item.percent >= 70 ? 'bg-amber-500' : 'bg-indigo-500'}`}
+                    style={{ width: `${item.percent}%` }}
+                  ></div>
+                </div>
+              </div>
+            ))}
+            {budgetProgressItems.length === 0 && (
+              <div className="h-full flex flex-col items-center justify-center text-center py-10">
+                <i className="fas fa-sliders-h text-2xl text-white/10 mb-4"></i>
+                <p className="text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">No budgets configured</p>
+                <p className="text-[8px] text-white/10 font-bold uppercase mt-1">Visit Settings to allocate your Margin</p>
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
 
       <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
         <div className="flex justify-between items-center mb-10">
@@ -718,60 +776,6 @@ const Dashboard: React.FC<Props> = ({
             );
           })}
         </div>
-      </section>
-
-      <section className="bg-slate-900 p-10 rounded-[3rem] shadow-2xl text-white overflow-hidden">
-         <div className="flex items-center justify-between mb-8">
-            <div>
-               <h3 className="font-black uppercase text-xs tracking-[0.3em] text-white/80">Monthly Category Analysis</h3>
-               <p className="text-[10px] text-white/40 font-bold uppercase mt-1 tracking-widest">Average Spend Distribution by Label</p>
-            </div>
-            <div className="w-10 h-10 bg-white/5 rounded-xl flex items-center justify-center border border-white/10">
-               <i className="fas fa-chart-bar text-indigo-400"></i>
-            </div>
-         </div>
-
-         <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-            <div className="h-[300px] relative">
-               <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                  <BarChart layout="vertical" data={categorySpendData} margin={{ left: 20, right: 30 }}>
-                     <XAxis type="number" hide />
-                     <YAxis 
-                        dataKey="name" 
-                        type="category" 
-                        axisLine={false} 
-                        tickLine={false} 
-                        tick={{ fontSize: 10, fontWeight: 800, fill: '#94a3b8' }} 
-                        width={80}
-                     />
-                     <Tooltip 
-                        cursor={{ fill: 'rgba(255,255,255,0.05)' }}
-                        contentStyle={{ borderRadius: '15px', background: '#0f172a', border: '1px solid #1e293b', color: '#fff' }}
-                     />
-                     <Bar dataKey="average" radius={[0, 10, 10, 0]} barSize={20}>
-                        {categorySpendData.map((entry, index) => (
-                           <Cell key={`cell-${index}`} fill={index === 0 ? '#4f46e5' : index === 1 ? '#6366f1' : '#818cf8'} />
-                        ))}
-                     </Bar>
-                  </BarChart>
-               </ResponsiveContainer>
-            </div>
-
-            <div className="space-y-4 max-h-[300px] overflow-y-auto no-scrollbar pr-2">
-               {categorySpendData.map((data, idx) => (
-                  <div key={data.name} className="flex items-center justify-between p-4 bg-white/5 border border-white/10 rounded-2xl group hover:bg-white/10 transition-colors">
-                     <div className="flex items-center gap-4">
-                        <div className="text-white/40 font-black text-[10px] w-4">{idx + 1}</div>
-                        <p className="font-black text-xs text-white/90 uppercase tracking-widest">{data.name}</p>
-                     </div>
-                     <div className="text-right">
-                        <p className="font-black text-xs text-indigo-400">${data.average.toFixed(2)}</p>
-                        <p className="text-[8px] font-bold text-white/30 uppercase tracking-widest">Monthly Avg</p>
-                     </div>
-                  </div>
-               ))}
-            </div>
-         </div>
       </section>
 
       <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">

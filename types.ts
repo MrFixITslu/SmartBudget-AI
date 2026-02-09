@@ -104,6 +104,7 @@ export interface RecurringIncome {
   dayOfMonth: number;
   nextConfirmationDate: string; // ISO Date String
   lastConfirmedDate?: string;
+  accumulatedReceived?: number; // Tracks partial payments within current cycle
 }
 
 export interface BudgetEvent {

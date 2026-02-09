@@ -100,7 +100,7 @@ const App: React.FC = () => {
     const lastCheck = localStorage.getItem(STORAGE_KEYS.LAST_CYCLE_CHECK);
 
     if (lastCheck && lastCheck !== currentCycleYearMonth) {
-      console.log("New cycle detected! Accruing unpaid balances...");
+      console.log("New cycle detected! Accruing unpaid balances and resetting income counters...");
       
       // Calculate previous cycle start and end dates
       const prevCycleStart = new Date(now.getFullYear(), now.getMonth(), 25);
@@ -123,6 +123,9 @@ const App: React.FC = () => {
         }
         return bill;
       }));
+
+      // Reset accumulatedReceived for income items on cycle rollover
+      setRecurringIncomes(prev => prev.map(inc => ({ ...inc, accumulatedReceived: 0 })));
     }
 
     localStorage.setItem(STORAGE_KEYS.LAST_CYCLE_CHECK, currentCycleYearMonth);
@@ -372,9 +375,17 @@ const App: React.FC = () => {
        }));
        setRecurringIncomes(prev => prev.map(inc => {
           if (inc.id === t.recurringId) {
-             const nextDate = new Date(inc.nextConfirmationDate);
-             nextDate.setMonth(nextDate.getMonth() + 1);
-             return { ...inc, lastConfirmedDate: t.date, nextConfirmationDate: nextDate.toISOString().split('T')[0] };
+             const totalTarget = inc.amount;
+             const alreadyReceived = inc.accumulatedReceived || 0;
+             const newTotal = alreadyReceived + t.amount;
+             
+             if (newTotal >= totalTarget) {
+                const nextDate = new Date(inc.nextConfirmationDate);
+                nextDate.setMonth(nextDate.getMonth() + 1);
+                return { ...inc, lastConfirmedDate: t.date, nextConfirmationDate: nextDate.toISOString().split('T')[0], accumulatedReceived: 0 };
+             } else {
+                return { ...inc, lastConfirmedDate: t.date, accumulatedReceived: newTotal };
+             }
           }
           return inc;
        }));
@@ -526,7 +537,7 @@ const App: React.FC = () => {
           salary={salary} onUpdateSalary={setSalary} targetMargin={targetMargin} onUpdateTargetMargin={setTargetMargin}
           categoryBudgets={categoryBudgets} onUpdateCategoryBudgets={setCategoryBudgets}
           recurringExpenses={recurringExpenses} onAddRecurring={(b) => setRecurringExpenses(p => [...p, {...b, id: generateId(), accumulatedOverdue: 0}])} onUpdateRecurring={(b) => setRecurringExpenses(p => p.map(x => x.id === b.id ? b : x))} onDeleteRecurring={(id) => setRecurringExpenses(p => p.filter(x => x.id !== id))} 
-          recurringIncomes={recurringIncomes} onAddRecurringIncome={(i) => setRecurringIncomes(p => [...p, {...i, id: generateId()}])} onUpdateRecurringIncome={(i) => setRecurringIncomes(p => p.map(x => x.id === i.id ? i : x))} onDeleteRecurringIncome={(id) => setRecurringIncomes(p => p.filter(x => x.id !== id))} 
+          recurringIncomes={recurringIncomes} onAddRecurringIncome={(i) => setRecurringIncomes(p => [...p, {...i, id: generateId(), accumulatedReceived: 0}])} onUpdateRecurringIncome={(i) => setRecurringIncomes(p => p.map(x => x.id === i.id ? i : x))} onDeleteRecurringIncome={(id) => setRecurringIncomes(p => p.filter(x => x.id !== id))} 
           savingGoals={savingGoals} onAddSavingGoal={(g) => setSavingGoals(p => [...p, {...g, id: generateId(), currentAmount: g.openingBalance}])} onDeleteSavingGoal={(id) => setSavingGoals(p => p.filter(x => x.id !== id))} 
           onExportData={handleExportData} onResetData={handleResetData} onClose={() => setShowSettings(false)} onLogout={handleLogout}
           remindersEnabled={remindersEnabled} onToggleReminders={setRemindersEnabled}

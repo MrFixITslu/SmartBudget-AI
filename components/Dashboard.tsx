@@ -39,6 +39,7 @@ const Dashboard: React.FC<Props> = ({
   transactions, investments, marketPrices, bankConnections, recurringExpenses, recurringIncomes, savingGoals, targetMargin, categoryBudgets, onWithdrawal, onDelete, onPayRecurring, onReceiveRecurringIncome, onEdit
 }) => {
   const [paymentInputs, setPaymentInputs] = useState<Record<string, string>>({});
+  const [incomeInputs, setIncomeInputs] = useState<Record<string, string>>({});
   const [isSyncingPortal, setIsSyncingPortal] = useState<string | null>(null);
   const [trendTimeframe, setTrendTimeframe] = useState<Timeframe>('monthly');
   const [trendCategory, setTrendCategory] = useState<string>('All');
@@ -190,11 +191,16 @@ const Dashboard: React.FC<Props> = ({
   };
 
   const isIncomeReceivedInCycle = (income: RecurringIncome) => {
-    return transactions.some(t => 
-      t.recurringId === income.id && 
-      new Date(t.date) >= cycleStartDate && 
-      t.type === 'income'
-    );
+    const totalReceived = transactions
+      .filter(t => t.recurringId === income.id && new Date(t.date) >= cycleStartDate && t.type === 'income')
+      .reduce((acc, t) => acc + t.amount, 0);
+    return totalReceived >= income.amount;
+  };
+
+  const getIncomeReceivedSoFar = (income: RecurringIncome) => {
+    return transactions
+      .filter(t => t.recurringId === income.id && new Date(t.date) >= cycleStartDate && t.type === 'income')
+      .reduce((acc, t) => acc + t.amount, 0);
   };
 
   const settlementProgress = useMemo(() => {
@@ -208,23 +214,68 @@ const Dashboard: React.FC<Props> = ({
   const handleSyncLucelec = async (id: string) => { setIsSyncingPortal(id); await syncLucelecPortal(); setIsSyncingPortal(null); };
 
   const renderIncomeCard = (income: RecurringIncome) => {
-    const received = isIncomeReceivedInCycle(income);
+    const receivedTotal = getIncomeReceivedSoFar(income);
+    const fullyReceived = receivedTotal >= income.amount;
+    const remaining = Math.max(0, income.amount - receivedTotal);
+    const currentInput = incomeInputs[income.id] || remaining.toString();
+
     return (
-      <div key={income.id} className={`p-5 border-2 rounded-[2rem] transition-all ${received ? 'bg-emerald-50/30 border-emerald-100 opacity-60 scale-[0.98]' : 'bg-white border-slate-100 shadow-sm'} flex items-center justify-between group`}>
-        <div className="flex items-center gap-4">
-          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-lg ${received ? 'bg-slate-200 text-slate-400' : 'bg-emerald-500 text-white shadow-lg shadow-emerald-100 animate-pulse-soft'}`}><i className="fas fa-hand-holding-dollar"></i></div>
-          <div>
-            <p className={`font-black text-sm ${received ? 'text-slate-400' : 'text-slate-800'}`}>{income.description}</p>
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{received ? `Cleared on Cycle Start` : `Expected: the ${income.dayOfMonth}th`}</p>
+      <div key={income.id} className={`p-5 border-2 rounded-[2rem] transition-all ${fullyReceived ? 'bg-emerald-50/30 border-emerald-100 opacity-60 scale-[0.98]' : 'bg-white border-slate-100 shadow-sm'} flex flex-col gap-4 group`}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-lg ${fullyReceived ? 'bg-slate-200 text-slate-400' : 'bg-emerald-500 text-white shadow-lg shadow-emerald-100'}`}><i className="fas fa-hand-holding-dollar"></i></div>
+            <div>
+              <p className={`font-black text-sm ${fullyReceived ? 'text-slate-400' : 'text-slate-800'}`}>{income.description}</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                {fullyReceived ? `Settled for Cycle` : `Target: the ${income.dayOfMonth}th`}
+              </p>
+            </div>
           </div>
-        </div>
-        <div className="flex items-center gap-6">
           <div className="text-right">
-            <p className={`font-black text-base ${received ? 'text-slate-300' : 'text-emerald-600'}`}>+${income.amount.toFixed(2)}</p>
-            {received ? <span className="text-[8px] font-black text-emerald-500 uppercase tracking-widest bg-emerald-50 px-2 py-0.5 rounded">Settled</span> : <span className="text-[8px] font-black text-amber-500 uppercase tracking-widest bg-amber-50 px-2 py-0.5 rounded">Pending</span>}
+            <p className={`font-black text-base ${fullyReceived ? 'text-slate-300' : 'text-emerald-600'}`}>+${income.amount.toFixed(2)}</p>
+            {fullyReceived ? <span className="text-[8px] font-black text-emerald-500 uppercase tracking-widest bg-emerald-50 px-2 py-0.5 rounded">Settled</span> : receivedTotal > 0 ? <span className="text-[8px] font-black text-amber-500 uppercase tracking-widest bg-amber-50 px-2 py-0.5 rounded">Partially Received</span> : <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest bg-slate-50 px-2 py-0.5 rounded">Pending</span>}
           </div>
-          {!received && <button onClick={() => onReceiveRecurringIncome(income, income.amount)} className="px-4 py-2 bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-slate-900 transition-all shadow-md active:scale-95">Confirm</button>}
         </div>
+
+        {!fullyReceived && (
+          <div className="flex items-center gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-100">
+             <div className="flex-1">
+               <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Log Part Payment</p>
+               <input 
+                 type="number" 
+                 step="0.01"
+                 className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-black outline-none focus:ring-2 focus:ring-emerald-500"
+                 value={currentInput}
+                 onChange={(e) => setIncomeInputs(prev => ({ ...prev, [income.id]: e.target.value }))}
+               />
+             </div>
+             <button 
+               onClick={() => {
+                 const amt = parseFloat(currentInput);
+                 if (!isNaN(amt) && amt > 0) {
+                    onReceiveRecurringIncome(income, amt);
+                    setIncomeInputs(prev => {
+                      const next = {...prev};
+                      delete next[income.id];
+                      return next;
+                    });
+                 }
+               }}
+               className="h-10 px-4 bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-slate-900 transition-all shadow-md active:scale-95 self-end"
+             >
+               Confirm
+             </button>
+          </div>
+        )}
+
+        {receivedTotal > 0 && (
+          <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+             <div 
+               className="h-full bg-emerald-500 transition-all duration-700" 
+               style={{ width: `${Math.min(100, (receivedTotal / income.amount) * 100)}%` }}
+             ></div>
+          </div>
+        )}
       </div>
     );
   };

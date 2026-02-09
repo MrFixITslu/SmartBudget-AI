@@ -133,13 +133,11 @@ const Dashboard: React.FC<Props> = ({
     const diff = target.getTime() - now.getTime();
     const safeDays = Math.max(1, Math.ceil(diff / 86400000));
     
-    const spentInCycle = currentCycleTransactions.reduce((acc, t) => acc + t.amount, 0);
-    // usableMargin = Cash - Remaining Budget
-    const remainingBudget = Math.max(0, totalBudgetAllocated - spentInCycle);
-    const usableMargin = liquidFunds - remainingBudget;
+    // Requirement: Safe Daily Spend IS EQUAL TO Monthly Net Margin divided by the number of days until the 25th
+    const dailySpendLimit = safetyMargin / safeDays;
     
-    return { daysUntil25th: safeDays, dailySpendLimit: usableMargin > 0 ? usableMargin / safeDays : 0 };
-  }, [liquidFunds, totalBudgetAllocated, currentCycleTransactions]);
+    return { daysUntil25th: safeDays, dailySpendLimit: dailySpendLimit > 0 ? dailySpendLimit : 0 };
+  }, [safetyMargin]); // Only depends on safetyMargin (Liquid Hub) and dates
 
   const manualTransactions = useMemo(() => 
     transactions.filter(t => !t.recurringId).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
@@ -478,7 +476,7 @@ const Dashboard: React.FC<Props> = ({
               <TransactionForm 
                 bankConnections={bankConnections} 
                 initialData={transactionToEdit} 
-                onAdd={(t) => { onEdit({ ...t, id: transactionToEdit.id } as Transaction); setTransactionToEdit(null); }} 
+                onEdit={(t) => { onEdit({ ...t, id: transactionToEdit.id } as Transaction); setTransactionToEdit(null); }} 
                 onCancel={() => setTransactionToEdit(null)} 
               />
             </div>

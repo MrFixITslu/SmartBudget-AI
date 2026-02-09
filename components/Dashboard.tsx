@@ -3,6 +3,7 @@ import React, { useMemo, useState } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, LineChart, Line, Legend } from 'recharts';
 import { Transaction, RecurringExpense, RecurringIncome, SavingGoal, InvestmentAccount, MarketPrice, BankConnection, CATEGORIES } from '../types';
 import { syncLucelecPortal } from '../services/bankApiService';
+import TransactionForm from './TransactionForm';
 
 interface InstitutionalBalance {
   balance: number;
@@ -34,12 +35,13 @@ interface Props {
 type Timeframe = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
 const Dashboard: React.FC<Props> = ({ 
-  transactions, investments, marketPrices, bankConnections, recurringExpenses, recurringIncomes, savingGoals, targetMargin, onWithdrawal, onDelete, onPayRecurring, onReceiveRecurringIncome
+  transactions, investments, marketPrices, bankConnections, recurringExpenses, recurringIncomes, savingGoals, targetMargin, onWithdrawal, onDelete, onPayRecurring, onReceiveRecurringIncome, onEdit
 }) => {
   const [paymentInputs, setPaymentInputs] = useState<Record<string, string>>({});
   const [isSyncingPortal, setIsSyncingPortal] = useState<string | null>(null);
   const [trendTimeframe, setTrendTimeframe] = useState<Timeframe>('monthly');
   const [trendCategory, setTrendCategory] = useState<string>('All');
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
 
   const institutionalBalances = useMemo<Record<string, InstitutionalBalance>>(() => {
     const balances: Record<string, InstitutionalBalance> = {};
@@ -105,22 +107,21 @@ const Dashboard: React.FC<Props> = ({
     [recurringIncomes]
   );
   const safetyMargin = totalMonthlyRecurringIncome - totalMonthlyRecurringExpenses - totalOverdue;
-  const marginProgress = targetMargin > 0 ? Math.min(100, (safetyMargin / targetMargin) * 100) : 0;
 
-  // Logic for Daily Spend Limit until the 25th
+  // Calculate Days until 25th for Safe Spend
   const { daysUntil25th, dailySpendLimit } = useMemo(() => {
     const now = new Date();
     const year = now.getFullYear();
     const month = now.getMonth();
     
-    // Target the 25th of this month, or next month if past 25th
-    let targetDate = new Date(year, month, 25);
+    let target = new Date(year, month, 25);
+    // If today is past the 25th, target the 25th of next month
     if (now.getDate() >= 25) {
-      targetDate = new Date(year, month + 1, 25);
+      target = new Date(year, month + 1, 25);
     }
     
-    const diffTime = targetDate.getTime() - now.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const diff = target.getTime() - now.getTime();
+    const diffDays = Math.ceil(diff / (1000 * 60 * 60 * 24));
     const safeDays = Math.max(1, diffDays);
     
     return {
@@ -137,13 +138,10 @@ const Dashboard: React.FC<Props> = ({
   const trendData = useMemo(() => {
     const expenses = transactions.filter(t => t.type === 'expense');
     const filtered = trendCategory === 'All' ? expenses : expenses.filter(t => t.category === trendCategory);
-    
     const buckets: Record<string, number> = {};
-    
     filtered.forEach(t => {
       const d = new Date(t.date);
       let key = '';
-      
       if (trendTimeframe === 'daily') {
         key = t.date;
       } else if (trendTimeframe === 'weekly') {
@@ -156,10 +154,8 @@ const Dashboard: React.FC<Props> = ({
       } else {
         key = d.getFullYear().toString();
       }
-      
       buckets[key] = (buckets[key] || 0) + t.amount;
     });
-
     return Object.entries(buckets)
       .map(([label, amount]) => ({ label, amount }))
       .sort((a, b) => a.label.localeCompare(b.label))
@@ -170,14 +166,12 @@ const Dashboard: React.FC<Props> = ({
     const expenses = transactions.filter(t => t.type === 'expense');
     const totals: Record<string, number> = {};
     const monthCounts: Record<string, Set<string>> = {};
-
     expenses.forEach(t => {
       const month = t.date.substring(0, 7); 
       totals[t.category] = (totals[t.category] || 0) + t.amount;
       if (!monthCounts[t.category]) monthCounts[t.category] = new Set();
       monthCounts[t.category].add(month);
     });
-
     return CATEGORIES
       .map(cat => ({
         name: cat,
@@ -192,9 +186,7 @@ const Dashboard: React.FC<Props> = ({
     const monthlyNet = totalMonthlyRecurringIncome - totalMonthlyRecurringExpenses;
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const currentMonthIdx = new Date().getMonth();
-
     let runningSavings = liquidFunds;
-
     for (let i = 0; i < 12; i++) {
       const monthLabel = months[(currentMonthIdx + i) % 12];
       data.push({
@@ -428,26 +420,26 @@ const Dashboard: React.FC<Props> = ({
            <p className="text-white/60 text-[10px] font-black uppercase tracking-widest mb-1">Monthly Net Margin</p>
            <h3 className="text-4xl font-black mb-4">${safetyMargin.toLocaleString()}</h3>
            
-           <div className="bg-black/10 rounded-[2rem] p-4 border border-white/10 mb-6 backdrop-blur-sm">
+           <div className="bg-black/10 rounded-[2rem] p-4 border border-white/10 mb-6 backdrop-blur-sm shadow-inner">
               <div className="flex justify-between items-center mb-1">
                  <p className="text-[9px] text-white/50 font-black uppercase tracking-widest">Safe Daily Spend</p>
-                 <span className="bg-white/10 text-white text-[8px] px-2 py-0.5 rounded-full font-black uppercase tracking-widest">Limit</span>
+                 <span className="bg-white/20 text-white text-[8px] px-2 py-0.5 rounded-full font-black uppercase tracking-widest">Limit</span>
               </div>
               <h4 className="text-2xl font-black text-white">
                 ${dailySpendLimit.toLocaleString('en-US', { maximumFractionDigits: 2 })}
               </h4>
               <p className="text-[9px] text-white/40 font-bold uppercase tracking-widest mt-1">
-                Budget for {daysUntil25th} days remaining
+                Allocated for {daysUntil25th} days until 25th
               </p>
            </div>
 
            <div className="border-t border-white/20 pt-4 mt-2">
               <div className="flex justify-between items-center mb-1">
-                 <p className="text-[9px] text-white/50 font-black uppercase tracking-widest">Recurring Commitment</p>
-                 <p className="text-xs font-black text-white">${totalMonthlyRecurringExpenses.toLocaleString()}</p>
+                 <p className="text-[9px] text-white/50 font-black uppercase tracking-widest">Settlement Countdown</p>
+                 <p className="text-xs font-black text-white">{daysUntil25th} Days Left</p>
               </div>
               <p className="text-[8px] text-white/40 font-bold uppercase tracking-widest leading-relaxed">
-                {safetyMargin >= 0 ? `${daysUntil25th} days until next cycle (25th)` : 'CRITICAL DEFICIT UNTIL 25th'}
+                Stay under limit to ensure surplus at cycle end.
               </p>
            </div>
         </div>
@@ -563,16 +555,62 @@ const Dashboard: React.FC<Props> = ({
                        </div>
                     </div>
                  </div>
-                 <div className="text-right">
-                    <p className={`font-black text-base ${t.type === 'expense' ? 'text-slate-900' : 'text-emerald-600'}`}>
-                       {t.type === 'expense' ? '-' : '+'}${t.amount.toFixed(2)}
-                    </p>
-                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{t.date}</p>
+                 <div className="flex items-center gap-4">
+                    <div className="text-right">
+                       <p className={`font-black text-base ${t.type === 'expense' ? 'text-slate-900' : 'text-emerald-600'}`}>
+                          {t.type === 'expense' ? '-' : '+'}${t.amount.toFixed(2)}
+                       </p>
+                       <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{t.date}</p>
+                    </div>
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button 
+                            onClick={() => setEditingTransaction(t)}
+                            className="w-8 h-8 flex items-center justify-center bg-white border border-slate-200 rounded-lg text-slate-400 hover:text-indigo-600 transition shadow-sm"
+                            title="Edit Entry"
+                        >
+                            <i className="fas fa-pencil text-[10px]"></i>
+                        </button>
+                        <button 
+                            onClick={() => onDelete(t.id)}
+                            className="w-8 h-8 flex items-center justify-center bg-white border border-slate-200 rounded-lg text-slate-400 hover:text-rose-600 transition shadow-sm"
+                            title="Delete Entry"
+                        >
+                            <i className="fas fa-trash-alt text-[10px]"></i>
+                        </button>
+                    </div>
                  </div>
               </div>
            ))}
         </div>
       </section>
+
+      {/* Editing Modal for Ledger Items */}
+      {editingTransaction && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-xl rounded-[3rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <div>
+                <h2 className="text-xl font-black text-slate-800">Edit Ledger Item</h2>
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Adjust Transaction Details</p>
+              </div>
+              <button onClick={() => setEditingTransaction(null)} className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-slate-400 hover:text-slate-800 transition">
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+            <div className="p-2">
+              <TransactionForm 
+                initialData={editingTransaction}
+                bankConnections={bankConnections}
+                onAdd={(updated) => {
+                  onEdit({ ...editingTransaction, ...updated } as Transaction);
+                  setEditingTransaction(null);
+                }} 
+                onCancel={() => setEditingTransaction(null)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">

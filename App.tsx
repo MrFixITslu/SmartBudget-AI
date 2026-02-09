@@ -25,11 +25,33 @@ const generateId = () => {
 
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    // Changed to localStorage to allow "remote login" persistence
+    // Persistent auth using localStorage for "Auto Login"
     return localStorage.getItem('ff_auth') === 'true';
   });
   const [activeTab, setActiveTab] = useState<'dashboard' | 'events'>('dashboard');
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
+
+  // REMOTE LOGIN HANDLER
+  useEffect(() => {
+    const handleRemoteLogin = () => {
+      const hash = window.location.hash;
+      if (hash.includes('u=') && hash.includes('p=')) {
+        const params = new URLSearchParams(hash.substring(1));
+        const u = params.get('u');
+        const p = params.get('p');
+        if (u && p) {
+          const success = handleLogin(u, p);
+          if (success) {
+            // Clear hash after successful remote login
+            window.history.replaceState(null, "", window.location.pathname + window.location.search);
+          }
+        }
+      }
+    };
+    handleRemoteLogin();
+    window.addEventListener('hashchange', handleRemoteLogin);
+    return () => window.removeEventListener('hashchange', handleRemoteLogin);
+  }, []);
 
   // Core State
   const [transactions, setTransactions] = useState<Transaction[]>(() => {
@@ -177,6 +199,12 @@ const App: React.FC = () => {
     return false;
   };
 
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    localStorage.removeItem('ff_auth');
+    setShowSettings(false);
+  };
+
   const handleAIAnalysis = (result: AIAnalysisResult) => {
     setPendingApprovals(prev => [...prev, result]);
   };
@@ -223,10 +251,16 @@ const App: React.FC = () => {
     }));
   };
 
+  const updateTransaction = (t: Transaction) => {
+    setTransactions(prev => prev.map(item => item.id === t.id ? t : item));
+  };
+
   const addTransaction = (t: Omit<Transaction, 'id'>) => {
     const finalInstitution = t.institution || 'Cash in Hand';
     const newTransaction: Transaction = { ...t, id: generateId(), institution: finalInstitution };
     const transactionsToAdd: Transaction[] = [newTransaction];
+    
+    // Auto-handling of savings logic
     const descLower = t.description.toLowerCase();
     const isSavingsTarget = descLower.includes('general saving') || descLower.includes('vacation saving');
     if (isSavingsTarget && t.type === 'expense') {
@@ -240,7 +274,10 @@ const App: React.FC = () => {
         institution: 'Laborie Cooperative Credit Union'
       });
     }
+
     setTransactions(prev => [...transactionsToAdd, ...prev]);
+
+    // Handle updates for recurring items
     if (t.recurringId) {
        const targetExpense = recurringExpenses.find(r => r.id === t.recurringId);
        if (targetExpense) {
@@ -364,7 +401,12 @@ const App: React.FC = () => {
 
       <section className="mb-10 sticky top-4 z-30">
         <div className="max-w-2xl mx-auto bg-white/80 backdrop-blur-xl p-4 rounded-[2.5rem] border border-white shadow-2xl">
-          <MagicInput onSuccess={handleAIAnalysis} onBulkSuccess={handleBulkAIAnalysis} onLoading={setIsLoading} onManualEntry={() => setShowManualEntry(true)} />
+          <MagicInput 
+            onSuccess={handleAIAnalysis} 
+            onBulkSuccess={handleBulkAIAnalysis} 
+            onLoading={setIsLoading} 
+            onManualEntry={() => setShowManualEntry(true)} 
+          />
         </div>
       </section>
 
@@ -373,12 +415,20 @@ const App: React.FC = () => {
           <>
             <VerificationQueue pendingItems={pendingApprovals} onApprove={approveItem} onDiscard={discardItem} onEdit={setEditingApprovalIndex} onDiscardAll={() => setPendingApprovals([])} />
             <Dashboard 
-              transactions={transactions} recurringExpenses={recurringExpenses} recurringIncomes={recurringIncomes}
-              savingGoals={savingGoals} investments={investments} marketPrices={marketPrices}
-              bankConnections={bankConnections} targetMargin={targetMargin}
-              onEdit={() => {}} onDelete={(id) => setTransactions(prev => prev.filter(t => t.id !== id))}
-              onPayRecurring={handlePayRecurring} onReceiveRecurringIncome={handleReceiveRecurringIncome}
-              onContributeSaving={handleContributeSaving} onWithdrawSaving={handleWithdrawSaving}
+              transactions={transactions} 
+              recurringExpenses={recurringExpenses} 
+              recurringIncomes={recurringIncomes}
+              savingGoals={savingGoals} 
+              investments={investments} 
+              marketPrices={marketPrices}
+              bankConnections={bankConnections} 
+              targetMargin={targetMargin}
+              onEdit={updateTransaction} 
+              onDelete={(id) => setTransactions(prev => prev.filter(t => t.id !== id))}
+              onPayRecurring={handlePayRecurring} 
+              onReceiveRecurringIncome={handleReceiveRecurringIncome}
+              onContributeSaving={handleContributeSaving} 
+              onWithdrawSaving={handleWithdrawSaving}
               onWithdrawal={handleWithdrawal}
               onAddIncome={(amount, desc, notes) => addTransaction({ amount, description: desc, notes, type: 'income', category: 'Income', date: new Date().toISOString().split('T')[0] })}
             />
@@ -403,13 +453,41 @@ const App: React.FC = () => {
               </button>
             </div>
             <div className="p-2">
-              <TransactionForm onAdd={(t) => { addTransaction(t); setShowManualEntry(false); }} onCancel={() => setShowManualEntry(false)} />
+              <TransactionForm 
+                bankConnections={bankConnections}
+                onAdd={(t) => { addTransaction(t); setShowManualEntry(false); }} 
+                onCancel={() => setShowManualEntry(false)} 
+              />
             </div>
           </div>
         </div>
       )}
 
-      {showSettings && <Settings salary={salary} onUpdateSalary={setSalary} targetMargin={targetMargin} onUpdateTargetMargin={setTargetMargin} recurringExpenses={recurringExpenses} onAddRecurring={(b) => setRecurringExpenses(p => [...p, {...b, id: generateId(), accumulatedOverdue: 0}])} onUpdateRecurring={(b) => setRecurringExpenses(p => p.map(x => x.id === b.id ? b : x))} onDeleteRecurring={(id) => setRecurringExpenses(p => p.filter(x => x.id !== id))} recurringIncomes={recurringIncomes} onAddRecurringIncome={(i) => setRecurringIncomes(p => [...p, {...i, id: generateId()}])} onUpdateRecurringIncome={(i) => setRecurringIncomes(p => p.map(x => x.id === i.id ? i : x))} onDeleteRecurringIncome={(id) => setRecurringIncomes(p => p.filter(x => x.id !== id))} savingGoals={savingGoals} onAddSavingGoal={(g) => setSavingGoals(p => [...p, {...g, id: generateId(), currentAmount: g.openingBalance}])} onDeleteSavingGoal={(id) => setSavingGoals(p => p.filter(x => x.id !== id))} onExportData={() => {}} onResetData={() => {}} onClose={() => setShowSettings(false)} currentBank={bankConnections[0] || {institution: '', status: 'unlinked', institutionType: 'bank', openingBalance: 0}} onResetBank={() => {}} />}
+      {showSettings && (
+        <Settings 
+          salary={salary} 
+          onUpdateSalary={setSalary} 
+          targetMargin={targetMargin} 
+          onUpdateTargetMargin={setTargetMargin} 
+          recurringExpenses={recurringExpenses} 
+          onAddRecurring={(b) => setRecurringExpenses(p => [...p, {...b, id: generateId(), accumulatedOverdue: 0}])} 
+          onUpdateRecurring={(b) => setRecurringExpenses(p => p.map(x => x.id === b.id ? b : x))} 
+          onDeleteRecurring={(id) => setRecurringExpenses(p => p.filter(x => x.id !== id))} 
+          recurringIncomes={recurringIncomes} 
+          onAddRecurringIncome={(i) => setRecurringIncomes(p => [...p, {...i, id: generateId()}])} 
+          onUpdateRecurringIncome={(i) => setRecurringIncomes(p => p.map(x => x.id === i.id ? i : x))} 
+          onDeleteRecurringIncome={(id) => setRecurringIncomes(p => p.filter(x => x.id !== id))} 
+          savingGoals={savingGoals} 
+          onAddSavingGoal={(g) => setSavingGoals(p => [...p, {...g, id: generateId(), currentAmount: g.openingBalance}])} 
+          onDeleteSavingGoal={(id) => setSavingGoals(p => p.filter(x => x.id !== id))} 
+          onExportData={() => {}} 
+          onResetData={() => {}} 
+          onClose={() => setShowSettings(false)} 
+          onLogout={handleLogout}
+          currentBank={bankConnections[0] || {institution: '', status: 'unlinked', institutionType: 'bank', openingBalance: 0}} 
+          onResetBank={() => {}} 
+        />
+      )}
       {showBankModal && <BankSyncModal onSuccess={handleBankSuccess} onClose={() => setShowBankModal(false)} />}
     </div>
   );

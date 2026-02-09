@@ -21,6 +21,7 @@ interface Props {
   onExportData: () => void;
   onResetData: () => void;
   onClose: () => void;
+  onLogout: () => void;
   currentBank: BankConnection;
   onResetBank: () => void;
 }
@@ -41,7 +42,8 @@ const Settings: React.FC<Props> = ({
   onDeleteSavingGoal,
   onExportData,
   onResetData,
-  onClose
+  onClose,
+  onLogout
 }) => {
   // Recurring Bill Form State
   const [isAddingBill, setIsAddingBill] = useState(false);
@@ -420,12 +422,21 @@ const Settings: React.FC<Props> = ({
           </section>
 
           {/* Export / Danger Area */}
-          <section className="pt-6 border-t border-slate-100 grid grid-cols-2 gap-4">
-            <button onClick={onExportData} className="py-4 bg-slate-100 text-slate-600 font-black rounded-2xl text-[10px] uppercase tracking-widest hover:bg-slate-200 transition">
-              <i className="fas fa-download mr-2"></i> Export CSV
-            </button>
-            <button onClick={onResetData} className="py-4 bg-rose-50 text-rose-600 font-black rounded-2xl text-[10px] uppercase tracking-widest hover:bg-rose-100 transition">
-              <i className="fas fa-exclamation-triangle mr-2"></i> Reset App
+          <section className="pt-6 border-t border-slate-100 space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <button onClick={onExportData} className="py-4 bg-slate-100 text-slate-600 font-black rounded-2xl text-[10px] uppercase tracking-widest hover:bg-slate-200 transition">
+                <i className="fas fa-download mr-2"></i> Export CSV
+              </button>
+              <button onClick={onResetData} className="py-4 bg-slate-100 text-slate-600 font-black rounded-2xl text-[10px] uppercase tracking-widest hover:bg-slate-200 transition">
+                <i className="fas fa-exclamation-triangle mr-2"></i> Reset App
+              </button>
+            </div>
+            
+            <button 
+              onClick={onLogout}
+              className="w-full py-5 bg-rose-50 text-rose-600 font-black rounded-2xl text-xs uppercase tracking-[0.2em] hover:bg-rose-600 hover:text-white transition-all shadow-lg shadow-rose-100"
+            >
+              <i className="fas fa-sign-out-alt mr-2"></i> Terminate Session
             </button>
           </section>
 

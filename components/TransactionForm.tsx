@@ -1,14 +1,15 @@
 
 import React, { useState } from 'react';
-import { CATEGORIES, Transaction, TransactionType, LineItem } from '../types';
+import { CATEGORIES, Transaction, TransactionType, LineItem, BankConnection } from '../types';
 
 interface Props {
   onAdd: (t: Omit<Transaction, 'id'>) => void;
   initialData?: Partial<Transaction>;
   onCancel?: () => void;
+  bankConnections?: BankConnection[];
 }
 
-const TransactionForm: React.FC<Props> = ({ onAdd, initialData, onCancel }) => {
+const TransactionForm: React.FC<Props> = ({ onAdd, initialData, onCancel, bankConnections = [] }) => {
   const [amount, setAmount] = useState(initialData?.amount?.toString() || '');
   const [category, setCategory] = useState(initialData?.category || CATEGORIES[0]);
   const [desc, setDesc] = useState(initialData?.description || '');
@@ -16,6 +17,7 @@ const TransactionForm: React.FC<Props> = ({ onAdd, initialData, onCancel }) => {
   const [type, setType] = useState<TransactionType>(initialData?.type || 'expense');
   const [date, setDate] = useState(initialData?.date || new Date().toISOString().split('T')[0]);
   const [vendor, setVendor] = useState(initialData?.vendor || '');
+  const [institution, setInstitution] = useState(initialData?.institution || 'Cash in Hand');
   const [lineItems, setLineItems] = useState<LineItem[]>(initialData?.lineItems || []);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -23,12 +25,10 @@ const TransactionForm: React.FC<Props> = ({ onAdd, initialData, onCancel }) => {
     const newErrors: Record<string, string> = {};
     const amt = parseFloat(amount);
     
-    // Strict positive validation
     if (isNaN(amt) || amt <= 0) {
       newErrors.amount = "Enter a positive number";
     }
     
-    // Non-whitespace description validation
     if (!desc || !desc.trim()) {
       newErrors.description = "Description cannot be empty";
     }
@@ -49,6 +49,7 @@ const TransactionForm: React.FC<Props> = ({ onAdd, initialData, onCancel }) => {
       type,
       date,
       vendor: vendor.trim() || undefined,
+      institution,
       lineItems: lineItems.length > 0 ? lineItems : undefined
     });
     
@@ -97,10 +98,30 @@ const TransactionForm: React.FC<Props> = ({ onAdd, initialData, onCancel }) => {
             className={`w-full p-4 bg-slate-50 border ${errors.amount ? 'border-rose-300 ring-2 ring-rose-50' : 'border-slate-100'} rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none font-black text-slate-800 text-lg transition-all`}
             placeholder="0.00"
             required
-            aria-invalid={errors.amount ? "true" : "false"}
           />
           {errors.amount && <p className="text-[9px] font-bold text-rose-500 mt-1 ml-1 animate-pulse">{errors.amount}</p>}
         </div>
+        <div>
+          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Payment Source</label>
+          <div className="relative">
+            <select
+              value={institution}
+              onChange={(e) => setInstitution(e.target.value)}
+              className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none font-black text-slate-700 text-sm appearance-none cursor-pointer"
+            >
+              <option value="Cash in Hand">Cash in Hand</option>
+              {bankConnections.map(conn => (
+                <option key={conn.institution} value={conn.institution}>{conn.institution}</option>
+              ))}
+            </select>
+            <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+              <i className="fas fa-wallet text-[10px]"></i>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Date</label>
           <div className="relative">
@@ -117,19 +138,6 @@ const TransactionForm: React.FC<Props> = ({ onAdd, initialData, onCancel }) => {
             </div>
           </div>
         </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Merchant / Vendor</label>
-          <input
-            type="text"
-            value={vendor}
-            onChange={(e) => setVendor(e.target.value)}
-            className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-slate-700 text-sm"
-            placeholder="Store Name"
-          />
-        </div>
         <div>
           <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Category</label>
           <div className="relative">
@@ -141,7 +149,7 @@ const TransactionForm: React.FC<Props> = ({ onAdd, initialData, onCancel }) => {
               {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
             <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-              <i className="fas fa-chevron-down text-[10px]"></i>
+              <i className="fas fa-tag text-[10px]"></i>
             </div>
           </div>
         </div>

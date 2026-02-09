@@ -1,6 +1,6 @@
 
 import React, { useMemo, useState } from 'react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, LineChart, Line, Legend } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, LineChart, Line, Legend, ComposedChart } from 'recharts';
 import { Transaction, RecurringExpense, RecurringIncome, SavingGoal, InvestmentAccount, MarketPrice, BankConnection, CATEGORIES } from '../types';
 import { syncLucelecPortal } from '../services/bankApiService';
 import TransactionForm from './TransactionForm';
@@ -146,6 +146,34 @@ const Dashboard: React.FC<Props> = ({
     });
     return Object.entries(buckets).map(([label, amount]) => ({ label, amount })).sort((a, b) => a.label.localeCompare(b.label)).slice(-12);
   }, [transactions, trendTimeframe, trendCategory]);
+
+  const yearlyProjectionData = useMemo(() => {
+    const monthlyIncome = totalMonthlyRecurringIncome;
+    const monthlyFixedExpenses = totalMonthlyRecurringExpenses;
+    const monthlyVariableBudget = totalBudgetAllocated;
+    const monthlyTotalExpenses = monthlyFixedExpenses + monthlyVariableBudget;
+    
+    const data = [];
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const currentMonthIdx = new Date().getMonth();
+    
+    let cumulativeSavings = liquidFunds;
+
+    for (let i = 0; i < 12; i++) {
+      const idx = (currentMonthIdx + i) % 12;
+      const savings = monthlyIncome - monthlyTotalExpenses;
+      cumulativeSavings += savings;
+
+      data.push({
+        month: months[idx],
+        income: monthlyIncome,
+        expenses: monthlyTotalExpenses,
+        savings: Math.max(0, savings),
+        cumulative: cumulativeSavings
+      });
+    }
+    return data;
+  }, [totalMonthlyRecurringIncome, totalMonthlyRecurringExpenses, totalBudgetAllocated, liquidFunds]);
 
   const cycleBills = useMemo(() => [...recurringExpenses].sort((a, b) => a.dayOfMonth - b.dayOfMonth), [recurringExpenses]);
   const cycleIncomes = useMemo(() => [...recurringIncomes].sort((a, b) => a.dayOfMonth - b.dayOfMonth), [recurringIncomes]);
@@ -325,6 +353,46 @@ const Dashboard: React.FC<Props> = ({
           <div className="flex-1 space-y-6 overflow-y-auto no-scrollbar pr-1">{budgetProgressItems.map(item => (<div key={item.category} className="space-y-2"><div className="flex justify-between items-end"><div><p className="text-[10px] font-black text-white/90 uppercase tracking-widest">{item.category}</p><p className="text-[9px] text-white/40 font-bold uppercase">${item.actual.toFixed(2)} spent</p></div><div className="text-right"><p className={`text-xs font-black ${item.percent >= 90 ? 'text-rose-400' : 'text-indigo-400'}`}>${(item.limit - item.actual).toFixed(2)} left</p><p className="text-[9px] text-white/40 font-bold uppercase">{item.percent.toFixed(0)}% used</p></div></div><div className="h-2 w-full bg-white/5 rounded-full overflow-hidden border border-white/5"><div className={`h-full transition-all duration-1000 ease-out ${item.percent >= 90 ? 'bg-rose-500' : item.percent >= 70 ? 'bg-amber-500' : 'bg-indigo-500'}`} style={{ width: `${item.percent}%` }}></div></div></div>))}{budgetProgressItems.length === 0 && (<div className="h-full flex flex-col items-center justify-center text-center py-10"><i className="fas fa-sliders-h text-2xl text-white/10 mb-4"></i><p className="text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">No budgets configured</p></div>)}</div>
         </section>
       </div>
+
+      <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
+          <div>
+            <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em]">Yearly Financial Outlook</h3>
+            <p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-widest">12-Month Projected Growth & Spend</p>
+          </div>
+          <div className="flex items-center gap-6">
+            <div className="text-right">
+              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Est. Annual Savings</p>
+              <p className="text-sm font-black text-emerald-600">
+                +${(yearlyProjectionData[11].cumulative - liquidFunds).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="h-[350px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={yearlyProjectionData}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+              <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 9, fontWeight: 800, fill: '#94a3b8' }} dy={10} />
+              <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 9, fontWeight: 800, fill: '#94a3b8' }} tickFormatter={(val) => `$${val/1000}k`} />
+              <Tooltip 
+                contentStyle={{ borderRadius: '20px', border: 'none', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', fontSize: '11px', fontWeight: 'bold' }} 
+                cursor={{ fill: '#f8fafc' }}
+              />
+              <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.1em' }} />
+              <Bar dataKey="income" name="Monthly Income" fill="#10b981" radius={[10, 10, 0, 0]} barSize={20} />
+              <Bar dataKey="expenses" name="Planned Spend" fill="#f43f5e" radius={[10, 10, 0, 0]} barSize={20} />
+              <Area type="monotone" dataKey="cumulative" name="Projected Cash Reserve" fill="url(#colorCum)" stroke="#6366f1" strokeWidth={3} fillOpacity={1} />
+              <defs>
+                <linearGradient id="colorCum" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#6366f1" stopOpacity={0.1}/>
+                  <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      </section>
 
       <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
         <div className="flex justify-between items-center mb-10"><div><h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em]">Financial Activity Feed</h3><p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-widest">Cash & Digital Transaction Ledger</p></div><div className="text-right"><p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Today's Flow</p><p className="text-sm font-black text-slate-900">${manualTransactions.filter(t => t.date === new Date().toISOString().split('T')[0]).reduce((acc, t) => t.type === 'expense' ? acc - t.amount : acc + t.amount, 0).toFixed(2)}</p></div></div>

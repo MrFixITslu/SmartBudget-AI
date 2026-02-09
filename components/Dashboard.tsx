@@ -43,6 +43,7 @@ const Dashboard: React.FC<Props> = ({
   const [isSyncingPortal, setIsSyncingPortal] = useState<string | null>(null);
   const [trendTimeframe, setTrendTimeframe] = useState<Timeframe>('monthly');
   const [trendCategory, setTrendCategory] = useState<string>('All');
+  const [transactionToEdit, setTransactionToEdit] = useState<Transaction | null>(null);
 
   const cycleStartDate = useMemo(() => {
     const now = new Date();
@@ -97,7 +98,9 @@ const Dashboard: React.FC<Props> = ({
   const totalMonthlyRecurringExpenses = useMemo(() => recurringExpenses.reduce((acc, curr) => acc + (curr.amount || 0), 0), [recurringExpenses]);
   const totalOverdue = useMemo(() => recurringExpenses.reduce((acc, curr) => acc + (curr.accumulatedOverdue || 0), 0), [recurringExpenses]);
   const totalMonthlyRecurringIncome = useMemo(() => recurringIncomes.reduce((acc, curr) => acc + (curr.amount || 0), 0), [recurringIncomes]);
-  const safetyMargin = totalMonthlyRecurringIncome - totalMonthlyRecurringExpenses - totalOverdue;
+  
+  // Requirement: Monthly Net Margin should equal Liquid Hub total
+  const safetyMargin = liquidFunds;
 
   const currentCycleTransactions = useMemo(() => 
     transactions.filter(t => new Date(t.date) >= cycleStartDate && t.type === 'expense'),
@@ -111,13 +114,14 @@ const Dashboard: React.FC<Props> = ({
   }, [currentCycleTransactions]);
 
   const budgetProgressItems = useMemo(() => {
-    return (Object.entries(categoryBudgets) as [string, number][])
+    const items = (Object.entries(categoryBudgets) as [string, number][])
       .filter(([_, limit]) => limit > 0)
       .map(([cat, limit]) => {
         const actual = categorySpendActual[cat] || 0;
         return { category: cat, limit, actual, percent: Math.min(100, (actual / limit) * 100) };
       })
       .sort((a, b) => b.percent - a.percent);
+    return items;
   }, [categoryBudgets, categorySpendActual]);
 
   const totalBudgetAllocated = useMemo(() => (Object.values(categoryBudgets) as number[]).reduce((acc, v) => acc + (v || 0), 0), [categoryBudgets]);
@@ -128,9 +132,14 @@ const Dashboard: React.FC<Props> = ({
     if (now.getDate() >= 25) target = new Date(now.getFullYear(), now.getMonth() + 1, 25);
     const diff = target.getTime() - now.getTime();
     const safeDays = Math.max(1, Math.ceil(diff / 86400000));
-    const usableMargin = safetyMargin - totalBudgetAllocated;
+    
+    const spentInCycle = currentCycleTransactions.reduce((acc, t) => acc + t.amount, 0);
+    // usableMargin = Cash - Remaining Budget
+    const remainingBudget = Math.max(0, totalBudgetAllocated - spentInCycle);
+    const usableMargin = liquidFunds - remainingBudget;
+    
     return { daysUntil25th: safeDays, dailySpendLimit: usableMargin > 0 ? usableMargin / safeDays : 0 };
-  }, [safetyMargin, totalBudgetAllocated]);
+  }, [liquidFunds, totalBudgetAllocated, currentCycleTransactions]);
 
   const manualTransactions = useMemo(() => 
     transactions.filter(t => !t.recurringId).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
@@ -288,7 +297,6 @@ const Dashboard: React.FC<Props> = ({
     // Logic for Activation
     const today = new Date();
     const todayDay = today.getDate();
-    // Activation is active if today's date >= bill's due date OR there is accumulated debt
     const isActive = todayDay >= bill.dayOfMonth || (bill.accumulatedOverdue || 0) > 0;
     const daysOverdue = todayDay > bill.dayOfMonth && !paid ? todayDay - bill.dayOfMonth : 0;
     
@@ -447,8 +455,36 @@ const Dashboard: React.FC<Props> = ({
 
       <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
         <div className="flex justify-between items-center mb-10"><div><h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em]">Financial Activity Feed</h3><p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-widest">Cash & Digital Transaction Ledger</p></div><div className="text-right"><p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Today's Flow</p><p className="text-sm font-black text-slate-900">${manualTransactions.filter(t => t.date === new Date().toISOString().split('T')[0]).reduce((acc, t) => t.type === 'expense' ? acc - t.amount : acc + t.amount, 0).toFixed(2)}</p></div></div>
-        <div className="space-y-4 max-h-[500px] overflow-y-auto no-scrollbar pr-2">{manualTransactions.map(t => (<div key={t.id} className="p-5 bg-slate-50 border border-slate-100 rounded-[2rem] hover:bg-white hover:shadow-lg hover:ring-2 hover:ring-indigo-100/50 transition-all group flex items-center justify-between"><div className="flex items-center gap-4"><div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-white text-lg shadow-sm transition-transform group-hover:scale-110 ${t.type === 'expense' ? 'bg-slate-200 text-slate-400' : 'bg-emerald-500'}`}><i className={`fas fa-receipt`}></i></div><div><p className="font-black text-sm text-slate-800">{t.description}</p><div className="flex items-center gap-2"><span className="text-[9px] font-black text-indigo-500 uppercase tracking-widest">{t.category}</span><span className="w-1 h-1 bg-slate-300 rounded-full"></span><span className={`text-[8px] font-black uppercase tracking-widest ${t.institution === 'Cash in Hand' ? 'text-amber-500' : 'text-slate-400'}`}>{t.institution === 'Cash in Hand' ? 'Wallet' : t.institution}</span></div></div></div><div className="flex items-center gap-4"><div className="text-right"><p className={`font-black text-base ${t.type === 'expense' ? 'text-slate-900' : 'text-emerald-600'}`}>{t.type === 'expense' ? '-' : '+'}${t.amount.toFixed(2)}</p><p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{t.date}</p></div></div></div>))}</div>
+        <div className="space-y-4 max-h-[500px] overflow-y-auto no-scrollbar pr-2">{manualTransactions.map(t => (<div key={t.id} className="p-5 bg-slate-50 border border-slate-100 rounded-[2rem] hover:bg-white hover:shadow-lg hover:ring-2 hover:ring-indigo-100/50 transition-all group flex items-center justify-between"><div className="flex items-center gap-4"><div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-white text-lg shadow-sm transition-transform group-hover:scale-110 ${t.type === 'expense' ? 'bg-slate-200 text-slate-400' : 'bg-emerald-500'}`}><i className={`fas fa-receipt`}></i></div><div><p className="font-black text-sm text-slate-800">{t.description}</p><div className="flex items-center gap-2"><span className="text-[9px] font-black text-indigo-500 uppercase tracking-widest">{t.category}</span><span className="w-1 h-1 bg-slate-300 rounded-full"></span><span className={`text-[8px] font-black uppercase tracking-widest ${t.institution === 'Cash in Hand' ? 'text-amber-500' : 'text-slate-400'}`}>{t.institution === 'Cash in Hand' ? 'Wallet' : t.institution}</span></div></div></div><div className="flex items-center gap-4"><div className="text-right"><p className={`font-black text-base ${t.type === 'expense' ? 'text-slate-900' : 'text-emerald-600'}`}>{t.type === 'expense' ? '-' : '+'}${t.amount.toFixed(2)}</p><p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{t.date}</p></div><button onClick={() => setTransactionToEdit(t)} className="w-10 h-10 flex items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-400 hover:text-indigo-600 opacity-0 group-hover:opacity-100 transition-all shadow-sm"><i className="fas fa-edit text-xs"></i></button></div></div>))}</div>
       </section>
+
+      {transactionToEdit && (
+        <div className="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-xl rounded-[3rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <div><h2 className="text-xl font-black text-slate-800">Modify Entry</h2><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Update Transaction Details</p></div>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => { if(confirm('Permanently delete this entry?')) { onDelete(transactionToEdit.id); setTransactionToEdit(null); } }} 
+                  className="w-10 h-10 flex items-center justify-center bg-white border border-rose-100 rounded-xl text-rose-400 hover:bg-rose-500 hover:text-white transition shadow-sm"
+                  title="Delete Entry"
+                >
+                  <i className="fas fa-trash-alt"></i>
+                </button>
+                <button onClick={() => setTransactionToEdit(null)} className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-slate-400 hover:text-slate-800 transition"><i className="fas fa-times"></i></button>
+              </div>
+            </div>
+            <div className="p-2">
+              <TransactionForm 
+                bankConnections={bankConnections} 
+                initialData={transactionToEdit} 
+                onAdd={(t) => { onEdit({ ...t, id: transactionToEdit.id } as Transaction); setTransactionToEdit(null); }} 
+                onCancel={() => setTransactionToEdit(null)} 
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">

@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CATEGORIES, Transaction, TransactionType, LineItem, BankConnection } from '../types';
 
 interface Props {
@@ -50,15 +50,19 @@ const TransactionForm: React.FC<Props> = ({ onAdd, initialData, onCancel, bankCo
       date,
       vendor: vendor.trim() || undefined,
       institution,
-      lineItems: lineItems.length > 0 ? lineItems : undefined
+      lineItems: lineItems.length > 0 ? lineItems : undefined,
+      recurringId: initialData?.recurringId,
+      savingGoalId: initialData?.savingGoalId
     });
     
     // Reset form
-    setAmount('');
-    setDesc('');
-    setNotes('');
-    setVendor('');
-    setLineItems([]);
+    if (!initialData) {
+      setAmount('');
+      setDesc('');
+      setNotes('');
+      setVendor('');
+      setLineItems([]);
+    }
     setErrors({});
   };
 
@@ -67,6 +71,8 @@ const TransactionForm: React.FC<Props> = ({ onAdd, initialData, onCancel, bankCo
     d.setDate(d.getDate() + offset);
     setDate(d.toISOString().split('T')[0]);
   };
+
+  const isEditing = !!initialData?.id;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4 p-6 bg-white rounded-[2rem] shadow-sm border border-slate-100 animate-in fade-in duration-300">
@@ -201,7 +207,7 @@ const TransactionForm: React.FC<Props> = ({ onAdd, initialData, onCancel, bankCo
           type="submit"
           className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase tracking-widest text-[11px] hover:bg-indigo-700 transition shadow-xl shadow-indigo-100 active:scale-95"
         >
-          Confirm Entry
+          {isEditing ? 'Save Changes' : 'Confirm Entry'}
         </button>
       </div>
     </form>

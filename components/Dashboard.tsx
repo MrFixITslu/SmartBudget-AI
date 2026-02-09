@@ -42,9 +42,6 @@ const Dashboard: React.FC<Props> = ({
   const [isSyncingPortal, setIsSyncingPortal] = useState<string | null>(null);
   const [trendTimeframe, setTrendTimeframe] = useState<Timeframe>('monthly');
   const [trendCategory, setTrendCategory] = useState<string>('All');
-  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
-
-  const currentMonth = useMemo(() => new Date().toISOString().substring(0, 7), []);
 
   const cycleStartDate = useMemo(() => {
     const now = new Date();
@@ -101,16 +98,16 @@ const Dashboard: React.FC<Props> = ({
   const totalMonthlyRecurringIncome = useMemo(() => recurringIncomes.reduce((acc, curr) => acc + (curr.amount || 0), 0), [recurringIncomes]);
   const safetyMargin = totalMonthlyRecurringIncome - totalMonthlyRecurringExpenses - totalOverdue;
 
-  const currentMonthTransactions = useMemo(() => 
-    transactions.filter(t => t.date.startsWith(currentMonth) && t.type === 'expense'),
-    [transactions, currentMonth]
+  const currentCycleTransactions = useMemo(() => 
+    transactions.filter(t => new Date(t.date) >= cycleStartDate && t.type === 'expense'),
+    [transactions, cycleStartDate]
   );
 
   const categorySpendActual = useMemo(() => {
     const totals: Record<string, number> = {};
-    currentMonthTransactions.forEach(t => { totals[t.category] = (totals[t.category] || 0) + t.amount; });
+    currentCycleTransactions.forEach(t => { totals[t.category] = (totals[t.category] || 0) + t.amount; });
     return totals;
-  }, [currentMonthTransactions]);
+  }, [currentCycleTransactions]);
 
   const budgetProgressItems = useMemo(() => {
     return (Object.entries(categoryBudgets) as [string, number][])
@@ -149,19 +146,6 @@ const Dashboard: React.FC<Props> = ({
     });
     return Object.entries(buckets).map(([label, amount]) => ({ label, amount })).sort((a, b) => a.label.localeCompare(b.label)).slice(-12);
   }, [transactions, trendTimeframe, trendCategory]);
-
-  const projectionData = useMemo(() => {
-    const data = [];
-    const monthlyNet = totalMonthlyRecurringIncome - totalMonthlyRecurringExpenses;
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const currentMonthIdx = new Date().getMonth();
-    let runningSavings = liquidFunds;
-    for (let i = 0; i < 12; i++) {
-      data.push({ name: months[(currentMonthIdx + i) % 12], ProjectedSavings: Math.round(runningSavings), MonthlySpend: Math.round(totalMonthlyRecurringExpenses) });
-      runningSavings += monthlyNet;
-    }
-    return data;
-  }, [liquidFunds, totalMonthlyRecurringIncome, totalMonthlyRecurringExpenses]);
 
   const cycleBills = useMemo(() => [...recurringExpenses].sort((a, b) => a.dayOfMonth - b.dayOfMonth), [recurringExpenses]);
   const cycleIncomes = useMemo(() => [...recurringIncomes].sort((a, b) => a.dayOfMonth - b.dayOfMonth), [recurringIncomes]);
@@ -221,18 +205,51 @@ const Dashboard: React.FC<Props> = ({
     const paid = isBillPaidInCycle(bill);
     const totalToPay = bill.amount + (bill.accumulatedOverdue || 0);
     const currentInput = paymentInputs[bill.id] || totalToPay.toString();
+    
+    // Logic for Activation
+    const today = new Date();
+    const todayDay = today.getDate();
+    // Activation is active if today's date >= bill's due date OR there is accumulated debt
+    const isActive = todayDay >= bill.dayOfMonth || (bill.accumulatedOverdue || 0) > 0;
+    const daysOverdue = todayDay > bill.dayOfMonth && !paid ? todayDay - bill.dayOfMonth : 0;
+    
+    let statusLabel = "Scheduled";
+    let statusColor = "text-slate-400 bg-slate-50";
+    if (paid) {
+      statusLabel = "Paid";
+      statusColor = "text-emerald-500 bg-emerald-50 border-emerald-100";
+    } else if (daysOverdue > 0) {
+      statusLabel = `${daysOverdue} Days Overdue`;
+      statusColor = "text-rose-500 bg-rose-50 border-rose-100 animate-pulse";
+    } else if (isActive) {
+      statusLabel = "Active / Due";
+      statusColor = "text-indigo-600 bg-indigo-50 border-indigo-100";
+    }
+
     return (
-      <div key={bill.id} className={`p-6 border-2 transition-all duration-300 ${paid ? 'bg-slate-50/50 border-slate-100 opacity-70 scale-[0.98] grayscale-[0.5]' : (bill.accumulatedOverdue || 0) > 0 ? 'bg-white border-rose-100 shadow-xl shadow-rose-50/20' : 'bg-white border-slate-100 shadow-sm'} rounded-[2.5rem] group relative`}>
-        {paid && <div className="absolute top-4 right-6 flex items-center gap-2 text-[8px] font-black text-emerald-500 uppercase tracking-[0.2em] border border-emerald-200 px-3 py-1.5 rounded-full bg-emerald-50 shadow-sm animate-in fade-in zoom-in"><i className="fas fa-check-circle"></i> Paid</div>}
-        <div className={`flex flex-col ${isCompact ? 'lg:flex-col' : 'lg:flex-row lg:items-center'} justify-between gap-6`}>
+      <div key={bill.id} className={`p-6 border-2 transition-all duration-300 ${paid ? 'bg-slate-50/50 border-slate-100 opacity-70 scale-[0.98] grayscale-[0.5]' : daysOverdue > 0 ? 'bg-white border-rose-200 shadow-xl shadow-rose-50/20' : isActive ? 'bg-white border-indigo-100 shadow-md ring-2 ring-indigo-50/50' : 'bg-slate-50 border-slate-100 opacity-80'} rounded-[2.5rem] group relative`}>
+        <div className={`absolute top-4 right-6 flex items-center gap-2 text-[8px] font-black uppercase tracking-[0.2em] border px-3 py-1.5 rounded-full shadow-sm ${statusColor}`}>
+          <i className={`fas ${paid ? 'fa-check-circle' : daysOverdue > 0 ? 'fa-clock' : 'fa-calendar-day'}`}></i> {statusLabel}
+        </div>
+
+        <div className={`flex flex-col ${isCompact ? 'lg:flex-col' : 'lg:flex-row lg:items-center'} justify-between gap-6 mt-4`}>
           <div className="flex items-center gap-5">
-            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-xl shadow-lg transition-all duration-500 ${paid ? 'bg-slate-200 text-slate-400' : (bill.accumulatedOverdue || 0) > 0 ? 'bg-rose-500 text-white rotate-3' : 'bg-indigo-600 text-white animate-pulse-soft'}`}><i className={`fas ${bill.externalSyncEnabled ? 'fa-plug' : 'fa-file-invoice'}`}></i></div>
+            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-xl shadow-lg transition-all duration-500 ${paid ? 'bg-slate-200 text-slate-400' : daysOverdue > 0 ? 'bg-rose-500 text-white rotate-3' : isActive ? 'bg-indigo-600 text-white animate-pulse-soft' : 'bg-slate-300 text-slate-500'}`}><i className={`fas ${bill.externalSyncEnabled ? 'fa-plug' : 'fa-file-invoice'}`}></i></div>
             <div>
               <p className={`font-black text-base ${paid ? 'text-slate-400' : 'text-slate-800'} flex items-center gap-2`}>{bill.description}{bill.externalSyncEnabled && !paid && <button onClick={() => handleSyncLucelec(bill.id)} disabled={isSyncingPortal === bill.id} className={`text-[8px] px-2 py-1 rounded font-black uppercase transition-all ${isSyncingPortal === bill.id ? 'bg-amber-100 text-amber-600 animate-pulse' : 'bg-indigo-50 text-indigo-500 hover:bg-indigo-600 hover:text-white'}`}>{isSyncingPortal === bill.id ? 'Syncing...' : 'Sync NeilV'}</button>}</p>
-              <p className={`text-[10px] font-black uppercase tracking-widest ${paid ? 'text-slate-300' : (bill.accumulatedOverdue || 0) > 0 ? 'text-rose-500' : 'text-slate-400'}`}>{paid ? `Settled for Cycle` : `Due: the ${bill.dayOfMonth}th • $${bill.amount} Base`}</p>
+              <p className={`text-[10px] font-black uppercase tracking-widest ${paid ? 'text-slate-300' : daysOverdue > 0 ? 'text-rose-500' : 'text-slate-400'}`}>{paid ? `Settled for Cycle` : `Due: the ${bill.dayOfMonth}th • $${bill.amount} Base`}</p>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-4 lg:gap-8"><div className="text-right min-w-[100px]"><p className={`text-xl font-black transition-colors ${paid ? 'text-slate-300' : (bill.accumulatedOverdue || 0) > 0 ? 'text-rose-600' : 'text-slate-900'}`}>${totalToPay.toFixed(2)}</p><p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Required</p></div><div className={`flex items-center gap-2 p-2 rounded-2xl border transition-all ${paid ? 'bg-slate-100 border-transparent' : 'bg-slate-50 border-slate-200'}`}><input type="number" step="0.01" disabled={paid} className={`w-24 px-3 py-2 border-none rounded-xl text-xs font-black outline-none transition-all ${paid ? 'bg-transparent text-slate-300' : 'bg-white focus:ring-2 focus:ring-indigo-500 text-slate-800'}`} value={paid ? '0.00' : currentInput} onChange={(e) => setPaymentInputs(prev => ({ ...prev, [bill.id]: e.target.value }))} /><button disabled={paid} onClick={() => { const amt = parseFloat(currentInput); if (!isNaN(amt) && amt > 0) { onPayRecurring(bill, amt); setPaymentInputs(prev => { const next = {...prev}; delete next[bill.id]; return next; }); } }} className={`px-5 py-2.5 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all shadow-lg active:scale-95 ${paid ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none' : 'bg-indigo-600 text-white hover:bg-slate-900'}`}>{paid ? 'Paid' : (parseFloat(currentInput) >= totalToPay ? 'Full Pay' : 'Partial')}</button></div></div>
+          <div className="flex flex-wrap items-center gap-4 lg:gap-8">
+            <div className="text-right min-w-[100px]">
+              <p className={`text-xl font-black transition-colors ${paid ? 'text-slate-300' : daysOverdue > 0 ? 'text-rose-600' : 'text-slate-900'}`}>${totalToPay.toFixed(2)}</p>
+              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Required</p>
+            </div>
+            <div className={`flex items-center gap-2 p-2 rounded-2xl border transition-all ${paid ? 'bg-slate-100 border-transparent' : 'bg-slate-50 border-slate-200'}`}>
+              <input type="number" step="0.01" disabled={paid} className={`w-24 px-3 py-2 border-none rounded-xl text-xs font-black outline-none transition-all ${paid ? 'bg-transparent text-slate-300' : 'bg-white focus:ring-2 focus:ring-indigo-500 text-slate-800'}`} value={paid ? '0.00' : currentInput} onChange={(e) => setPaymentInputs(prev => ({ ...prev, [bill.id]: e.target.value }))} />
+              <button disabled={paid} onClick={() => { const amt = parseFloat(currentInput); if (!isNaN(amt) && amt > 0) { onPayRecurring(bill, amt); setPaymentInputs(prev => { const next = {...prev}; delete next[bill.id]; return next; }); } }} className={`px-5 py-2.5 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all shadow-lg active:scale-95 ${paid ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none' : 'bg-indigo-600 text-white hover:bg-slate-900'}`}>{paid ? 'Paid' : (parseFloat(currentInput) >= totalToPay ? 'Full Pay' : 'Partial')}</button>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -270,8 +287,15 @@ const Dashboard: React.FC<Props> = ({
         <div className="bg-slate-900 md:col-span-2 p-10 rounded-[3rem] shadow-2xl text-white relative overflow-hidden group">
           <div className="absolute top-0 right-0 p-16 opacity-[0.03] scale-150"><i className="fas fa-gem text-[140px]"></i></div>
           <div className="relative z-10">
-            <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.25em] mb-3">Consolidated Net Worth</p>
-            <h2 className="text-5xl font-black tracking-tight">${netWorth.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h2>
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.25em] mb-3">Consolidated Net Worth</p>
+                <h2 className="text-5xl font-black tracking-tight">${netWorth.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h2>
+              </div>
+              <div className="text-right">
+                <p className="text-emerald-400 text-[9px] font-black uppercase tracking-widest border border-emerald-400/30 px-3 py-1.5 rounded-full bg-emerald-400/5">Cycle Reset: 25th</p>
+              </div>
+            </div>
             <div className="flex items-center gap-6 mt-8">
                <div className="bg-white/5 px-4 py-3 rounded-2xl border border-white/10"><p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Liquid Hub</p><p className="text-lg font-black text-emerald-400">${liquidFunds.toLocaleString()}</p></div>
                <div className="bg-white/5 px-4 py-3 rounded-2xl border border-white/10"><p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Asset Value</p><p className="text-lg font-black text-indigo-400">${(portfolioFunds + cryptoFunds).toLocaleString()}</p></div>
@@ -297,7 +321,7 @@ const Dashboard: React.FC<Props> = ({
           <div className="h-[300px] w-full"><ResponsiveContainer width="100%" height="100%"><LineChart data={trendData}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" /><XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 9, fontWeight: 800, fill: '#94a3b8' }} dy={10} /><YAxis axisLine={false} tickLine={false} tick={{ fontSize: 9, fontWeight: 800, fill: '#94a3b8' }} tickFormatter={(val) => `$${val}`} /><Tooltip contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase' }} /><Line type="monotone" dataKey="amount" stroke="#6366f1" strokeWidth={4} dot={{ fill: '#6366f1', strokeWidth: 2, r: 4, stroke: '#fff' }} activeDot={{ r: 6, strokeWidth: 0 }} animationDuration={1500} name="Expenditure" /></LineChart></ResponsiveContainer></div>
         </section>
         <section className="bg-slate-900 p-10 rounded-[3rem] shadow-2xl text-white overflow-hidden flex flex-col">
-          <div className="flex items-center justify-between mb-8"><div><h3 className="font-black uppercase text-xs tracking-[0.3em] text-white/80">Active Budgets</h3><p className="text-[10px] text-white/40 font-bold uppercase mt-1 tracking-widest">Progress on Category Limits</p></div><div className="w-10 h-10 bg-white/5 rounded-xl flex items-center justify-center border border-white/10"><i className="fas fa-bullseye text-indigo-400"></i></div></div>
+          <div className="flex items-center justify-between mb-8"><div><h3 className="font-black uppercase text-xs tracking-[0.3em] text-white/80">Active Budgets</h3><p className="text-[10px] text-white/40 font-bold uppercase mt-1 tracking-widest">Spent since {cycleStartDate.toLocaleDateString()}</p></div><div className="w-10 h-10 bg-white/5 rounded-xl flex items-center justify-center border border-white/10"><i className="fas fa-bullseye text-indigo-400"></i></div></div>
           <div className="flex-1 space-y-6 overflow-y-auto no-scrollbar pr-1">{budgetProgressItems.map(item => (<div key={item.category} className="space-y-2"><div className="flex justify-between items-end"><div><p className="text-[10px] font-black text-white/90 uppercase tracking-widest">{item.category}</p><p className="text-[9px] text-white/40 font-bold uppercase">${item.actual.toFixed(2)} spent</p></div><div className="text-right"><p className={`text-xs font-black ${item.percent >= 90 ? 'text-rose-400' : 'text-indigo-400'}`}>${(item.limit - item.actual).toFixed(2)} left</p><p className="text-[9px] text-white/40 font-bold uppercase">{item.percent.toFixed(0)}% used</p></div></div><div className="h-2 w-full bg-white/5 rounded-full overflow-hidden border border-white/5"><div className={`h-full transition-all duration-1000 ease-out ${item.percent >= 90 ? 'bg-rose-500' : item.percent >= 70 ? 'bg-amber-500' : 'bg-indigo-500'}`} style={{ width: `${item.percent}%` }}></div></div></div>))}{budgetProgressItems.length === 0 && (<div className="h-full flex flex-col items-center justify-center text-center py-10"><i className="fas fa-sliders-h text-2xl text-white/10 mb-4"></i><p className="text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">No budgets configured</p></div>)}</div>
         </section>
       </div>

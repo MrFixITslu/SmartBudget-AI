@@ -28,7 +28,8 @@ const STORAGE_KEYS = {
   INVESTMENTS: 'budget_investments',
   EVENTS: 'budget_events',
   REMINDERS: 'budget_reminders_enabled',
-  AUTH: 'ff_auth'
+  AUTH: 'ff_auth',
+  LAST_CYCLE_CHECK: 'ff_last_cycle_check'
 };
 
 const safeParse = (key: string, fallback: any) => {
@@ -86,6 +87,46 @@ const App: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [showBankModal, setShowBankModal] = useState(false);
   const [showManualEntry, setShowManualEntry] = useState(false);
+
+  // Fiscal Cycle Reset Detection (25th of month)
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const now = new Date();
+    const currentCycleYearMonth = now.getDate() < 25 
+      ? `${now.getFullYear()}-${now.getMonth()}` // Previous month's cycle
+      : `${now.getFullYear()}-${now.getMonth() + 1}`; // Current month's cycle
+
+    const lastCheck = localStorage.getItem(STORAGE_KEYS.LAST_CYCLE_CHECK);
+
+    if (lastCheck && lastCheck !== currentCycleYearMonth) {
+      console.log("New cycle detected! Accruing unpaid balances...");
+      
+      // Calculate previous cycle start and end dates
+      const prevCycleStart = new Date(now.getFullYear(), now.getMonth(), 25);
+      if (now.getDate() < 25) prevCycleStart.setMonth(prevCycleStart.getMonth() - 2);
+      else prevCycleStart.setMonth(prevCycleStart.getMonth() - 1);
+      
+      const prevCycleEnd = new Date(prevCycleStart);
+      prevCycleEnd.setMonth(prevCycleEnd.getMonth() + 1);
+      prevCycleEnd.setDate(24);
+
+      setRecurringExpenses(prev => prev.map(bill => {
+        const wasPaidInCycle = transactions.some(t => 
+          t.recurringId === bill.id && 
+          new Date(t.date) >= prevCycleStart && 
+          new Date(t.date) <= prevCycleEnd
+        );
+
+        if (!wasPaidInCycle) {
+          return { ...bill, accumulatedOverdue: (bill.accumulatedOverdue || 0) + bill.amount };
+        }
+        return bill;
+      }));
+    }
+
+    localStorage.setItem(STORAGE_KEYS.LAST_CYCLE_CHECK, currentCycleYearMonth);
+  }, [isAuthenticated, transactions]);
 
   // Key Selection Check
   useEffect(() => {
@@ -269,11 +310,9 @@ const App: React.FC = () => {
 
   const updatePortfolio = (update: PortfolioUpdate) => {
     setInvestments(prev => {
-      // Find the existing account for this provider
       const account = prev.find(inv => inv.provider === update.provider);
       
       if (!account) {
-        // If account doesn't exist, create it (shouldn't happen with BankSyncModal logic)
         return [...prev, {
           id: generateId(),
           provider: update.provider,
@@ -376,10 +415,8 @@ const App: React.FC = () => {
       }
       setIsLoading(false);
     } else {
-      // Specifically for Investment (Binance/Vanguard)
       const provider = institution as 'Binance' | 'Vanguard';
       
-      // Initialize the account structure
       const newInv: InvestmentAccount = {
         id: generateId(), 
         provider, 
@@ -388,7 +425,6 @@ const App: React.FC = () => {
       };
       setInvestments(prev => [...prev.filter(i => i.provider !== institution), newInv]);
 
-      // Pull current holdings from simulated API
       setIsLoading(true);
       const holdingsData = await syncInvestmentHoldings(provider);
       if (holdingsData && holdingsData.length > 0) {

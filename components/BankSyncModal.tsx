@@ -42,7 +42,14 @@ const BankSyncModal: React.FC<Props> = ({ onSuccess, onClose }) => {
     setLoading(true);
     const success = await verifyApiConnection({}, selectedBank?.name || '');
     setLoading(false);
-    if (success) setStep('balance-init');
+    if (success) {
+      // For investments, we skip the manual balance entry if we're pulling portfolio data
+      if (selectedBank?.type === 'investment') {
+        setStep('syncing');
+      } else {
+        setStep('balance-init');
+      }
+    }
   };
 
   const handleFinish = () => {
@@ -144,7 +151,7 @@ const BankSyncModal: React.FC<Props> = ({ onSuccess, onClose }) => {
                 </>
               )}
               <button disabled={loading} className={`w-full py-4 ${selectedBank.color} text-white font-black rounded-2xl transition shadow-lg flex items-center justify-center gap-2 active:scale-95`}>
-                {loading ? <i className="fas fa-circle-notch fa-spin"></i> : 'Authorize API'}
+                {loading ? <i className="fas fa-circle-notch fa-spin"></i> : (selectedBank.type === 'investment' ? 'Connect Portfolio' : 'Authorize API')}
               </button>
             </form>
           </div>
@@ -180,9 +187,13 @@ const BankSyncModal: React.FC<Props> = ({ onSuccess, onClose }) => {
         {step === 'syncing' && (
           <div className="p-12 text-center">
             <div className="w-20 h-20 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-8"></div>
-            <h3 className="text-xl font-black text-slate-800 mb-2">Standardizing Feed</h3>
-            <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] animate-pulse">JSON Pipeline Processing...</p>
-            {setTimeout(() => setStep('success'), 3000) && null}
+            <h3 className="text-xl font-black text-slate-800 mb-2">
+              {selectedBank?.type === 'investment' ? 'Extracting Portfolio' : 'Standardizing Feed'}
+            </h3>
+            <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] animate-pulse">
+              {selectedBank?.type === 'investment' ? 'Polling Asset Balances...' : 'JSON Pipeline Processing...'}
+            </p>
+            {setTimeout(() => setStep('success'), 4000) && null}
           </div>
         )}
 
@@ -192,7 +203,11 @@ const BankSyncModal: React.FC<Props> = ({ onSuccess, onClose }) => {
               <i className="fas fa-check"></i>
             </div>
             <h3 className="text-2xl font-black text-slate-800 mb-2">API Linked!</h3>
-            <p className="text-slate-500 text-sm mb-8">Real-time webhooks are now active for <b>{selectedBank?.name}</b>.</p>
+            <p className="text-slate-500 text-sm mb-8">
+              {selectedBank?.type === 'investment' 
+                ? `Total amounts for ${selectedBank.name} have been retrieved. Approve them in the Verification Queue.`
+                : `Real-time webhooks are now active for ${selectedBank?.name}.`}
+            </p>
             <button onClick={handleFinish} className="w-full py-4 bg-slate-900 text-white font-black rounded-2xl shadow-xl transition active:scale-95">
               Go to Dashboard
             </button>

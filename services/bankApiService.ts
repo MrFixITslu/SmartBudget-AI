@@ -61,6 +61,58 @@ export const syncBankData = async (
 };
 
 /**
+ * Specifically for Investment platforms like Binance.
+ * Pulls current holdings/quantities instead of just transactions.
+ */
+export const syncInvestmentHoldings = async (
+  provider: 'Binance' | 'Vanguard'
+): Promise<AIAnalysisResult[]> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  await new Promise(resolve => setTimeout(resolve, 2500));
+
+  try {
+    const prompt = `
+      Simulate a ${provider} API response for the current user's portfolio state.
+      Return a list of current holdings. 
+      For Binance, include BTC, ETH, and SOL with realistic "whale-like" quantities.
+      For Vanguard, include VOO and VOOG.
+    `;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              updateType: { type: Type.STRING, enum: ["portfolio"] },
+              portfolio: {
+                type: Type.OBJECT,
+                properties: {
+                  symbol: { type: Type.STRING },
+                  quantity: { type: Type.NUMBER },
+                  provider: { type: Type.STRING, enum: ["Binance", "Vanguard"] }
+                },
+                required: ["symbol", "quantity", "provider"]
+              }
+            },
+            required: ["updateType", "portfolio"]
+          }
+        }
+      }
+    });
+
+    return JSON.parse(response.text);
+  } catch (error) {
+    console.error("Investment Sync Error:", error);
+    return [];
+  }
+};
+
+/**
  * Specialized LUCELEC Portal Scraper Simulation
  * Target: https://myaccount.lucelec.com/app/login.jsp
  * User: NeilV

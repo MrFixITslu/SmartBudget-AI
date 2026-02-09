@@ -9,7 +9,7 @@ import BankSyncModal from './components/BankSyncModal';
 import BudgetAssistant from './components/BudgetAssistant';
 import EventPlanner from './components/EventPlanner';
 import VerificationQueue from './components/VerificationQueue';
-import { syncBankData } from './services/bankApiService';
+import { syncBankData, syncInvestmentHoldings } from './services/bankApiService';
 import { Transaction, AIAnalysisResult, RecurringExpense, RecurringIncome, SavingGoal, BankConnection, InvestmentAccount, MarketPrice, InstitutionType, BudgetEvent, PortfolioUpdate } from './types';
 
 // Simple obfuscated credentials
@@ -268,23 +268,42 @@ const App: React.FC = () => {
   };
 
   const updatePortfolio = (update: PortfolioUpdate) => {
-    setInvestments(prev => prev.map(inv => {
-      if (inv.provider === update.provider) {
-        const existingIdx = inv.holdings.findIndex(h => h.symbol === update.symbol);
-        const newHoldings = [...inv.holdings];
-        if (existingIdx >= 0) {
-          newHoldings[existingIdx] = { ...newHoldings[existingIdx], quantity: update.quantity };
-        } else {
-          newHoldings.push({ 
-            symbol: update.symbol, 
-            quantity: update.quantity, 
-            purchasePrice: marketPrices.find(m => m.symbol === update.symbol)?.price || 0 
-          });
-        }
-        return { ...inv, holdings: newHoldings };
+    setInvestments(prev => {
+      // Find the existing account for this provider
+      const account = prev.find(inv => inv.provider === update.provider);
+      
+      if (!account) {
+        // If account doesn't exist, create it (shouldn't happen with BankSyncModal logic)
+        return [...prev, {
+          id: generateId(),
+          provider: update.provider,
+          name: `${update.provider} Portfolio`,
+          holdings: [{
+            symbol: update.symbol,
+            quantity: update.quantity,
+            purchasePrice: marketPrices.find(m => m.symbol === update.symbol)?.price || 0
+          }]
+        }];
       }
-      return inv;
-    }));
+
+      return prev.map(inv => {
+        if (inv.provider === update.provider) {
+          const existingIdx = inv.holdings.findIndex(h => h.symbol === update.symbol);
+          const newHoldings = [...inv.holdings];
+          if (existingIdx >= 0) {
+            newHoldings[existingIdx] = { ...newHoldings[existingIdx], quantity: update.quantity };
+          } else {
+            newHoldings.push({ 
+              symbol: update.symbol, 
+              quantity: update.quantity, 
+              purchasePrice: marketPrices.find(m => m.symbol === update.symbol)?.price || 0 
+            });
+          }
+          return { ...inv, holdings: newHoldings };
+        }
+        return inv;
+      });
+    });
   };
 
   const updateTransaction = (t: Transaction) => {
@@ -340,6 +359,7 @@ const App: React.FC = () => {
       lastSynced: new Date().toLocaleTimeString(), openingBalance
     };
     setBankConnections(prev => [...prev.filter(c => c.institution !== institution), newConn]);
+    
     if (institutionType !== 'investment') {
       setIsLoading(true);
       const newApiData = await syncBankData(institution);
@@ -356,10 +376,25 @@ const App: React.FC = () => {
       }
       setIsLoading(false);
     } else {
+      // Specifically for Investment (Binance/Vanguard)
+      const provider = institution as 'Binance' | 'Vanguard';
+      
+      // Initialize the account structure
       const newInv: InvestmentAccount = {
-        id: generateId(), provider: institution as any, name: `${institution} Portfolio`, holdings: []
+        id: generateId(), 
+        provider, 
+        name: `${institution} Portfolio`, 
+        holdings: []
       };
       setInvestments(prev => [...prev.filter(i => i.provider !== institution), newInv]);
+
+      // Pull current holdings from simulated API
+      setIsLoading(true);
+      const holdingsData = await syncInvestmentHoldings(provider);
+      if (holdingsData && holdingsData.length > 0) {
+        setPendingApprovals(prev => [...prev, ...holdingsData]);
+      }
+      setIsLoading(false);
     }
   };
 

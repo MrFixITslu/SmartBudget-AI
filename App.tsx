@@ -10,7 +10,7 @@ import BudgetAssistant from './components/BudgetAssistant';
 import EventPlanner from './components/EventPlanner';
 import VerificationQueue from './components/VerificationQueue';
 import { syncBankData, syncInvestmentHoldings } from './services/bankApiService';
-import { Transaction, AIAnalysisResult, RecurringExpense, RecurringIncome, SavingGoal, BankConnection, InvestmentAccount, MarketPrice, InstitutionType, BudgetEvent, PortfolioUpdate, InvestmentGoal } from './types';
+import { Transaction, AIAnalysisResult, RecurringExpense, RecurringIncome, SavingGoal, BankConnection, InvestmentAccount, MarketPrice, InstitutionType, BudgetEvent, PortfolioUpdate, InvestmentGoal, Contact } from './types';
 
 // Simple obfuscated credentials
 const _U = "bnN2"; // nsv
@@ -28,6 +28,7 @@ const STORAGE_KEYS = {
   BANK_CONNECTIONS: 'budget_bank_conns',
   INVESTMENTS: 'budget_investments',
   EVENTS: 'budget_events',
+  CONTACTS: 'ff_contacts',
   REMINDERS: 'budget_reminders_enabled',
   AUTH: 'ff_auth',
   LAST_CYCLE_CHECK: 'ff_last_cycle_check'
@@ -93,6 +94,7 @@ const App: React.FC = () => {
   const [bankConnections, setBankConnections] = useState<BankConnection[]>(() => safeParse(STORAGE_KEYS.BANK_CONNECTIONS, []));
   const [investments, setInvestments] = useState<InvestmentAccount[]>(() => safeParse(STORAGE_KEYS.INVESTMENTS, []));
   const [events, setEvents] = useState<BudgetEvent[]>(() => safeParse(STORAGE_KEYS.EVENTS, []));
+  const [contacts, setContacts] = useState<Contact[]>(() => safeParse(STORAGE_KEYS.CONTACTS, []));
 
   // Notification State
   const [remindersEnabled, setRemindersEnabled] = useState<boolean>(() => {
@@ -114,77 +116,38 @@ const App: React.FC = () => {
   const [showBankModal, setShowBankModal] = useState(false);
   const [showManualEntry, setShowManualEntry] = useState(false);
 
-  // Fiscal Cycle Reset Detection (25th of month)
+  // Fiscal Cycle Reset Detection
   useEffect(() => {
     if (!isAuthenticated) return;
-
     const now = new Date();
     const currentCycleYearMonth = now.getDate() < 25 
-      ? `${now.getFullYear()}-${now.getMonth()}` // Previous month's cycle
-      : `${now.getFullYear()}-${now.getMonth() + 1}`; // Current month's cycle
-
+      ? `${now.getFullYear()}-${now.getMonth()}` 
+      : `${now.getFullYear()}-${now.getMonth() + 1}`; 
     const lastCheck = localStorage.getItem(STORAGE_KEYS.LAST_CYCLE_CHECK);
-
     if (lastCheck && lastCheck !== currentCycleYearMonth) {
-      console.log("New cycle detected! Accruing unpaid balances and resetting income counters...");
-      
       const prevCycleStart = new Date(now.getFullYear(), now.getMonth(), 25);
       if (now.getDate() < 25) prevCycleStart.setMonth(prevCycleStart.getMonth() - 2);
       else prevCycleStart.setMonth(prevCycleStart.getMonth() - 1);
-      
       const prevCycleEnd = new Date(prevCycleStart);
       prevCycleEnd.setMonth(prevCycleEnd.getMonth() + 1);
       prevCycleEnd.setDate(24);
-
       setRecurringExpenses(prev => prev.map(bill => {
-        const wasPaidInCycle = transactions.some(t => 
-          t.recurringId === bill.id && 
-          new Date(t.date) >= prevCycleStart && 
-          new Date(t.date) <= prevCycleEnd
-        );
-
-        if (!wasPaidInCycle) {
-          return { ...bill, accumulatedOverdue: (bill.accumulatedOverdue || 0) + bill.amount };
-        }
+        const wasPaidInCycle = transactions.some(t => t.recurringId === bill.id && new Date(t.date) >= prevCycleStart && new Date(t.date) <= prevCycleEnd);
+        if (!wasPaidInCycle) return { ...bill, accumulatedOverdue: (bill.accumulatedOverdue || 0) + bill.amount };
         return bill;
       }));
-
       setRecurringIncomes(prev => prev.map(inc => ({ ...inc, accumulatedReceived: 0 })));
     }
-
     localStorage.setItem(STORAGE_KEYS.LAST_CYCLE_CHECK, currentCycleYearMonth);
   }, [isAuthenticated, transactions]);
 
   useEffect(() => {
     const checkKey = async () => {
       const aistudio = (window as any).aistudio;
-      if (aistudio) {
-        const hasKey = await aistudio.hasSelectedApiKey();
-        setHasApiKey(hasKey);
-      } else {
-        setHasApiKey(true);
-      }
+      if (aistudio) setHasApiKey(await aistudio.hasSelectedApiKey());
+      else setHasApiKey(true);
     };
     checkKey();
-  }, []);
-
-  useEffect(() => {
-    const handleRemoteLogin = () => {
-      const hash = window.location.hash;
-      if (hash.includes('u=') && hash.includes('p=')) {
-        const params = new URLSearchParams(hash.substring(1));
-        const u = params.get('u');
-        const p = params.get('p');
-        if (u && p) {
-          if (handleLogin(u, p)) {
-            window.history.replaceState(null, "", window.location.pathname + window.location.search);
-          }
-        }
-      }
-    };
-    handleRemoteLogin();
-    window.addEventListener('hashchange', handleRemoteLogin);
-    return () => window.removeEventListener('hashchange', handleRemoteLogin);
   }, []);
 
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions)); }, [transactions]);
@@ -198,44 +161,15 @@ const App: React.FC = () => {
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.BANK_CONNECTIONS, JSON.stringify(bankConnections)); }, [bankConnections]);
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.INVESTMENTS, JSON.stringify(investments)); }, [investments]);
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.EVENTS, JSON.stringify(events)); }, [events]);
+  useEffect(() => { localStorage.setItem(STORAGE_KEYS.CONTACTS, JSON.stringify(contacts)); }, [contacts]);
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.REMINDERS, remindersEnabled.toString()); }, [remindersEnabled]);
-
-  useEffect(() => {
-    if (remindersEnabled && isAuthenticated && ("Notification" in window)) {
-      const lastNotifyDate = localStorage.getItem('budget_last_notify_date');
-      const today = new Date().toISOString().split('T')[0];
-      
-      if (lastNotifyDate !== today) {
-        if (window.Notification.permission === "granted") {
-          new window.Notification("Fire Finance Pro", {
-            body: "Time to update your daily ledger! Any new coffee or utility bills?",
-            icon: "https://cdn-icons-png.flaticon.com/512/2654/2654504.png"
-          });
-          localStorage.setItem('budget_last_notify_date', today);
-        } else if (window.Notification.permission !== "denied") {
-          window.Notification.requestPermission().then(permission => {
-            if (permission === "granted") {
-              new window.Notification("Fire Finance Pro", {
-                body: "Reminders enabled! We'll ping you daily to keep your budget on track.",
-              });
-              localStorage.setItem('budget_last_notify_date', today);
-            }
-          });
-        }
-      }
-    }
-  }, [remindersEnabled, isAuthenticated]);
 
   useEffect(() => {
     const interval = setInterval(() => {
       setMarketPrices(prev => prev.map(p => {
         const isCrypto = ['BTC', 'ETH', 'SOL'].includes(p.symbol);
         const drift = (Math.random() - 0.48) * (isCrypto ? (p.symbol === 'BTC' ? 40 : 2) : 0.2);
-        return { 
-          ...p, 
-          price: Math.max(0, p.price + drift),
-          change24h: p.change24h + (Math.random() - 0.5) * 0.08
-        };
+        return { ...p, price: Math.max(0, p.price + drift), change24h: p.change24h + (Math.random() - 0.5) * 0.08 };
       }));
     }, 5000);
     return () => clearInterval(interval);
@@ -244,20 +178,9 @@ const App: React.FC = () => {
   const readilyAvailableFunds = useMemo(() => {
     const primaryBank = bankConnections.find(c => c.institution.includes('1st National'));
     const opening = primaryBank?.openingBalance || 0;
-    const relevantHistory = transactions.filter(t => 
-      t.institution === primaryBank?.institution || 
-      t.destinationInstitution === primaryBank?.institution ||
-      t.institution === 'Cash in Hand' ||
-      t.destinationInstitution === 'Cash in Hand'
-    );
-    const flow = relevantHistory.reduce((acc, t) => {
-       if (t.destinationInstitution === '1st National Bank St. Lucia' || t.destinationInstitution === 'Cash in Hand') {
-         if (t.type === 'transfer' || t.type === 'withdrawal') return acc + t.amount;
-       }
-       if (t.institution === '1st National Bank St. Lucia' || t.institution === 'Cash in Hand') {
-         if (t.type === 'income') return acc + t.amount;
-         if (t.type === 'expense' || t.type === 'transfer' || t.type === 'withdrawal' || t.type === 'savings') return acc - t.amount;
-       }
+    const flow = transactions.filter(t => t.institution === primaryBank?.institution || t.destinationInstitution === primaryBank?.institution || t.institution === 'Cash in Hand' || t.destinationInstitution === 'Cash in Hand').reduce((acc, t) => {
+       if (t.destinationInstitution === '1st National Bank St. Lucia' || t.destinationInstitution === 'Cash in Hand') { if (t.type === 'transfer' || t.type === 'withdrawal') return acc + t.amount; }
+       if (t.institution === '1st National Bank St. Lucia' || t.institution === 'Cash in Hand') { if (t.type === 'income') return acc + t.amount; if (t.type === 'expense' || t.type === 'transfer' || t.type === 'withdrawal' || t.type === 'savings') return acc - t.amount; }
        return acc;
     }, 0);
     return opening + flow;
@@ -278,115 +201,9 @@ const App: React.FC = () => {
     setShowSettings(false);
   };
 
-  const handleExportData = () => {
-    const data: Record<string, any> = {};
-    Object.values(STORAGE_KEYS).forEach(key => {
-      const val = localStorage.getItem(key);
-      if (val) {
-        try {
-          data[key] = JSON.parse(val);
-        } catch {
-          data[key] = val;
-        }
-      }
-    });
-
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `fire-finance-backup-${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const handleResetData = () => {
-    if (window.confirm("Are you absolutely sure you want to reset all your financial data? This cannot be undone.")) {
-      Object.values(STORAGE_KEYS).forEach(key => {
-        if (key !== STORAGE_KEYS.AUTH) {
-          localStorage.removeItem(key);
-        }
-      });
-      window.location.reload();
-    }
-  };
-
-  const handleAIAnalysis = (result: AIAnalysisResult) => {
-    setPendingApprovals(prev => [...prev, result]);
-  };
-
-  const handleBulkAIAnalysis = (results: AIAnalysisResult[]) => {
-    setPendingApprovals(prev => [...prev, ...results]);
-  };
-
-  const approveItem = (index: number) => {
-    const item = pendingApprovals[index];
-    if (!item) return;
-
-    if (item.updateType === 'portfolio' && item.portfolio) {
-      updatePortfolio(item.portfolio);
-    } else if (item.updateType === 'transaction' && item.transaction) {
-      addTransaction(item.transaction as Transaction);
-    }
-    setPendingApprovals(prev => prev.filter((_, i) => i !== index));
-    if (editingApprovalIndex === index) setEditingApprovalIndex(null);
-  };
-
-  const discardItem = (index: number) => {
-    setPendingApprovals(prev => prev.filter((_, i) => i !== index));
-    if (editingApprovalIndex === index) setEditingApprovalIndex(null);
-  };
-
-  const updatePortfolio = (update: PortfolioUpdate) => {
-    setInvestments(prev => {
-      const account = prev.find(inv => inv.provider === update.provider);
-      
-      if (!account) {
-        return [...prev, {
-          id: generateId(),
-          provider: update.provider,
-          name: `${update.provider} Portfolio`,
-          holdings: [{
-            symbol: update.symbol,
-            quantity: update.quantity,
-            purchasePrice: marketPrices.find(m => m.symbol === update.symbol)?.price || 0
-          }]
-        }];
-      }
-
-      return prev.map(inv => {
-        if (inv.provider === update.provider) {
-          const existingIdx = inv.holdings.findIndex(h => h.symbol === update.symbol);
-          const newHoldings = [...inv.holdings];
-          if (existingIdx >= 0) {
-            newHoldings[existingIdx] = { ...newHoldings[existingIdx], quantity: update.quantity };
-          } else {
-            newHoldings.push({ 
-              symbol: update.symbol, 
-              quantity: update.quantity, 
-              purchasePrice: marketPrices.find(m => m.symbol === update.symbol)?.price || 0 
-            });
-          }
-          return { ...inv, holdings: newHoldings };
-        }
-        return inv;
-      });
-    });
-  };
-
-  const updateTransaction = (t: Transaction) => {
-    setTransactions(prev => prev.map(item => item.id === t.id ? t : item));
-  };
-
   const addTransaction = (t: Omit<Transaction, 'id'>) => {
-    const finalInstitution = t.institution || 'Cash in Hand';
-    const newTransaction: Transaction = { ...t, id: generateId(), institution: finalInstitution };
-    const transactionsToAdd: Transaction[] = [newTransaction];
-    
-    setTransactions(prev => [...transactionsToAdd, ...prev]);
-
+    const newTransaction: Transaction = { ...t, id: generateId(), institution: t.institution || 'Cash in Hand' };
+    setTransactions(prev => [newTransaction, ...prev]);
     if (t.recurringId) {
        setRecurringExpenses(prev => prev.map(rec => {
           if (rec.id === t.recurringId) {
@@ -395,80 +212,23 @@ const App: React.FC = () => {
                 const dueDate = new Date(rec.nextDueDate);
                 dueDate.setMonth(dueDate.getMonth() + 1);
                 return { ...rec, accumulatedOverdue: 0, lastBilledDate: t.date, nextDueDate: dueDate.toISOString().split('T')[0] };
-             } else {
-                return { ...rec, accumulatedOverdue: Math.max(0, totalDue - t.amount), lastBilledDate: t.date };
              }
+             return { ...rec, accumulatedOverdue: Math.max(0, totalDue - t.amount), lastBilledDate: t.date };
           }
           return rec;
        }));
        setRecurringIncomes(prev => prev.map(inc => {
           if (inc.id === t.recurringId) {
-             const totalTarget = inc.amount;
              const alreadyReceived = inc.accumulatedReceived || 0;
-             const newTotal = alreadyReceived + t.amount;
-             
-             if (newTotal >= totalTarget) {
+             if (alreadyReceived + t.amount >= inc.amount) {
                 const nextDate = new Date(inc.nextConfirmationDate);
                 nextDate.setMonth(nextDate.getMonth() + 1);
                 return { ...inc, lastConfirmedDate: t.date, nextConfirmationDate: nextDate.toISOString().split('T')[0], accumulatedReceived: 0 };
-             } else {
-                return { ...inc, lastConfirmedDate: t.date, accumulatedReceived: newTotal };
              }
+             return { ...inc, lastConfirmedDate: t.date, accumulatedReceived: alreadyReceived + t.amount };
           }
           return inc;
        }));
-    }
-  };
-
-  const handleWithdrawal = (institution: string, amount: number) => {
-    addTransaction({
-      amount,
-      description: `Withdrawal from ${institution} to Wallet`,
-      category: 'Transfer',
-      type: 'transfer',
-      date: new Date().toISOString().split('T')[0],
-      institution: institution,
-      destinationInstitution: 'Cash in Hand'
-    });
-  };
-
-  const handleBankSuccess = async (institution: string, accountLastFour: string, openingBalance: number, institutionType: InstitutionType) => {
-    const newConn: BankConnection = { 
-      institution, institutionType, status: 'linked', accountLastFour, 
-      lastSynced: new Date().toLocaleTimeString(), openingBalance
-    };
-    setBankConnections(prev => [...prev.filter(c => c.institution !== institution), newConn]);
-    
-    if (institutionType !== 'investment') {
-      setIsLoading(true);
-      const newApiData = await syncBankData(institution);
-      if (newApiData && newApiData.length > 0) {
-        const pendingResults: AIAnalysisResult[] = newApiData.map((res: any) => ({
-          updateType: 'transaction',
-          transaction: {
-            amount: res.amount, category: res.category, description: res.description,
-            type: res.type, date: res.date || new Date().toISOString().split('T')[0],
-            vendor: res.vendor, institution: institution
-          }
-        }));
-        setPendingApprovals(prev => [...prev, ...pendingResults]);
-      }
-      setIsLoading(false);
-    } else {
-      const provider = institution as 'Binance' | 'Vanguard';
-      const newInv: InvestmentAccount = {
-        id: generateId(), 
-        provider, 
-        name: `${institution} Portfolio`, 
-        holdings: []
-      };
-      setInvestments(prev => [...prev.filter(i => i.provider !== institution), newInv]);
-      setIsLoading(true);
-      const holdingsData = await syncInvestmentHoldings(provider);
-      if (holdingsData && holdingsData.length > 0) {
-        setPendingApprovals(prev => [...prev, ...holdingsData]);
-      }
-      setIsLoading(false);
     }
   };
 
@@ -489,14 +249,13 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen pb-20 px-4 md:px-6 max-w-6xl mx-auto pt-16 relative">
       <MarketTicker prices={marketPrices} />
-      
       <header className="flex items-center justify-between mb-8 mt-4">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-900 flex items-center gap-2">
             <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white text-lg shadow-lg shadow-indigo-100"><i className="fas fa-chart-pie"></i></div>
             Fire Finance <span className="text-indigo-600">Pro v0.5</span>
           </h1>
-          <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-1">1st National Priority Enabled</p>
+          <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-1">Universal Command Center</p>
         </div>
         <div className="flex items-center gap-3">
           <button onClick={() => setShowBankModal(true)} className="w-11 h-11 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-indigo-600 hover:bg-indigo-50 transition shadow-sm" title="Bank Sync"><i className="fas fa-plug"></i></button>
@@ -514,42 +273,29 @@ const App: React.FC = () => {
 
       <section className="mb-10 sticky top-12 z-30">
         <div className="max-w-2xl mx-auto bg-white/80 backdrop-blur-xl p-4 rounded-[2.5rem] border border-white shadow-2xl">
-          <MagicInput onSuccess={handleAIAnalysis} onBulkSuccess={handleBulkAIAnalysis} onLoading={setIsLoading} onManualEntry={() => setShowManualEntry(true)} />
+          <MagicInput onSuccess={(r) => setPendingApprovals(p => [...p, r])} onBulkSuccess={(r) => setPendingApprovals(p => [...p, ...r])} onLoading={setIsLoading} onManualEntry={() => setShowManualEntry(true)} />
         </div>
       </section>
 
       <main>
         {activeTab === 'dashboard' ? (
           <>
-            <VerificationQueue pendingItems={pendingApprovals} onApprove={approveItem} onDiscard={discardItem} onEdit={setEditingApprovalIndex} onDiscardAll={() => setPendingApprovals([])} />
-            <Dashboard 
-              transactions={transactions} 
-              recurringExpenses={recurringExpenses} 
-              recurringIncomes={recurringIncomes}
-              savingGoals={savingGoals} 
-              investmentGoals={investmentGoals}
-              investments={investments} 
-              marketPrices={marketPrices}
-              bankConnections={bankConnections} 
-              targetMargin={targetMargin}
-              categoryBudgets={categoryBudgets}
-              onEdit={updateTransaction} 
-              onDelete={(id) => setTransactions(prev => prev.filter(t => t.id !== id))}
-              onPayRecurring={handlePayRecurring} 
-              onReceiveRecurringIncome={handleReceiveRecurringIncome}
-              onContributeSaving={handleContributeSaving} 
-              onWithdrawSaving={handleWithdrawSaving}
-              onWithdrawal={handleWithdrawal}
-              onAddIncome={(amount, desc, notes) => addTransaction({ amount, description: desc, notes, type: 'income', category: 'Income', date: new Date().toISOString().split('T')[0] })}
-            />
+            <VerificationQueue pendingItems={pendingApprovals} onApprove={(idx) => { const item = pendingApprovals[idx]; if (item.updateType === 'portfolio' && item.portfolio) { setInvestments(prev => { const acc = prev.find(inv => inv.provider === item.portfolio!.provider); if (!acc) return [...prev, { id: generateId(), provider: item.portfolio!.provider, name: `${item.portfolio!.provider} Portfolio`, holdings: [{ symbol: item.portfolio!.symbol, quantity: item.portfolio!.quantity, purchasePrice: 0 }] }]; return prev.map(inv => inv.provider === item.portfolio!.provider ? { ...inv, holdings: inv.holdings.some(h => h.symbol === item.portfolio!.symbol) ? inv.holdings.map(h => h.symbol === item.portfolio!.symbol ? { ...h, quantity: item.portfolio!.quantity } : h) : [...inv.holdings, { symbol: item.portfolio!.symbol, quantity: item.portfolio!.quantity, purchasePrice: 0 }] } : inv); }); } else if (item.transaction) { addTransaction(item.transaction as Transaction); } setPendingApprovals(p => p.filter((_, i) => i !== idx)); }} onDiscard={(idx) => setPendingApprovals(p => p.filter((_, i) => i !== idx))} onEdit={() => {}} onDiscardAll={() => setPendingApprovals([])} />
+            <Dashboard transactions={transactions} recurringExpenses={recurringExpenses} recurringIncomes={recurringIncomes} savingGoals={savingGoals} investmentGoals={investmentGoals} investments={investments} marketPrices={marketPrices} bankConnections={bankConnections} targetMargin={targetMargin} categoryBudgets={categoryBudgets} onEdit={(t) => setTransactions(prev => prev.map(item => item.id === t.id ? t : item))} onDelete={(id) => setTransactions(prev => prev.filter(t => t.id !== id))} onPayRecurring={(rec, amt) => addTransaction({ amount: amt, description: rec.description, category: rec.category, type: 'expense', date: new Date().toISOString().split('T')[0], recurringId: rec.id, institution: '1st National Bank St. Lucia' })} onReceiveRecurringIncome={(inc, amt) => addTransaction({ amount: amt, description: `Income: ${inc.description}`, category: inc.category, type: 'income', date: new Date().toISOString().split('T')[0], recurringId: inc.id, institution: '1st National Bank St. Lucia' })} onContributeSaving={() => {}} onWithdrawSaving={() => {}} onWithdrawal={() => {}} onAddIncome={() => {}} />
           </>
         ) : (
-          <EventPlanner events={events} onAddEvent={(e) => setEvents(prev => [...prev, { ...e, id: generateId(), items: [] }])} onDeleteEvent={(id) => setEvents(prev => prev.filter(e => e.id !== id))} onUpdateEvent={(updated) => setEvents(prev => prev.map(e => e.id === updated.id ? updated : e))} />
+          <EventPlanner 
+            events={events} 
+            contacts={contacts}
+            onAddEvent={(e) => setEvents(prev => [...prev, { ...e, id: generateId(), items: [], notes: [], tasks: [], files: [], contactIds: [] }])} 
+            onDeleteEvent={(id) => setEvents(prev => prev.filter(e => e.id !== id))} 
+            onUpdateEvent={(updated) => setEvents(prev => prev.map(e => e.id === updated.id ? updated : e))}
+            onUpdateContacts={setContacts}
+          />
         )}
       </main>
 
       <BudgetAssistant transactions={transactions} investments={investments} marketPrices={marketPrices} availableFunds={readilyAvailableFunds} />
-
       {showManualEntry && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-xl rounded-[3rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
@@ -561,36 +307,10 @@ const App: React.FC = () => {
           </div>
         </div>
       )}
-
-      {showSettings && (
-        <Settings 
-          salary={salary} onUpdateSalary={setSalary} targetMargin={targetMargin} onUpdateTargetMargin={setTargetMargin}
-          categoryBudgets={categoryBudgets} onUpdateCategoryBudgets={setCategoryBudgets}
-          recurringExpenses={recurringExpenses} onAddRecurring={(b) => setRecurringExpenses(p => [...p, {...b, id: generateId(), accumulatedOverdue: 0}])} onUpdateRecurring={(b) => setRecurringExpenses(p => p.map(x => x.id === b.id ? b : x))} onDeleteRecurring={(id) => setRecurringExpenses(p => p.filter(x => x.id !== id))} 
-          recurringIncomes={recurringIncomes} onAddRecurringIncome={(i) => setRecurringIncomes(p => [...p, {...i, id: generateId(), accumulatedReceived: 0}])} onUpdateRecurringIncome={(i) => setRecurringIncomes(p => p.map(x => x.id === i.id ? i : x))} onDeleteRecurringIncome={(id) => setRecurringIncomes(p => p.filter(x => x.id !== id))} 
-          savingGoals={savingGoals} onAddSavingGoal={(g) => setSavingGoals(p => [...p, {...g, id: generateId(), currentAmount: g.openingBalance}])} onDeleteSavingGoal={(id) => setSavingGoals(p => p.filter(x => x.id !== id))} 
-          investmentGoals={investmentGoals} onAddInvestmentGoal={(g) => setInvestmentGoals(p => [...p, {...g, id: generateId()}])} onDeleteInvestmentGoal={(id) => setInvestmentGoals(p => p.filter(x => x.id !== id))}
-          onExportData={handleExportData} onResetData={handleResetData} onClose={() => setShowSettings(false)} onLogout={handleLogout}
-          remindersEnabled={remindersEnabled} onToggleReminders={setRemindersEnabled}
-          currentBank={bankConnections[0] || {institution: '', status: 'unlinked', institutionType: 'bank', openingBalance: 0}} onResetBank={() => {}} 
-        />
-      )}
-      {showBankModal && <BankSyncModal onSuccess={handleBankSuccess} onClose={() => setShowBankModal(false)} />}
+      {showSettings && <Settings salary={salary} onUpdateSalary={setSalary} targetMargin={targetMargin} onUpdateTargetMargin={setTargetMargin} categoryBudgets={categoryBudgets} onUpdateCategoryBudgets={setCategoryBudgets} recurringExpenses={recurringExpenses} onAddRecurring={(b) => setRecurringExpenses(p => [...p, {...b, id: generateId(), accumulatedOverdue: 0}])} onUpdateRecurring={(b) => setRecurringExpenses(p => p.map(x => x.id === b.id ? b : x))} onDeleteRecurring={(id) => setRecurringExpenses(p => p.filter(x => x.id !== id))} recurringIncomes={recurringIncomes} onAddRecurringIncome={(i) => setRecurringIncomes(p => [...p, {...i, id: generateId(), accumulatedReceived: 0}])} onUpdateRecurringIncome={(i) => setRecurringIncomes(p => p.map(x => x.id === i.id ? i : x))} onDeleteRecurringIncome={(id) => setRecurringIncomes(p => p.filter(x => x.id !== id))} savingGoals={savingGoals} onAddSavingGoal={(g) => setSavingGoals(p => [...p, {...g, id: generateId(), currentAmount: g.openingBalance}])} onDeleteSavingGoal={(id) => setSavingGoals(p => p.filter(x => x.id !== id))} investmentGoals={investmentGoals} onAddInvestmentGoal={(g) => setInvestmentGoals(p => [...p, {...g, id: generateId()}])} onDeleteInvestmentGoal={(id) => setInvestmentGoals(p => p.filter(x => x.id !== id))} onExportData={() => {}} onResetData={() => {}} onClose={() => setShowSettings(false)} onLogout={handleLogout} remindersEnabled={remindersEnabled} onToggleReminders={setRemindersEnabled} currentBank={bankConnections[0] || {institution: '', status: 'unlinked', institutionType: 'bank', openingBalance: 0}} onResetBank={() => {}} />}
+      {showBankModal && <BankSyncModal onSuccess={(inst, last4, open, type) => { setBankConnections(prev => [...prev, { institution: inst, institutionType: type, status: 'linked', accountLastFour: last4, openingBalance: open, lastSynced: new Date().toLocaleTimeString() }]); setShowBankModal(false); }} onClose={() => setShowBankModal(false)} />}
     </div>
   );
-
-  function handlePayRecurring(rec: RecurringExpense, amount: number) {
-    addTransaction({ amount, description: rec.description, category: rec.category, type: 'expense', date: new Date().toISOString().split('T')[0], recurringId: rec.id, institution: '1st National Bank St. Lucia' });
-  }
-  function handleReceiveRecurringIncome(inc: RecurringIncome, amount: number) {
-    addTransaction({ amount, description: `Income: ${inc.description}`, category: inc.category, type: 'income', date: new Date().toISOString().split('T')[0], recurringId: inc.id, institution: '1st National Bank St. Lucia' });
-  }
-  function handleContributeSaving(id: string, amount: number) {
-    setSavingGoals(prev => prev.map(g => g.id === id ? { ...g, currentAmount: g.currentAmount + amount } : g));
-  }
-  function handleWithdrawSaving(id: string, amount: number) {
-    setSavingGoals(prev => prev.map(g => g.id === id ? { ...g, currentAmount: Math.max(0, g.currentAmount - amount) } : g));
-  }
 };
 
 export default App;

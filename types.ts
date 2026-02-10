@@ -49,7 +49,7 @@ export interface Transaction {
   recurringId?: string;
   savingGoalId?: string;
   institution?: string;
-  destinationInstitution?: string; // New field for transfers
+  destinationInstitution?: string; 
 }
 
 export interface PortfolioUpdate {
@@ -97,10 +97,10 @@ export interface RecurringExpense {
   category: string;
   description: string;
   dayOfMonth: number;
-  nextDueDate: string; // ISO Date String
-  accumulatedOverdue: number; // Sum of past missed payments
+  nextDueDate: string; 
+  accumulatedOverdue: number; 
   lastBilledDate?: string;
-  externalPortalUrl?: string; // e.g. LUCELEC
+  externalPortalUrl?: string; 
   externalSyncEnabled?: boolean;
 }
 
@@ -110,9 +110,39 @@ export interface RecurringIncome {
   category: string;
   description: string;
   dayOfMonth: number;
-  nextConfirmationDate: string; // ISO Date String
+  nextConfirmationDate: string; 
   lastConfirmedDate?: string;
-  accumulatedReceived?: number; // Tracks partial payments within current cycle
+  accumulatedReceived?: number; 
+}
+
+export interface Contact {
+  id: string;
+  name: string;
+  number: string;
+  email: string;
+}
+
+export interface ProjectNote {
+  id: string;
+  text: string;
+  timestamp: string;
+}
+
+export interface ProjectTask {
+  id: string;
+  text: string;
+  completed: boolean;
+  dueDate?: string;
+  completionDate?: string;
+}
+
+export interface ProjectFile {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  data: string; // base64
+  timestamp: string;
 }
 
 export interface BudgetEvent {
@@ -120,8 +150,13 @@ export interface BudgetEvent {
   name: string;
   date: string;
   items: EventItem[];
-  notes?: string;
+  notes: ProjectNote[];
+  tasks: ProjectTask[];
+  files: ProjectFile[];
+  contactIds: string[];
   status: 'planned' | 'active' | 'completed';
+  outcome?: 'success' | 'failed';
+  lessonsLearnt?: string;
   projectedBudget?: number;
 }
 

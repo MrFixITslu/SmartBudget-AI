@@ -62,8 +62,8 @@ const Dashboard: React.FC<Props> = ({
     const balances: Record<string, InstitutionalBalance> = {};
     bankConnections.forEach(conn => {
       const history = transactions.filter(t => t.institution === conn.institution || t.destinationInstitution === conn.institution);
-      // Fix: Removed <number> from reduce to avoid "Untyped function calls" error
-      const flow = history.reduce((acc, t) => {
+      // Fix: Explicitly typing accumulator as number to prevent "unknown" type errors in reduce
+      const flow = history.reduce((acc: number, t) => {
         if (t.destinationInstitution === conn.institution && (t.type === 'transfer' || t.type === 'withdrawal')) return acc + t.amount;
         if (t.institution === conn.institution) {
           if (t.type === 'income') return acc + t.amount;
@@ -74,8 +74,8 @@ const Dashboard: React.FC<Props> = ({
       balances[conn.institution] = { balance: (conn.openingBalance || 0) + flow, type: conn.institutionType, available: conn.institution.includes('1st National') };
     });
 
-    // Fix: Removed <number> from reduce to avoid "Untyped function calls" error
-    const cashFlow = transactions.filter(t => t.institution === 'Cash in Hand' || t.destinationInstitution === 'Cash in Hand').reduce((acc, t) => {
+    // Fix: Explicitly typing accumulator as number to prevent "unknown" type errors in reduce
+    const cashFlow = transactions.filter(t => t.institution === 'Cash in Hand' || t.destinationInstitution === 'Cash in Hand').reduce((acc: number, t) => {
       if (t.destinationInstitution === 'Cash in Hand' && (t.type === 'transfer' || t.type === 'withdrawal')) return acc + t.amount;
       if (t.institution === 'Cash in Hand') {
         if (t.type === 'income') return acc + t.amount;
@@ -86,15 +86,15 @@ const Dashboard: React.FC<Props> = ({
     balances['Cash in Hand'] = { balance: cashFlow, type: 'cash', available: true, isCash: true };
 
     investments.forEach(inv => {
-      // Fix: Removed <number> from reduce to avoid "Untyped function calls" error
-      const liveVal = inv.holdings.reduce((hAcc, h) => {
+      // Fix: Explicitly typing accumulator as number to prevent "unknown" type errors in reduce
+      const liveVal = inv.holdings.reduce((hAcc: number, h) => {
         const live = marketPrices.find(m => m.symbol === h.symbol)?.price || h.purchasePrice;
         return hAcc + (h.quantity * live);
       }, 0);
-      // Fix: Removed <number> from reduce to avoid "Untyped function calls" error
-      const withdrawFlow = transactions.filter(t => t.institution === inv.provider && (t.type === 'withdrawal' || t.type === 'transfer' || t.type === 'expense')).reduce((acc, t) => acc + t.amount, 0);
-      // Fix: Removed <number> from reduce to avoid "Untyped function calls" error
-      const depositFlow = transactions.filter(t => t.destinationInstitution === inv.provider && (t.type === 'transfer' || t.type === 'income')).reduce((acc, t) => acc + t.amount, 0);
+      // Fix: Explicitly typing accumulator as number to prevent "unknown" type errors in reduce
+      const withdrawFlow = transactions.filter(t => t.institution === inv.provider && (t.type === 'withdrawal' || t.type === 'transfer' || t.type === 'expense')).reduce((acc: number, t) => acc + t.amount, 0);
+      // Fix: Explicitly typing accumulator as number to prevent "unknown" type errors in reduce
+      const depositFlow = transactions.filter(t => t.destinationInstitution === inv.provider && (t.type === 'transfer' || t.type === 'income')).reduce((acc: number, t) => acc + t.amount, 0);
       balances[inv.provider] = { balance: liveVal - withdrawFlow + depositFlow, type: 'investment', available: false, holdings: inv.holdings };
     });
     return balances;
@@ -106,10 +106,10 @@ const Dashboard: React.FC<Props> = ({
     return primary + cash;
   }, [institutionalBalances]);
 
-  // Fix: Removed redundant comparison (if type is investment it won't be cash) and reduce type argument
-  const portfolioFunds = useMemo(() => (Object.values(institutionalBalances) as InstitutionalBalance[]).filter(b => b.type === 'investment').reduce((acc, b) => acc + b.balance, 0), [institutionalBalances]);
-  // Fix: Removed <number> and acc: number from reduce to resolve operator errors
-  const netWorth: number = (Object.values(institutionalBalances) as InstitutionalBalance[]).reduce((acc, b) => acc + b.balance, 0);
+  // Fix: Explicitly typing accumulator as number to prevent "unknown" type errors in reduce
+  const portfolioFunds = useMemo(() => (Object.values(institutionalBalances) as InstitutionalBalance[]).filter(b => b.type === 'investment').reduce((acc: number, b) => acc + b.balance, 0), [institutionalBalances]);
+  // Fix: Explicitly typing accumulator as number to prevent "unknown" type errors in reduce
+  const netWorth: number = (Object.values(institutionalBalances) as InstitutionalBalance[]).reduce((acc: number, b) => acc + b.balance, 0);
 
   // Fix: Added missing trendData calculation
   const trendData = useMemo(() => {
@@ -154,8 +154,10 @@ const Dashboard: React.FC<Props> = ({
     return ((incomesCleared + billsCleared) / totalItems) * 100;
   }, [recurringIncomes, recurringExpenses, transactions, cycleStartDate]);
 
-  const totalMonthlyIncomes = useMemo(() => recurringIncomes.reduce<number>((acc, i) => acc + i.amount, 0), [recurringIncomes]);
-  const totalMonthlyExpenses = useMemo(() => recurringExpenses.reduce<number>((acc, e) => acc + e.amount, 0) + (Object.values(categoryBudgets).reduce<number>((a, b) => a + (b || 0), 0)), [recurringExpenses, categoryBudgets]);
+  // Fix: Explicitly typing accumulator as number to prevent "unknown" type errors in reduce
+  const totalMonthlyIncomes = useMemo(() => recurringIncomes.reduce((acc: number, i) => acc + i.amount, 0), [recurringIncomes]);
+  // Fix: Explicitly typing accumulator as number to prevent "unknown" type errors in reduce and ensuring category budgets are treated as numbers
+  const totalMonthlyExpenses = useMemo(() => recurringExpenses.reduce((acc: number, e) => acc + e.amount, 0) + (Object.values(categoryBudgets).reduce((a: number, b) => a + (Number(b) || 0), 0)), [recurringExpenses, categoryBudgets]);
   const savingsRate = useMemo(() => totalMonthlyIncomes === 0 ? 0 : ((totalMonthlyIncomes - totalMonthlyExpenses) / totalMonthlyIncomes) * 100, [totalMonthlyIncomes, totalMonthlyExpenses]);
   const burnRate = useMemo(() => totalMonthlyExpenses / 30, [totalMonthlyExpenses]);
   const runwayMonths = useMemo(() => burnRate > 0 ? (liquidFunds / (burnRate * 30)) : 0, [liquidFunds, burnRate]);
@@ -207,8 +209,8 @@ const Dashboard: React.FC<Props> = ({
   }, [liquidFunds, netWorth, savingsRate, transactions.length, burnRate, runwayMonths, cycleProgress]);
 
   const renderIncomeCard = (income: RecurringIncome) => {
-    // Fix: Removed <number> from reduce to avoid "Untyped function calls" error
-    const receivedTotal = transactions.filter(t => t.recurringId === income.id && new Date(t.date) >= cycleStartDate && t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
+    // Fix: Explicitly typing accumulator as number to prevent "unknown" type errors in reduce
+    const receivedTotal = transactions.filter(t => t.recurringId === income.id && new Date(t.date) >= cycleStartDate && t.type === 'income').reduce((acc: number, t) => acc + t.amount, 0);
     const fullyReceived = receivedTotal >= income.amount;
     const currentInput = incomeInputs[income.id] || (income.amount - receivedTotal).toString();
     return (
@@ -246,7 +248,7 @@ const Dashboard: React.FC<Props> = ({
             <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-xl shadow-lg ${paid ? 'bg-slate-200 text-slate-400' : 'bg-indigo-600 text-white'}`}><i className={`fas ${bill.externalSyncEnabled ? 'fa-plug' : 'fa-file-invoice'}`}></i></div>
             <div><p className={`font-black text-base ${paid ? 'text-slate-400' : 'text-slate-800'}`}>{bill.description}</p><p className={`text-[10px] font-black uppercase tracking-widest text-slate-400`}>{paid ? `Settled` : `the ${bill.dayOfMonth}th`}</p></div>
           </div>
-          <div className="flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-4">
             <p className={`text-xl font-black ${paid ? 'text-slate-300' : 'text-slate-900'}`}>${totalToPay.toFixed(2)}</p>
             <div className={`flex items-center gap-2 p-2 rounded-2xl border ${paid ? 'bg-slate-100' : 'bg-slate-50 border-slate-200'}`}>
               <input type="number" step="0.01" disabled={paid} className="w-24 px-3 py-2 border-none rounded-xl text-xs font-black outline-none bg-white" value={paid ? '0.00' : currentInput} onChange={(e) => setPaymentInputs(prev => ({ ...prev, [bill.id]: e.target.value }))} />
@@ -326,8 +328,8 @@ const Dashboard: React.FC<Props> = ({
         <section className="bg-slate-900 p-10 rounded-[3rem] shadow-2xl text-white overflow-hidden flex flex-col">
           <div className="flex items-center justify-between mb-8"><div><h3 className="font-black uppercase text-xs tracking-[0.3em] text-white/80">Active Budgets</h3><p className="text-[10px] text-white/40 font-bold uppercase mt-1 tracking-widest">Target Limits This Cycle</p></div><i className="fas fa-bullseye text-indigo-400"></i></div>
           <div className="flex-1 space-y-6 overflow-y-auto no-scrollbar pr-1">{(Object.entries(categoryBudgets) as [string, number][]).filter(([_, limit]) => limit > 0).map(([cat, limit]) => {
-              // Fix: Removed <number> from reduce to avoid "Untyped function calls" error
-              const actual = transactions.filter(t => t.category === cat && new Date(t.date) >= cycleStartDate).reduce((a, b) => a + b.amount, 0);
+              // Fix: Explicitly typing accumulator as number to prevent "unknown" type errors in reduce
+              const actual = transactions.filter(t => t.category === cat && new Date(t.date) >= cycleStartDate).reduce((a: number, b) => a + b.amount, 0);
               const percent = Math.min(100, (actual / limit) * 100);
               return (<div key={cat} className="space-y-2"><div className="flex justify-between items-end"><div><p className="text-[10px] font-black text-white/90 uppercase tracking-widest">{cat}</p></div><div className="text-right"><p className={`text-xs font-black ${percent >= 90 ? 'text-rose-400' : 'text-indigo-400'}`}>${(limit - actual).toFixed(0)} left</p></div></div><div className="h-2 w-full bg-white/5 rounded-full overflow-hidden border border-white/5"><div className={`h-full transition-all duration-1000 ease-out ${percent >= 90 ? 'bg-rose-500' : 'bg-indigo-500'}`} style={{ width: `${percent}%` }}></div></div></div>);
             })}</div>

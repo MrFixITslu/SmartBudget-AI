@@ -134,7 +134,7 @@ export interface ProjectTask {
   completed: boolean;
   dueDate?: string;
   completionDate?: string;
-  subTasks?: ProjectTask[]; // Support for nested tasks
+  subTasks?: ProjectTask[]; 
 }
 
 export interface ProjectFile {
@@ -143,8 +143,8 @@ export interface ProjectFile {
   type: string;
   size: number;
   timestamp: string;
-  storageRef: string; // Key for IndexedDB or filename for Disk
-  storageType: 'indexeddb' | 'filesystem';
+  storageRef: string; 
+  storageType: 'indexeddb' | 'filesystem' | 'url';
 }
 
 export interface BudgetEvent {

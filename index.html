@@ -12,26 +12,24 @@
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2654/2654504.png">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
+    <!-- Office & Document Rendering Engines (Latest Versions) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+        
         body { 
             font-family: 'Inter', sans-serif; 
             overscroll-behavior-y: contain;
+            -webkit-tap-highlight-color: transparent;
         }
-        .glass { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.3); }
-        .dark-glass { background: rgba(15, 23, 42, 0.8); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); }
-        
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
-        
-        @keyframes pulse-soft {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.7; }
-        }
-        .animate-pulse-soft { animation: pulse-soft 3s infinite; }
 
-        /* Marquee Animation for Market Ticker */
+        .custom-scrollbar::-webkit-scrollbar { width: 5px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+
         @keyframes marquee {
             0% { transform: translateX(0); }
             100% { transform: translateX(-50%); }
@@ -39,25 +37,59 @@
         .animate-marquee {
             display: flex;
             width: max-content;
-            animation: marquee 40s linear infinite;
+            animation: marquee 50s linear infinite;
         }
-        .animate-marquee:hover {
-            animation-play-state: paused;
+
+        /* Office Document Style Overrides */
+        .preview-content {
+          font-family: 'Georgia', serif;
+          line-height: 1.6;
+          color: #1e293b;
+          background: white;
+          padding: 3rem;
+          max-width: 800px;
+          margin: 0 auto;
+          box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.15);
+        }
+        .preview-content table {
+          border-collapse: collapse;
+          width: 100%;
+          font-family: 'Inter', sans-serif;
+          font-size: 0.75rem;
+          margin: 1.5rem 0;
+        }
+        .preview-content th, .preview-content td {
+          border: 1px solid #e2e8f0;
+          padding: 10px;
+          text-align: left;
+        }
+        .preview-content th {
+          background-color: #f8fafc;
+          font-weight: 800;
+          text-transform: uppercase;
+          font-size: 0.65rem;
+          letter-spacing: 0.05em;
+        }
+        
+        .glass-dark {
+          background: rgba(15, 23, 42, 0.9);
+          backdrop-filter: blur(20px);
+          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
         }
     </style>
 <script type="importmap">
 {
   "imports": {
-    "react/": "https://esm.sh/react@^19.2.3/",
-    "react": "https://esm.sh/react@^19.2.3",
-    "@google/genai": "https://esm.sh/@google/genai@^1.34.0",
-    "recharts": "https://esm.sh/recharts@^3.6.0",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/"
+    "react/": "https://esm.sh/react@^19.0.0/",
+    "react": "https://esm.sh/react@^19.0.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.0.0/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.3.0",
+    "recharts": "https://esm.sh/recharts@^2.15.0"
   }
 }
 </script>
 </head>
-<body class="bg-slate-50 text-slate-900">
+<body class="bg-slate-50 text-slate-900 selection:bg-indigo-100 selection:text-indigo-900">
     <div id="root"></div>
 </body>
 </html>

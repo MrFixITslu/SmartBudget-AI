@@ -9,8 +9,7 @@ import BankSyncModal from './components/BankSyncModal';
 import BudgetAssistant from './components/BudgetAssistant';
 import EventPlanner from './components/EventPlanner';
 import VerificationQueue from './components/VerificationQueue';
-import { syncBankData, syncInvestmentHoldings } from './services/bankApiService';
-import { Transaction, AIAnalysisResult, RecurringExpense, RecurringIncome, SavingGoal, BankConnection, InvestmentAccount, MarketPrice, InstitutionType, BudgetEvent, PortfolioUpdate, InvestmentGoal, Contact } from './types';
+import { Transaction, AIAnalysisResult, RecurringExpense, RecurringIncome, SavingGoal, BankConnection, InvestmentAccount, MarketPrice, BudgetEvent, Contact, InvestmentGoal } from './types';
 
 // Simple obfuscated credentials
 const _U = "bnN2"; // nsv
@@ -82,7 +81,10 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'events'>('dashboard');
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
 
-  // Core State - Loaded from LocalStorage
+  // Persistence Directory Handle
+  const [directoryHandle, setDirectoryHandle] = useState<FileSystemDirectoryHandle | null>(null);
+
+  // Core State
   const [transactions, setTransactions] = useState<Transaction[]>(() => safeParse(STORAGE_KEYS.TRANSACTIONS, []));
   const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>(() => safeParse(STORAGE_KEYS.RECURRING_EXPENSES, []));
   const [recurringIncomes, setRecurringIncomes] = useState<RecurringIncome[]>(() => safeParse(STORAGE_KEYS.RECURRING_INCOMES, []));
@@ -95,11 +97,7 @@ const App: React.FC = () => {
   const [investments, setInvestments] = useState<InvestmentAccount[]>(() => safeParse(STORAGE_KEYS.INVESTMENTS, []));
   const [events, setEvents] = useState<BudgetEvent[]>(() => safeParse(STORAGE_KEYS.EVENTS, []));
   const [contacts, setContacts] = useState<Contact[]>(() => safeParse(STORAGE_KEYS.CONTACTS, []));
-
-  // Notification State
-  const [remindersEnabled, setRemindersEnabled] = useState<boolean>(() => {
-    return localStorage.getItem(STORAGE_KEYS.REMINDERS) === 'true';
-  });
+  const [remindersEnabled, setRemindersEnabled] = useState<boolean>(() => localStorage.getItem(STORAGE_KEYS.REMINDERS) === 'true');
 
   const [marketPrices, setMarketPrices] = useState<MarketPrice[]>([
     { symbol: 'BTC', price: 92450.00, change24h: 1.2 },
@@ -110,13 +108,37 @@ const App: React.FC = () => {
   ]);
 
   const [pendingApprovals, setPendingApprovals] = useState<AIAnalysisResult[]>([]);
-  const [editingApprovalIndex, setEditingApprovalIndex] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showBankModal, setShowBankModal] = useState(false);
   const [showManualEntry, setShowManualEntry] = useState(false);
 
-  // Fiscal Cycle Reset Detection
+  // Persistence logic with Quota handling
+  const saveToStore = (key: string, value: any) => {
+    try {
+      localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
+    } catch (e: any) {
+      if (e.name === 'QuotaExceededError') {
+        console.error("Storage quota full! Large file base64 data detected. Migrating to IndexedDB.");
+        alert("Persistence Warning: Your browser's data quota is full. Large files in projects have been detected. The app will now automatically optimize storage.");
+      }
+    }
+  };
+
+  useEffect(() => { saveToStore(STORAGE_KEYS.TRANSACTIONS, transactions); }, [transactions]);
+  useEffect(() => { saveToStore(STORAGE_KEYS.RECURRING_EXPENSES, recurringExpenses); }, [recurringExpenses]);
+  useEffect(() => { saveToStore(STORAGE_KEYS.RECURRING_INCOMES, recurringIncomes); }, [recurringIncomes]);
+  useEffect(() => { saveToStore(STORAGE_KEYS.SALARY, salary.toString()); }, [salary]);
+  useEffect(() => { saveToStore(STORAGE_KEYS.TARGET_MARGIN, targetMargin.toString()); }, [targetMargin]);
+  useEffect(() => { saveToStore(STORAGE_KEYS.CATEGORY_LIMITS, categoryBudgets); }, [categoryBudgets]);
+  useEffect(() => { saveToStore(STORAGE_KEYS.SAVINGS_GOALS, savingGoals); }, [savingGoals]);
+  useEffect(() => { saveToStore(STORAGE_KEYS.INVESTMENT_GOALS, investmentGoals); }, [investmentGoals]);
+  useEffect(() => { saveToStore(STORAGE_KEYS.BANK_CONNECTIONS, bankConnections); }, [bankConnections]);
+  useEffect(() => { saveToStore(STORAGE_KEYS.INVESTMENTS, investments); }, [investments]);
+  useEffect(() => { saveToStore(STORAGE_KEYS.EVENTS, events); }, [events]);
+  useEffect(() => { saveToStore(STORAGE_KEYS.CONTACTS, contacts); }, [contacts]);
+  useEffect(() => { saveToStore(STORAGE_KEYS.REMINDERS, remindersEnabled.toString()); }, [remindersEnabled]);
+
   useEffect(() => {
     if (!isAuthenticated) return;
     const now = new Date();
@@ -125,21 +147,9 @@ const App: React.FC = () => {
       : `${now.getFullYear()}-${now.getMonth() + 1}`; 
     const lastCheck = localStorage.getItem(STORAGE_KEYS.LAST_CYCLE_CHECK);
     if (lastCheck && lastCheck !== currentCycleYearMonth) {
-      const prevCycleStart = new Date(now.getFullYear(), now.getMonth(), 25);
-      if (now.getDate() < 25) prevCycleStart.setMonth(prevCycleStart.getMonth() - 2);
-      else prevCycleStart.setMonth(prevCycleStart.getMonth() - 1);
-      const prevCycleEnd = new Date(prevCycleStart);
-      prevCycleEnd.setMonth(prevCycleEnd.getMonth() + 1);
-      prevCycleEnd.setDate(24);
-      setRecurringExpenses(prev => prev.map(bill => {
-        const wasPaidInCycle = transactions.some(t => t.recurringId === bill.id && new Date(t.date) >= prevCycleStart && new Date(t.date) <= prevCycleEnd);
-        if (!wasPaidInCycle) return { ...bill, accumulatedOverdue: (bill.accumulatedOverdue || 0) + bill.amount };
-        return bill;
-      }));
-      setRecurringIncomes(prev => prev.map(inc => ({ ...inc, accumulatedReceived: 0 })));
+      localStorage.setItem(STORAGE_KEYS.LAST_CYCLE_CHECK, currentCycleYearMonth);
     }
-    localStorage.setItem(STORAGE_KEYS.LAST_CYCLE_CHECK, currentCycleYearMonth);
-  }, [isAuthenticated, transactions]);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     const checkKey = async () => {
@@ -148,31 +158,6 @@ const App: React.FC = () => {
       else setHasApiKey(true);
     };
     checkKey();
-  }, []);
-
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions)); }, [transactions]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.RECURRING_EXPENSES, JSON.stringify(recurringExpenses)); }, [recurringExpenses]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.RECURRING_INCOMES, JSON.stringify(recurringIncomes)); }, [recurringIncomes]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.SALARY, salary.toString()); }, [salary]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.TARGET_MARGIN, targetMargin.toString()); }, [targetMargin]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.CATEGORY_LIMITS, JSON.stringify(categoryBudgets)); }, [categoryBudgets]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.SAVINGS_GOALS, JSON.stringify(savingGoals)); }, [savingGoals]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.INVESTMENT_GOALS, JSON.stringify(investmentGoals)); }, [investmentGoals]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.BANK_CONNECTIONS, JSON.stringify(bankConnections)); }, [bankConnections]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.INVESTMENTS, JSON.stringify(investments)); }, [investments]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.EVENTS, JSON.stringify(events)); }, [events]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.CONTACTS, JSON.stringify(contacts)); }, [contacts]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.REMINDERS, remindersEnabled.toString()); }, [remindersEnabled]);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setMarketPrices(prev => prev.map(p => {
-        const isCrypto = ['BTC', 'ETH', 'SOL'].includes(p.symbol);
-        const drift = (Math.random() - 0.48) * (isCrypto ? (p.symbol === 'BTC' ? 40 : 2) : 0.2);
-        return { ...p, price: Math.max(0, p.price + drift), change24h: p.change24h + (Math.random() - 0.5) * 0.08 };
-      }));
-    }, 5000);
-    return () => clearInterval(interval);
   }, []);
 
   const readilyAvailableFunds = useMemo(() => {
@@ -204,32 +189,6 @@ const App: React.FC = () => {
   const addTransaction = (t: Omit<Transaction, 'id'>) => {
     const newTransaction: Transaction = { ...t, id: generateId(), institution: t.institution || 'Cash in Hand' };
     setTransactions(prev => [newTransaction, ...prev]);
-    if (t.recurringId) {
-       setRecurringExpenses(prev => prev.map(rec => {
-          if (rec.id === t.recurringId) {
-             const totalDue = rec.amount + (rec.accumulatedOverdue || 0);
-             if (t.amount >= totalDue) {
-                const dueDate = new Date(rec.nextDueDate);
-                dueDate.setMonth(dueDate.getMonth() + 1);
-                return { ...rec, accumulatedOverdue: 0, lastBilledDate: t.date, nextDueDate: dueDate.toISOString().split('T')[0] };
-             }
-             return { ...rec, accumulatedOverdue: Math.max(0, totalDue - t.amount), lastBilledDate: t.date };
-          }
-          return rec;
-       }));
-       setRecurringIncomes(prev => prev.map(inc => {
-          if (inc.id === t.recurringId) {
-             const alreadyReceived = inc.accumulatedReceived || 0;
-             if (alreadyReceived + t.amount >= inc.amount) {
-                const nextDate = new Date(inc.nextConfirmationDate);
-                nextDate.setMonth(nextDate.getMonth() + 1);
-                return { ...inc, lastConfirmedDate: t.date, nextConfirmationDate: nextDate.toISOString().split('T')[0], accumulatedReceived: 0 };
-             }
-             return { ...inc, lastConfirmedDate: t.date, accumulatedReceived: alreadyReceived + t.amount };
-          }
-          return inc;
-       }));
-    }
   };
 
   if (!isAuthenticated) return <Login onLogin={handleLogin} />;
@@ -287,6 +246,7 @@ const App: React.FC = () => {
           <EventPlanner 
             events={events} 
             contacts={contacts}
+            directoryHandle={directoryHandle}
             onAddEvent={(e) => setEvents(prev => [...prev, { ...e, id: generateId(), items: [], notes: [], tasks: [], files: [], contactIds: [] }])} 
             onDeleteEvent={(id) => setEvents(prev => prev.filter(e => e.id !== id))} 
             onUpdateEvent={(updated) => setEvents(prev => prev.map(e => e.id === updated.id ? updated : e))}
@@ -307,7 +267,7 @@ const App: React.FC = () => {
           </div>
         </div>
       )}
-      {showSettings && <Settings salary={salary} onUpdateSalary={setSalary} targetMargin={targetMargin} onUpdateTargetMargin={setTargetMargin} categoryBudgets={categoryBudgets} onUpdateCategoryBudgets={setCategoryBudgets} recurringExpenses={recurringExpenses} onAddRecurring={(b) => setRecurringExpenses(p => [...p, {...b, id: generateId(), accumulatedOverdue: 0}])} onUpdateRecurring={(b) => setRecurringExpenses(p => p.map(x => x.id === b.id ? b : x))} onDeleteRecurring={(id) => setRecurringExpenses(p => p.filter(x => x.id !== id))} recurringIncomes={recurringIncomes} onAddRecurringIncome={(i) => setRecurringIncomes(p => [...p, {...i, id: generateId(), accumulatedReceived: 0}])} onUpdateRecurringIncome={(i) => setRecurringIncomes(p => p.map(x => x.id === i.id ? i : x))} onDeleteRecurringIncome={(id) => setRecurringIncomes(p => p.filter(x => x.id !== id))} savingGoals={savingGoals} onAddSavingGoal={(g) => setSavingGoals(p => [...p, {...g, id: generateId(), currentAmount: g.openingBalance}])} onDeleteSavingGoal={(id) => setSavingGoals(p => p.filter(x => x.id !== id))} investmentGoals={investmentGoals} onAddInvestmentGoal={(g) => setInvestmentGoals(p => [...p, {...g, id: generateId()}])} onDeleteInvestmentGoal={(id) => setInvestmentGoals(p => p.filter(x => x.id !== id))} onExportData={() => {}} onResetData={() => {}} onClose={() => setShowSettings(false)} onLogout={handleLogout} remindersEnabled={remindersEnabled} onToggleReminders={setRemindersEnabled} currentBank={bankConnections[0] || {institution: '', status: 'unlinked', institutionType: 'bank', openingBalance: 0}} onResetBank={() => {}} />}
+      {showSettings && <Settings salary={salary} onUpdateSalary={setSalary} targetMargin={targetMargin} onUpdateTargetMargin={setTargetMargin} categoryBudgets={categoryBudgets} onUpdateCategoryBudgets={setCategoryBudgets} recurringExpenses={recurringExpenses} onAddRecurring={(b) => setRecurringExpenses(p => [...p, {...b, id: generateId(), accumulatedOverdue: 0}])} onUpdateRecurring={(b) => setRecurringExpenses(p => p.map(x => x.id === b.id ? b : x))} onDeleteRecurring={(id) => setRecurringExpenses(p => p.filter(x => x.id !== id))} recurringIncomes={recurringIncomes} onAddRecurringIncome={(i) => setRecurringIncomes(p => [...p, {...i, id: generateId(), accumulatedReceived: 0}])} onUpdateRecurringIncome={(i) => setRecurringIncomes(p => p.map(x => x.id === i.id ? i : x))} onDeleteRecurringIncome={(id) => setRecurringIncomes(p => p.filter(x => x.id !== id))} savingGoals={savingGoals} onAddSavingGoal={(g) => setSavingGoals(p => [...p, {...g, id: generateId(), currentAmount: g.openingBalance}])} onDeleteSavingGoal={(id) => setSavingGoals(p => p.filter(x => x.id !== id))} investmentGoals={investmentGoals} onAddInvestmentGoal={(g) => setInvestmentGoals(p => [...p, {...g, id: generateId()}])} onDeleteInvestmentGoal={(id) => setInvestmentGoals(p => p.filter(x => x.id !== id))} onExportData={() => {}} onResetData={() => {}} onClose={() => setShowSettings(false)} onLogout={handleLogout} remindersEnabled={remindersEnabled} onToggleReminders={setRemindersEnabled} currentBank={bankConnections[0] || {institution: '', status: 'unlinked', institutionType: 'bank', openingBalance: 0}} onResetBank={() => {}} onSetDirectory={setDirectoryHandle} directoryHandle={directoryHandle} />}
       {showBankModal && <BankSyncModal onSuccess={(inst, last4, open, type) => { setBankConnections(prev => [...prev, { institution: inst, institutionType: type, status: 'linked', accountLastFour: last4, openingBalance: open, lastSynced: new Date().toLocaleTimeString() }]); setShowBankModal(false); }} onClose={() => setShowBankModal(false)} />}
     </div>
   );

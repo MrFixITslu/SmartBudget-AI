@@ -1,10 +1,12 @@
 
 import React, { useState, useMemo, useRef } from 'react';
 import { BudgetEvent, EventItem, EVENT_ITEM_CATEGORIES, EventItemCategory, ProjectTask, ProjectFile, ProjectNote, Contact } from '../types';
+import { saveFileToIndexedDB, saveFileToHardDrive, getFileFromIndexedDB, getFileFromHardDrive, deleteFileFromIndexedDB } from '../services/fileStorageService';
 
 interface Props {
   events: BudgetEvent[];
   contacts: Contact[];
+  directoryHandle: FileSystemDirectoryHandle | null;
   onAddEvent: (event: Omit<BudgetEvent, 'id' | 'items' | 'notes' | 'tasks' | 'files' | 'contactIds'>) => void;
   onDeleteEvent: (id: string) => void;
   onUpdateEvent: (event: BudgetEvent) => void;
@@ -15,13 +17,14 @@ const generateId = () => Math.random().toString(36).substr(2, 9);
 
 type ProjectTab = 'ledger' | 'tasks' | 'vault' | 'contacts' | 'log' | 'review';
 
-const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteEvent, onUpdateEvent, onUpdateContacts }) => {
+const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAddEvent, onDeleteEvent, onUpdateEvent, onUpdateContacts }) => {
   const [showAddForm, setShowAddForm] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ProjectTab>('ledger');
   const [showUniversalPicker, setShowUniversalPicker] = useState(false);
+  const [uploading, setUploading] = useState(false);
   
-  // Edit States
+  // Edit Modal States
   const [editingItem, setEditingItem] = useState<EventItem | null>(null);
   const [editingTask, setEditingTask] = useState<ProjectTask | null>(null);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
@@ -43,7 +46,7 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const selectedEvent = useMemo(() => 
-    events.find(e => e.id === selectedEventId), 
+    (Array.isArray(events) ? events : []).find(e => e.id === selectedEventId), 
     [events, selectedEventId]
   );
 
@@ -61,6 +64,7 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
     return { income, expenses, net: income - expenses };
   }, [selectedEvent]);
 
+  // Ledger CRUD
   const handleAddItem = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!selectedEvent) return;
@@ -88,6 +92,7 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
     setEditingItem(null);
   };
 
+  // Task CRUD
   const addTask = () => {
     if (!selectedEvent || !taskText.trim()) return;
     const newTask: ProjectTask = {
@@ -124,6 +129,7 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
     onUpdateEvent({ ...selectedEvent, tasks: updatedTasks });
   };
 
+  // Contact CRUD
   const addContactToProject = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedEvent || !cName.trim()) return;
@@ -157,90 +163,102 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
     onUpdateEvent({ ...selectedEvent, contactIds: [...contactIds, contactId] });
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Vault Management (Async storage fix)
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !selectedEvent) return;
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
+    setUploading(true);
+    try {
+      const fileId = generateId();
+      let storageRef = fileId;
+      let storageType: 'indexeddb' | 'filesystem' = 'indexeddb';
+
+      if (directoryHandle) {
+        // Disk Sync - Save to Project Subfolder
+        storageRef = await saveFileToHardDrive(directoryHandle, selectedEvent.name, file.name, file);
+        storageType = 'filesystem';
+      } else {
+        // IndexedDB Sync - Large blob storage
+        await saveFileToIndexedDB(fileId, file);
+      }
+
       const newFile: ProjectFile = {
-        id: generateId(),
+        id: fileId,
         name: file.name,
         type: file.type,
         size: file.size,
-        data: reader.result as string, // base64
-        timestamp: new Date().toLocaleString()
+        timestamp: new Date().toLocaleString(),
+        storageRef: storageRef,
+        storageType: storageType
       };
+
       const files = Array.isArray(selectedEvent.files) ? selectedEvent.files : [];
       onUpdateEvent({ ...selectedEvent, files: [...files, newFile] });
-    };
-    reader.readAsDataURL(file);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+    } catch (error) {
+      console.error("Upload failed:", error);
+      alert("File upload failed. Ensure you have granted folder permissions if using disk sync.");
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
-  const downloadFile = (file: ProjectFile) => {
+  const downloadFile = async (file: ProjectFile) => {
     try {
-      const base64Parts = file.data.split(',');
-      const mime = base64Parts[0].match(/:(.*?);/)?.[1] || file.type;
-      const b64Data = base64Parts[1];
-      
-      const byteCharacters = atob(b64Data);
-      const byteArrays = [];
-      
-      for (let offset = 0; offset < byteCharacters.length; offset += 512) {
-        const slice = byteCharacters.slice(offset, offset + 512);
-        const byteNumbers = new Array(slice.length);
-        for (let i = 0; i < slice.length; i++) {
-          byteNumbers[i] = slice.charCodeAt(i);
-        }
-        const byteArray = new Uint8Array(byteNumbers);
-        byteArrays.push(byteArray);
+      let blob: Blob | null = null;
+
+      if (file.storageType === 'filesystem' && directoryHandle) {
+        blob = await getFileFromHardDrive(directoryHandle, file.storageRef);
+      } else {
+        blob = await getFileFromIndexedDB(file.id);
       }
-      
-      const blob = new Blob(byteArrays, { type: mime });
+
+      if (!blob) throw new Error("File data not found in vault.");
+
       const url = URL.createObjectURL(blob);
-      
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', file.name); // This enforces the original filename
+      link.download = file.name;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       setTimeout(() => URL.revokeObjectURL(url), 10000);
     } catch (error) {
-      console.error("Failed to download file:", error);
-      alert("Unable to download file.");
+      console.error("Download failed:", error);
+      alert("Unable to retrieve file from secure vault.");
     }
   };
 
-  // Fixed error: Added openFile function to preview files from base64 data
-  const openFile = (file: ProjectFile) => {
+  const openPreview = async (file: ProjectFile) => {
     try {
-      const base64Parts = file.data.split(',');
-      const mime = base64Parts[0].match(/:(.*?);/)?.[1] || file.type;
-      const b64Data = base64Parts[1];
-      
-      const byteCharacters = atob(b64Data);
-      const byteArrays = [];
-      
-      for (let offset = 0; offset < byteCharacters.length; offset += 512) {
-        const slice = byteCharacters.slice(offset, offset + 512);
-        const byteNumbers = new Array(slice.length);
-        for (let i = 0; i < slice.length; i++) {
-          byteNumbers[i] = slice.charCodeAt(i);
-        }
-        const byteArray = new Uint8Array(byteNumbers);
-        byteArrays.push(byteArray);
+      let blob: Blob | null = null;
+      if (file.storageType === 'filesystem' && directoryHandle) {
+        blob = await getFileFromHardDrive(directoryHandle, file.storageRef);
+      } else {
+        blob = await getFileFromIndexedDB(file.id);
       }
-      
-      const blob = new Blob(byteArrays, { type: mime });
+
+      if (!blob) return;
       const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      const win = window.open();
+      if (win) win.document.write(`<iframe src="${url}" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>`);
     } catch (error) {
-      console.error("Failed to open file preview:", error);
-      alert("Unable to preview file.");
+      alert("Preview error. Please try downloading.");
     }
+  };
+
+  const deleteFile = async (file: ProjectFile) => {
+    if (!selectedEvent) return;
+    if (!confirm('Permanently remove this asset?')) return;
+
+    if (file.storageType === 'indexeddb') {
+      await deleteFileFromIndexedDB(file.id);
+    }
+    // Note: We don't delete from Hard Drive automatically for safety
+
+    const files = (Array.isArray(selectedEvent.files) ? selectedEvent.files : []).filter(f => f.id !== file.id);
+    onUpdateEvent({ ...selectedEvent, files });
   };
 
   const addNote = () => {
@@ -477,9 +495,18 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
                   <div className="flex items-center justify-between mb-10">
                     <div>
                       <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em]">Vault: /{selectedEvent.name.replace(/\s+/g, '-').toLowerCase()}</h3>
-                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Encrypted Local Asset Storage</p>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">
+                        {directoryHandle ? 'Native Disk Storage Active' : 'Internal Secure Vault Active'}
+                      </p>
                     </div>
-                    <button onClick={() => fileInputRef.current?.click()} className="px-6 py-3 bg-slate-900 text-white rounded-2xl text-[9px] font-black uppercase tracking-widest hover:bg-indigo-600 transition shadow-lg"><i className="fas fa-upload mr-2"></i> Upload Asset</button>
+                    <button 
+                      onClick={() => fileInputRef.current?.click()} 
+                      disabled={uploading}
+                      className="px-6 py-3 bg-slate-900 text-white rounded-2xl text-[9px] font-black uppercase tracking-widest hover:bg-indigo-600 transition shadow-lg disabled:opacity-50"
+                    >
+                      {uploading ? <i className="fas fa-circle-notch fa-spin mr-2"></i> : <i className="fas fa-upload mr-2"></i>}
+                      Upload Asset
+                    </button>
                     <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
@@ -493,18 +520,19 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
                         <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest">{file.timestamp}</p>
                         
                         <div className="mt-4 flex flex-col gap-2">
-                           <button onClick={() => downloadFile(file)} className="py-2 bg-indigo-500 text-white rounded-xl text-[8px] font-black uppercase tracking-widest transition hover:bg-slate-900">Download</button>
-                           <button onClick={() => openFile(file)} className="py-2 bg-slate-200 text-slate-600 rounded-xl text-[8px] font-black uppercase tracking-widest transition hover:bg-slate-300">Preview</button>
+                           <button onClick={() => downloadFile(file)} className="py-2 bg-indigo-500 text-white rounded-xl text-[8px] font-black uppercase tracking-widest transition hover:bg-slate-900">Open</button>
+                           <button onClick={() => openPreview(file)} className="py-2 bg-slate-200 text-slate-600 rounded-xl text-[8px] font-black uppercase tracking-widest transition hover:bg-slate-300">Preview</button>
                         </div>
 
                         <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button 
-                            onClick={(e) => { e.stopPropagation(); onUpdateEvent({...selectedEvent, files: (Array.isArray(selectedEvent.files) ? selectedEvent.files : []).filter(f => f.id !== file.id)}); }} 
+                            onClick={(e) => { e.stopPropagation(); deleteFile(file); }} 
                             className="w-6 h-6 bg-rose-50 text-rose-500 rounded-lg text-[8px] flex items-center justify-center hover:bg-rose-500 hover:text-white transition"
                           >
                             <i className="fas fa-times"></i>
                           </button>
                         </div>
+                        {file.storageType === 'filesystem' && <div className="absolute -top-1 -left-1 w-4 h-4 bg-emerald-500 text-white rounded-full flex items-center justify-center text-[7px] border-2 border-white shadow-sm" title="Stored on Local Hard Drive"><i className="fas fa-hdd"></i></div>}
                       </div>
                     ))}
                     {(!Array.isArray(selectedEvent.files) || selectedEvent.files.length === 0) && <div className="col-span-full py-20 text-center border-2 border-dashed border-slate-100 rounded-[2.5rem]"><p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.2em]">No assets in repository</p></div>}

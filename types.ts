@@ -141,8 +141,9 @@ export interface ProjectFile {
   name: string;
   type: string;
   size: number;
-  data: string; // base64
   timestamp: string;
+  storageRef: string; // Key for IndexedDB or filename for Disk
+  storageType: 'indexeddb' | 'filesystem';
 }
 
 export interface BudgetEvent {

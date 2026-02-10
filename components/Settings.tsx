@@ -31,6 +31,8 @@ interface Props {
   onToggleReminders: (enabled: boolean) => void;
   currentBank: BankConnection;
   onResetBank: () => void;
+  onSetDirectory: (handle: FileSystemDirectoryHandle | null) => void;
+  directoryHandle: FileSystemDirectoryHandle | null;
 }
 
 const Settings: React.FC<Props> = ({ 
@@ -38,7 +40,8 @@ const Settings: React.FC<Props> = ({
   recurringExpenses, onAddRecurring, onUpdateRecurring, onDeleteRecurring, 
   recurringIncomes, onAddRecurringIncome, onUpdateRecurringIncome, onDeleteRecurringIncome, 
   investmentGoals, onAddInvestmentGoal, onDeleteInvestmentGoal,
-  onExportData, onResetData, onClose, onLogout, remindersEnabled, onToggleReminders
+  onExportData, onResetData, onClose, onLogout, remindersEnabled, onToggleReminders,
+  onSetDirectory, directoryHandle
 }) => {
   const [editingBill, setEditingBill] = useState<RecurringExpense | null>(null);
   const [editingIncome, setEditingIncome] = useState<RecurringIncome | null>(null);
@@ -53,6 +56,15 @@ const Settings: React.FC<Props> = ({
 
   const handleBudgetChange = (category: string, value: string) => {
     onUpdateCategoryBudgets({ ...categoryBudgets, [category]: parseFloat(value) || 0 });
+  };
+
+  const handleSetLocalVault = async () => {
+    try {
+      const handle = await (window as any).showDirectoryPicker();
+      onSetDirectory(handle);
+    } catch (err) {
+      console.error("Directory access denied", err);
+    }
   };
 
   const handleReminderToggle = (enabled: boolean) => {
@@ -129,6 +141,22 @@ const Settings: React.FC<Props> = ({
         </div>
 
         <div className="p-8 space-y-10 overflow-y-auto custom-scrollbar flex-1">
+          <section className="bg-indigo-50/50 p-6 rounded-[2rem] border border-indigo-100 space-y-4">
+             <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-indigo-600 shadow-sm"><i className="fas fa-folder-open"></i></div>
+                <div><h3 className="text-sm font-black text-slate-800">Local Hard Drive Vault</h3><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Save Project Files to a specific folder</p></div>
+              </div>
+              <button 
+                onClick={handleSetLocalVault}
+                className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${directoryHandle ? 'bg-emerald-100 text-emerald-700' : 'bg-indigo-600 text-white shadow-lg'}`}
+              >
+                {directoryHandle ? 'Vault Linked' : 'Connect Folder'}
+              </button>
+            </div>
+            {directoryHandle && <p className="text-[9px] text-emerald-600 font-black uppercase tracking-widest bg-emerald-50 p-2 rounded-lg text-center"><i className="fas fa-shield-check mr-1"></i> Native File System Sync Enabled</p>}
+          </section>
+
           <section className="bg-indigo-50/50 p-6 rounded-[2rem] border border-indigo-100">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">

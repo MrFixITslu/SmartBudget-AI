@@ -21,6 +21,11 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
   const [activeTab, setActiveTab] = useState<ProjectTab>('ledger');
   const [showUniversalPicker, setShowUniversalPicker] = useState(false);
   
+  // Edit States
+  const [editingItem, setEditingItem] = useState<EventItem | null>(null);
+  const [editingTask, setEditingTask] = useState<ProjectTask | null>(null);
+  const [editingContact, setEditingContact] = useState<Contact | null>(null);
+
   // New Project Form
   const [newName, setNewName] = useState('');
   const [newDate, setNewDate] = useState(new Date().toISOString().split('T')[0]);
@@ -74,6 +79,15 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
     e.currentTarget.reset();
   };
 
+  const handleUpdateItem = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedEvent || !editingItem) return;
+    const items = Array.isArray(selectedEvent.items) ? selectedEvent.items : [];
+    const updatedItems = items.map(i => i.id === editingItem.id ? editingItem : i);
+    onUpdateEvent({ ...selectedEvent, items: updatedItems });
+    setEditingItem(null);
+  };
+
   const addTask = () => {
     if (!selectedEvent || !taskText.trim()) return;
     const newTask: ProjectTask = {
@@ -86,6 +100,15 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
     onUpdateEvent({ ...selectedEvent, tasks: [...tasks, newTask] });
     setTaskText('');
     setTaskDueDate('');
+  };
+
+  const handleUpdateTask = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedEvent || !editingTask) return;
+    const tasks = Array.isArray(selectedEvent.tasks) ? selectedEvent.tasks : [];
+    const updatedTasks = tasks.map(t => t.id === editingTask.id ? editingTask : t);
+    onUpdateEvent({ ...selectedEvent, tasks: updatedTasks });
+    setEditingTask(null);
   };
 
   const toggleTask = (taskId: string) => {
@@ -119,6 +142,14 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
     setCName(''); setCNum(''); setCEmail('');
   };
 
+  const handleUpdateContact = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingContact) return;
+    const updatedContacts = contacts.map(c => c.id === editingContact.id ? editingContact : c);
+    onUpdateContacts(updatedContacts);
+    setEditingContact(null);
+  };
+
   const linkExistingContact = (contactId: string) => {
     if (!selectedEvent) return;
     const contactIds = Array.isArray(selectedEvent.contactIds) ? selectedEvent.contactIds : [];
@@ -147,7 +178,7 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const openFile = (file: ProjectFile) => {
+  const downloadFile = (file: ProjectFile) => {
     try {
       const base64Parts = file.data.split(',');
       const mime = base64Parts[0].match(/:(.*?);/)?.[1] || file.type;
@@ -169,17 +200,46 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
       const blob = new Blob(byteArrays, { type: mime });
       const url = URL.createObjectURL(blob);
       
-      const newWindow = window.open(url, '_blank');
-      if (!newWindow) {
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = file.name;
-        link.click();
-      }
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', file.name); // This enforces the original filename
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
       setTimeout(() => URL.revokeObjectURL(url), 10000);
     } catch (error) {
-      console.error("Failed to open file:", error);
-      alert("Unable to open file.");
+      console.error("Failed to download file:", error);
+      alert("Unable to download file.");
+    }
+  };
+
+  // Fixed error: Added openFile function to preview files from base64 data
+  const openFile = (file: ProjectFile) => {
+    try {
+      const base64Parts = file.data.split(',');
+      const mime = base64Parts[0].match(/:(.*?);/)?.[1] || file.type;
+      const b64Data = base64Parts[1];
+      
+      const byteCharacters = atob(b64Data);
+      const byteArrays = [];
+      
+      for (let offset = 0; offset < byteCharacters.length; offset += 512) {
+        const slice = byteCharacters.slice(offset, offset + 512);
+        const byteNumbers = new Array(slice.length);
+        for (let i = 0; i < slice.length; i++) {
+          byteNumbers[i] = slice.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        byteArrays.push(byteArray);
+      }
+      
+      const blob = new Blob(byteArrays, { type: mime });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (error) {
+      console.error("Failed to open file preview:", error);
+      alert("Unable to preview file.");
     }
   };
 
@@ -324,7 +384,7 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
                     </div>
                     <div className="space-y-4">
                       {(Array.isArray(selectedEvent.items) ? selectedEvent.items : []).map(item => (
-                        <div key={item.id} className="flex items-center justify-between p-6 bg-slate-50 rounded-[2rem] border border-slate-100 transition shadow-sm">
+                        <div key={item.id} className="flex items-center justify-between p-6 bg-slate-50 rounded-[2rem] border border-slate-100 transition shadow-sm group">
                           <div className="flex items-center gap-5">
                             <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-white text-lg ${item.type === 'income' ? 'bg-emerald-500' : 'bg-rose-500'}`}><i className={`fas ${item.type === 'income' ? 'fa-arrow-up' : 'fa-arrow-down'}`}></i></div>
                             <div>
@@ -336,9 +396,14 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
                               </div>
                             </div>
                           </div>
-                          <div className="text-right">
-                            <p className={`font-black text-base ${item.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>{item.type === 'income' ? '+' : '-'}${item.amount.toLocaleString()}</p>
-                            <button onClick={() => onUpdateEvent({...selectedEvent, items: (Array.isArray(selectedEvent.items) ? selectedEvent.items : []).filter(i => i.id !== item.id)})} className="text-[8px] font-black text-slate-300 uppercase tracking-widest hover:text-rose-500 transition">Delete</button>
+                          <div className="flex items-center gap-4">
+                            <div className="text-right">
+                              <p className={`font-black text-base ${item.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>{item.type === 'income' ? '+' : '-'}${item.amount.toLocaleString()}</p>
+                            </div>
+                            <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button onClick={() => setEditingItem(item)} className="text-[8px] font-black text-indigo-500 uppercase tracking-widest hover:text-indigo-700 transition">Edit</button>
+                              <button onClick={() => onUpdateEvent({...selectedEvent, items: (Array.isArray(selectedEvent.items) ? selectedEvent.items : []).filter(i => i.id !== item.id)})} className="text-[8px] font-black text-rose-300 uppercase tracking-widest hover:text-rose-500 transition">Delete</button>
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -373,7 +438,7 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
                       {(Array.isArray(selectedEvent.tasks) ? selectedEvent.tasks : []).map(task => {
                         const isOverdue = task.dueDate && new Date(task.dueDate) < new Date() && !task.completed;
                         return (
-                          <div key={task.id} className={`flex items-center justify-between p-6 rounded-[2rem] border transition-all ${task.completed ? 'bg-slate-50 border-slate-100 opacity-60' : isOverdue ? 'bg-rose-50 border-rose-200' : 'bg-white border-slate-100 shadow-sm'}`}>
+                          <div key={task.id} className={`flex items-center justify-between p-6 rounded-[2rem] border transition-all ${task.completed ? 'bg-slate-50 border-slate-100 opacity-60' : isOverdue ? 'bg-rose-50 border-rose-200' : 'bg-white border-slate-100 shadow-sm'} group`}>
                             <div className="flex items-center gap-5">
                               <button onClick={() => toggleTask(task.id)} className={`w-10 h-10 rounded-2xl flex items-center justify-center transition-colors ${task.completed ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-transparent hover:bg-slate-300'}`}><i className="fas fa-check"></i></button>
                               <div>
@@ -384,7 +449,10 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
                                 </div>
                               </div>
                             </div>
-                            <button onClick={() => onUpdateEvent({...selectedEvent, tasks: (Array.isArray(selectedEvent.tasks) ? selectedEvent.tasks : []).filter(t => t.id !== task.id)})} className="text-slate-300 hover:text-rose-500 transition px-2"><i className="fas fa-trash-alt text-[10px]"></i></button>
+                            <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button onClick={() => setEditingTask(task)} className="w-8 h-8 rounded-xl bg-slate-50 text-indigo-500 flex items-center justify-center hover:bg-indigo-500 hover:text-white transition"><i className="fas fa-edit text-[10px]"></i></button>
+                              <button onClick={() => onUpdateEvent({...selectedEvent, tasks: (Array.isArray(selectedEvent.tasks) ? selectedEvent.tasks : []).filter(t => t.id !== task.id)})} className="w-8 h-8 rounded-xl bg-slate-50 text-rose-400 flex items-center justify-center hover:bg-rose-500 hover:text-white transition"><i className="fas fa-trash-alt text-[10px]"></i></button>
+                            </div>
                           </div>
                         );
                       })}
@@ -418,13 +486,17 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
                     {(Array.isArray(selectedEvent.files) ? selectedEvent.files : []).map(file => (
                       <div 
                         key={file.id} 
-                        onClick={() => openFile(file)}
-                        className="group relative bg-slate-50 border border-slate-100 rounded-[2rem] p-5 text-center hover:bg-white hover:shadow-xl transition-all cursor-pointer"
+                        className="group relative bg-slate-50 border border-slate-100 rounded-[2rem] p-5 text-center hover:bg-white hover:shadow-xl transition-all"
                       >
                         <div className="w-14 h-14 bg-white rounded-2xl flex items-center justify-center text-slate-400 text-xl mx-auto mb-4 group-hover:text-indigo-600 transition shadow-sm"><i className={`fas ${file.type.startsWith('image/') ? 'fa-image' : 'fa-file-alt'}`}></i></div>
                         <p className="text-[10px] font-black text-slate-800 truncate mb-1">{file.name}</p>
                         <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest">{file.timestamp}</p>
-                        <div className="mt-2 text-[8px] font-black text-indigo-500 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">Click to View</div>
+                        
+                        <div className="mt-4 flex flex-col gap-2">
+                           <button onClick={() => downloadFile(file)} className="py-2 bg-indigo-500 text-white rounded-xl text-[8px] font-black uppercase tracking-widest transition hover:bg-slate-900">Download</button>
+                           <button onClick={() => openFile(file)} className="py-2 bg-slate-200 text-slate-600 rounded-xl text-[8px] font-black uppercase tracking-widest transition hover:bg-slate-300">Preview</button>
+                        </div>
+
                         <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button 
                             onClick={(e) => { e.stopPropagation(); onUpdateEvent({...selectedEvent, files: (Array.isArray(selectedEvent.files) ? selectedEvent.files : []).filter(f => f.id !== file.id)}); }} 
@@ -473,7 +545,10 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
                               <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-indigo-600 shadow-sm"><i className="fas fa-user-tie"></i></div>
                               <div><p className="font-black text-base text-slate-800">{c.name}</p><p className="text-[10px] text-indigo-500 font-bold uppercase">{c.email}</p></div>
                             </div>
-                            <button onClick={() => onUpdateEvent({...selectedEvent, contactIds: (Array.isArray(selectedEvent.contactIds) ? selectedEvent.contactIds : []).filter(id => id !== c.id)})} className="text-slate-300 hover:text-rose-500 transition px-2"><i className="fas fa-user-minus text-[10px]"></i></button>
+                            <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button onClick={() => setEditingContact(c)} className="text-[8px] font-black text-indigo-500 uppercase tracking-widest hover:text-indigo-700 transition">Edit</button>
+                              <button onClick={() => onUpdateEvent({...selectedEvent, contactIds: (Array.isArray(selectedEvent.contactIds) ? selectedEvent.contactIds : []).filter(id => id !== c.id)})} className="text-[8px] font-black text-rose-300 uppercase tracking-widest hover:text-rose-500 transition">Disconnect</button>
+                            </div>
                           </div>
                           <div className="flex items-center gap-5 mt-4">
                              <div className="flex items-center gap-2 text-slate-400"><i className="fas fa-mobile-alt text-xs"></i><span className="text-[11px] font-black">{c.number}</span></div>
@@ -572,6 +647,64 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Edit Ledger Item Modal */}
+      {editingItem && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white w-full max-w-sm rounded-[3rem] p-8 shadow-2xl border border-slate-100">
+            <h3 className="text-xl font-black text-slate-800 mb-6 uppercase text-xs tracking-widest">Update Ledger Entry</h3>
+            <form onSubmit={handleUpdateItem} className="space-y-5">
+              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Description</label><input value={editingItem.description} onChange={e => setEditingItem({...editingItem, description: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" /></div>
+              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Amount</label><input type="number" step="0.01" value={editingItem.amount} onChange={e => setEditingItem({...editingItem, amount: parseFloat(e.target.value)})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" /></div>
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Category</label>
+                <select value={editingItem.category} onChange={e => setEditingItem({...editingItem, category: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold">
+                  {EVENT_ITEM_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div className="flex gap-2">
+                <button type="submit" className="flex-1 py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[10px] hover:bg-slate-900 transition">Save Changes</button>
+                <button type="button" onClick={() => setEditingItem(null)} className="flex-1 py-4 bg-slate-50 text-slate-400 font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-slate-100 transition">Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Task Modal */}
+      {editingTask && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white w-full max-w-sm rounded-[3rem] p-8 shadow-2xl border border-slate-100">
+            <h3 className="text-xl font-black text-slate-800 mb-6 uppercase text-xs tracking-widest">Update Objective</h3>
+            <form onSubmit={handleUpdateTask} className="space-y-5">
+              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Requirement</label><textarea value={editingTask.text} onChange={e => setEditingTask({...editingTask, text: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold resize-none h-32" /></div>
+              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Deadline</label><input type="date" value={editingTask.dueDate || ''} onChange={e => setEditingTask({...editingTask, dueDate: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" /></div>
+              <div className="flex gap-2">
+                <button type="submit" className="flex-1 py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[10px] hover:bg-slate-900 transition">Update Goal</button>
+                <button type="button" onClick={() => setEditingTask(null)} className="flex-1 py-4 bg-slate-50 text-slate-400 font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-slate-100 transition">Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Contact Modal */}
+      {editingContact && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white w-full max-w-sm rounded-[3rem] p-8 shadow-2xl border border-slate-100">
+            <h3 className="text-xl font-black text-slate-800 mb-6 uppercase text-xs tracking-widest">Update Stakeholder</h3>
+            <form onSubmit={handleUpdateContact} className="space-y-5">
+              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Full Name</label><input value={editingContact.name} onChange={e => setEditingContact({...editingContact, name: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" /></div>
+              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Mobile Line</label><input value={editingContact.number} onChange={e => setEditingContact({...editingContact, number: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" /></div>
+              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Email Address</label><input value={editingContact.email} onChange={e => setEditingContact({...editingContact, email: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" /></div>
+              <div className="flex gap-2">
+                <button type="submit" className="flex-1 py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[10px] hover:bg-slate-900 transition">Save Data</button>
+                <button type="button" onClick={() => setEditingContact(null)} className="flex-1 py-4 bg-slate-50 text-slate-400 font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-slate-100 transition">Cancel</button>
+              </div>
+            </form>
           </div>
         </div>
       )}

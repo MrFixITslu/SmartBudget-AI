@@ -38,6 +38,10 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
   const [taskDueDate, setTaskDueDate] = useState('');
   const [noteText, setNoteText] = useState('');
 
+  // Sub-task State
+  const [addingSubTaskTo, setAddingSubTaskTo] = useState<string | null>(null);
+  const [subTaskText, setSubTaskText] = useState('');
+
   // Contact States
   const [cName, setCName] = useState('');
   const [cNum, setCNum] = useState('');
@@ -92,14 +96,29 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
     setEditingItem(null);
   };
 
-  // Task CRUD
+  // Task CRUD (Recursive support)
+  const updateTaskInList = (tasks: ProjectTask[], taskId: string, updateFn: (task: ProjectTask) => ProjectTask): ProjectTask[] => {
+    return tasks.map(t => {
+      if (t.id === taskId) return updateFn(t);
+      if (t.subTasks) return { ...t, subTasks: updateTaskInList(t.subTasks, taskId, updateFn) };
+      return t;
+    });
+  };
+
+  const removeTaskFromList = (tasks: ProjectTask[], taskId: string): ProjectTask[] => {
+    return tasks
+      .filter(t => t.id !== taskId)
+      .map(t => (t.subTasks ? { ...t, subTasks: removeTaskFromList(t.subTasks, taskId) } : t));
+  };
+
   const addTask = () => {
     if (!selectedEvent || !taskText.trim()) return;
     const newTask: ProjectTask = {
       id: generateId(),
       text: taskText,
       completed: false,
-      dueDate: taskDueDate || undefined
+      dueDate: taskDueDate || undefined,
+      subTasks: []
     };
     const tasks = Array.isArray(selectedEvent.tasks) ? selectedEvent.tasks : [];
     onUpdateEvent({ ...selectedEvent, tasks: [...tasks, newTask] });
@@ -107,11 +126,29 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
     setTaskDueDate('');
   };
 
+  const addSubTask = (parentId: string) => {
+    if (!selectedEvent || !subTaskText.trim()) return;
+    const newSub: ProjectTask = {
+      id: generateId(),
+      text: subTaskText,
+      completed: false,
+      subTasks: []
+    };
+    const tasks = Array.isArray(selectedEvent.tasks) ? selectedEvent.tasks : [];
+    const updatedTasks = updateTaskInList(tasks, parentId, (p) => ({
+      ...p,
+      subTasks: [...(p.subTasks || []), newSub]
+    }));
+    onUpdateEvent({ ...selectedEvent, tasks: updatedTasks });
+    setSubTaskText('');
+    setAddingSubTaskTo(null);
+  };
+
   const handleUpdateTask = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedEvent || !editingTask) return;
     const tasks = Array.isArray(selectedEvent.tasks) ? selectedEvent.tasks : [];
-    const updatedTasks = tasks.map(t => t.id === editingTask.id ? editingTask : t);
+    const updatedTasks = updateTaskInList(tasks, editingTask.id, () => editingTask);
     onUpdateEvent({ ...selectedEvent, tasks: updatedTasks });
     setEditingTask(null);
   };
@@ -119,13 +156,18 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
   const toggleTask = (taskId: string) => {
     if (!selectedEvent) return;
     const tasks = Array.isArray(selectedEvent.tasks) ? selectedEvent.tasks : [];
-    const updatedTasks = tasks.map(t => 
-      t.id === taskId ? { 
-        ...t, 
-        completed: !t.completed, 
-        completionDate: !t.completed ? new Date().toLocaleString() : undefined 
-      } : t
-    );
+    const updatedTasks = updateTaskInList(tasks, taskId, (t) => ({
+      ...t,
+      completed: !t.completed,
+      completionDate: !t.completed ? new Date().toLocaleString() : undefined
+    }));
+    onUpdateEvent({ ...selectedEvent, tasks: updatedTasks });
+  };
+
+  const deleteTask = (taskId: string) => {
+    if (!selectedEvent) return;
+    const tasks = Array.isArray(selectedEvent.tasks) ? selectedEvent.tasks : [];
+    const updatedTasks = removeTaskFromList(tasks, taskId);
     onUpdateEvent({ ...selectedEvent, tasks: updatedTasks });
   };
 
@@ -163,7 +205,7 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
     onUpdateEvent({ ...selectedEvent, contactIds: [...contactIds, contactId] });
   };
 
-  // Vault Management (Async storage fix)
+  // Vault Management
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !selectedEvent) return;
@@ -175,11 +217,9 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
       let storageType: 'indexeddb' | 'filesystem' = 'indexeddb';
 
       if (directoryHandle) {
-        // Disk Sync - Save to Project Subfolder
         storageRef = await saveFileToHardDrive(directoryHandle, selectedEvent.name, file.name, file);
         storageType = 'filesystem';
       } else {
-        // IndexedDB Sync - Large blob storage
         await saveFileToIndexedDB(fileId, file);
       }
 
@@ -207,15 +247,12 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
   const downloadFile = async (file: ProjectFile) => {
     try {
       let blob: Blob | null = null;
-
       if (file.storageType === 'filesystem' && directoryHandle) {
         blob = await getFileFromHardDrive(directoryHandle, file.storageRef);
       } else {
         blob = await getFileFromIndexedDB(file.id);
       }
-
       if (!blob) throw new Error("File data not found in vault.");
-
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -225,8 +262,7 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
       document.body.removeChild(link);
       setTimeout(() => URL.revokeObjectURL(url), 10000);
     } catch (error) {
-      console.error("Download failed:", error);
-      alert("Unable to retrieve file from secure vault.");
+      alert("Unable to retrieve file.");
     }
   };
 
@@ -238,25 +274,19 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
       } else {
         blob = await getFileFromIndexedDB(file.id);
       }
-
       if (!blob) return;
       const url = URL.createObjectURL(blob);
       const win = window.open();
       if (win) win.document.write(`<iframe src="${url}" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>`);
     } catch (error) {
-      alert("Preview error. Please try downloading.");
+      alert("Preview error.");
     }
   };
 
   const deleteFile = async (file: ProjectFile) => {
     if (!selectedEvent) return;
     if (!confirm('Permanently remove this asset?')) return;
-
-    if (file.storageType === 'indexeddb') {
-      await deleteFileFromIndexedDB(file.id);
-    }
-    // Note: We don't delete from Hard Drive automatically for safety
-
+    if (file.storageType === 'indexeddb') await deleteFileFromIndexedDB(file.id);
     const files = (Array.isArray(selectedEvent.files) ? selectedEvent.files : []).filter(f => f.id !== file.id);
     onUpdateEvent({ ...selectedEvent, files });
   };
@@ -271,6 +301,52 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
     const notes = Array.isArray(selectedEvent.notes) ? selectedEvent.notes : [];
     onUpdateEvent({ ...selectedEvent, notes: [newNote, ...notes] });
     setNoteText('');
+  };
+
+  // Explicitly type TaskItem as React.FC to handle the 'key' prop in recursive calls and list rendering.
+  const TaskItem: React.FC<{ task: ProjectTask; depth?: number }> = ({ task, depth = 0 }) => {
+    const isOverdue = task.dueDate && new Date(task.dueDate) < new Date() && !task.completed;
+    const subProgress = task.subTasks && task.subTasks.length > 0 
+      ? (task.subTasks.filter(st => st.completed).length / task.subTasks.length) * 100 
+      : null;
+
+    return (
+      <div className="space-y-2">
+        <div className={`flex items-center justify-between p-4 rounded-[1.5rem] border transition-all ${depth > 0 ? 'ml-8 bg-slate-50/50' : 'bg-white border-slate-100 shadow-sm'} ${task.completed ? 'opacity-60' : isOverdue ? 'bg-rose-50 border-rose-200' : ''} group`}>
+          <div className="flex items-center gap-4">
+            <button onClick={() => toggleTask(task.id)} className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${task.completed ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-transparent hover:bg-slate-200'}`}><i className="fas fa-check text-[10px]"></i></button>
+            <div>
+              <p className={`font-black text-xs ${task.completed ? 'line-through text-slate-400' : 'text-slate-800'}`}>{task.text}</p>
+              <div className="flex flex-wrap items-center gap-3 mt-0.5">
+                {task.dueDate && <span className={`text-[7px] font-black uppercase tracking-widest ${isOverdue ? 'text-rose-600' : 'text-slate-400'}`}><i className="far fa-clock mr-1"></i> {task.dueDate}</span>}
+                {subProgress !== null && <span className="text-[7px] font-black uppercase tracking-widest text-indigo-500">{subProgress.toFixed(0)}% Sub-tasks Done</span>}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            {depth < 2 && (
+              <button onClick={() => setAddingSubTaskTo(task.id)} className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center hover:bg-indigo-600 hover:text-white transition" title="Add Sub-task"><i className="fas fa-plus text-[8px]"></i></button>
+            )}
+            <button onClick={() => setEditingTask(task)} className="w-7 h-7 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center hover:bg-slate-800 hover:text-white transition"><i className="fas fa-edit text-[8px]"></i></button>
+            <button onClick={() => deleteTask(task.id)} className="w-7 h-7 rounded-lg bg-rose-50 text-rose-400 flex items-center justify-center hover:bg-rose-500 hover:text-white transition"><i className="fas fa-trash-alt text-[8px]"></i></button>
+          </div>
+        </div>
+        
+        {addingSubTaskTo === task.id && (
+          <div className="ml-12 p-3 bg-indigo-50/50 rounded-xl border border-indigo-100 animate-in slide-in-from-top-1">
+            <div className="flex gap-2">
+              <input value={subTaskText} onChange={(e) => setSubTaskText(e.target.value)} placeholder="Sub-task requirement..." className="flex-1 p-2 bg-white border border-slate-200 rounded-lg text-[10px] font-bold outline-none" />
+              <button onClick={() => addSubTask(task.id)} className="px-3 bg-indigo-600 text-white rounded-lg text-[9px] font-black uppercase">Add</button>
+              <button onClick={() => setAddingSubTaskTo(null)} className="px-3 bg-slate-200 text-slate-500 rounded-lg text-[9px] font-black uppercase">Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {task.subTasks?.map(st => (
+          <TaskItem key={st.id} task={st} depth={depth + 1} />
+        ))}
+      </div>
+    );
   };
 
   return (
@@ -453,37 +529,19 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
                   <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
                     <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em] mb-8">Operational Roadmap</h3>
                     <div className="space-y-4">
-                      {(Array.isArray(selectedEvent.tasks) ? selectedEvent.tasks : []).map(task => {
-                        const isOverdue = task.dueDate && new Date(task.dueDate) < new Date() && !task.completed;
-                        return (
-                          <div key={task.id} className={`flex items-center justify-between p-6 rounded-[2rem] border transition-all ${task.completed ? 'bg-slate-50 border-slate-100 opacity-60' : isOverdue ? 'bg-rose-50 border-rose-200' : 'bg-white border-slate-100 shadow-sm'} group`}>
-                            <div className="flex items-center gap-5">
-                              <button onClick={() => toggleTask(task.id)} className={`w-10 h-10 rounded-2xl flex items-center justify-center transition-colors ${task.completed ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-transparent hover:bg-slate-300'}`}><i className="fas fa-check"></i></button>
-                              <div>
-                                <p className={`font-black text-sm ${task.completed ? 'line-through text-slate-400' : 'text-slate-800'}`}>{task.text}</p>
-                                <div className="flex flex-wrap items-center gap-3 mt-1">
-                                  {task.dueDate && <span className={`text-[8px] font-black uppercase tracking-widest ${isOverdue ? 'text-rose-600' : 'text-slate-400'}`}><i className="far fa-clock mr-1"></i> Due: {task.dueDate}</span>}
-                                  {task.completionDate && <span className="text-[8px] font-black uppercase tracking-widest text-emerald-500"><i className="fas fa-check-double mr-1"></i> Executed: {task.completionDate}</span>}
-                                </div>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button onClick={() => setEditingTask(task)} className="w-8 h-8 rounded-xl bg-slate-50 text-indigo-500 flex items-center justify-center hover:bg-indigo-500 hover:text-white transition"><i className="fas fa-edit text-[10px]"></i></button>
-                              <button onClick={() => onUpdateEvent({...selectedEvent, tasks: (Array.isArray(selectedEvent.tasks) ? selectedEvent.tasks : []).filter(t => t.id !== task.id)})} className="w-8 h-8 rounded-xl bg-slate-50 text-rose-400 flex items-center justify-center hover:bg-rose-500 hover:text-white transition"><i className="fas fa-trash-alt text-[10px]"></i></button>
-                            </div>
-                          </div>
-                        );
-                      })}
+                      {(Array.isArray(selectedEvent.tasks) ? selectedEvent.tasks : []).map(task => (
+                        <TaskItem key={task.id} task={task} />
+                      ))}
                       {(!Array.isArray(selectedEvent.tasks) || selectedEvent.tasks.length === 0) && <div className="py-20 text-center border-2 border-dashed border-slate-100 rounded-[2.5rem] text-[10px] font-black text-slate-300 uppercase tracking-widest">No strategic tasks assigned</div>}
                     </div>
                   </div>
                 </div>
                 <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm h-fit">
-                  <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.2em] mb-8">New Objective</h3>
+                  <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.2em] mb-8">New Primary Objective</h3>
                   <div className="space-y-5">
                     <textarea value={taskText} onChange={(e) => setTaskText(e.target.value)} placeholder="Operational requirement..." className="w-full h-32 p-5 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold text-xs resize-none"></textarea>
                     <div><label className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1 mb-2 block">Deadline</label><input type="date" value={taskDueDate} onChange={(e) => setTaskDueDate(e.target.value)} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none text-[10px] font-bold" /></div>
-                    <button onClick={addTask} className="w-full py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[9px] hover:bg-slate-900 transition">Assign Task</button>
+                    <button onClick={addTask} className="w-full py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[9px] hover:bg-slate-900 transition">Assign Root Task</button>
                   </div>
                 </div>
               </div>
@@ -499,11 +557,7 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
                         {directoryHandle ? 'Native Disk Storage Active' : 'Internal Secure Vault Active'}
                       </p>
                     </div>
-                    <button 
-                      onClick={() => fileInputRef.current?.click()} 
-                      disabled={uploading}
-                      className="px-6 py-3 bg-slate-900 text-white rounded-2xl text-[9px] font-black uppercase tracking-widest hover:bg-indigo-600 transition shadow-lg disabled:opacity-50"
-                    >
+                    <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className="px-6 py-3 bg-slate-900 text-white rounded-2xl text-[9px] font-black uppercase tracking-widest hover:bg-indigo-600 transition shadow-lg disabled:opacity-50">
                       {uploading ? <i className="fas fa-circle-notch fa-spin mr-2"></i> : <i className="fas fa-upload mr-2"></i>}
                       Upload Asset
                     </button>
@@ -511,26 +565,16 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
                     {(Array.isArray(selectedEvent.files) ? selectedEvent.files : []).map(file => (
-                      <div 
-                        key={file.id} 
-                        className="group relative bg-slate-50 border border-slate-100 rounded-[2rem] p-5 text-center hover:bg-white hover:shadow-xl transition-all"
-                      >
+                      <div key={file.id} className="group relative bg-slate-50 border border-slate-100 rounded-[2rem] p-5 text-center hover:bg-white hover:shadow-xl transition-all">
                         <div className="w-14 h-14 bg-white rounded-2xl flex items-center justify-center text-slate-400 text-xl mx-auto mb-4 group-hover:text-indigo-600 transition shadow-sm"><i className={`fas ${file.type.startsWith('image/') ? 'fa-image' : 'fa-file-alt'}`}></i></div>
                         <p className="text-[10px] font-black text-slate-800 truncate mb-1">{file.name}</p>
                         <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest">{file.timestamp}</p>
-                        
                         <div className="mt-4 flex flex-col gap-2">
                            <button onClick={() => downloadFile(file)} className="py-2 bg-indigo-500 text-white rounded-xl text-[8px] font-black uppercase tracking-widest transition hover:bg-slate-900">Open</button>
                            <button onClick={() => openPreview(file)} className="py-2 bg-slate-200 text-slate-600 rounded-xl text-[8px] font-black uppercase tracking-widest transition hover:bg-slate-300">Preview</button>
                         </div>
-
                         <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); deleteFile(file); }} 
-                            className="w-6 h-6 bg-rose-50 text-rose-500 rounded-lg text-[8px] flex items-center justify-center hover:bg-rose-500 hover:text-white transition"
-                          >
-                            <i className="fas fa-times"></i>
-                          </button>
+                          <button onClick={(e) => { e.stopPropagation(); deleteFile(file); }} className="w-6 h-6 bg-rose-50 text-rose-500 rounded-lg text-[8px] flex items-center justify-center hover:bg-rose-500 hover:text-white transition"><i className="fas fa-times"></i></button>
                         </div>
                         {file.storageType === 'filesystem' && <div className="absolute -top-1 -left-1 w-4 h-4 bg-emerald-500 text-white rounded-full flex items-center justify-center text-[7px] border-2 border-white shadow-sm" title="Stored on Local Hard Drive"><i className="fas fa-hdd"></i></div>}
                       </div>
@@ -561,7 +605,6 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
                                <button onClick={() => linkExistingContact(c.id)} className="px-4 py-2 bg-white/10 hover:bg-indigo-500 text-white rounded-xl text-[8px] font-black uppercase tracking-widest transition">Connect</button>
                             </div>
                           ))}
-                          {(Array.isArray(contacts) ? contacts : []).filter(c => !((Array.isArray(selectedEvent.contactIds) ? selectedEvent.contactIds : [])).includes(c.id)).length === 0 && <p className="text-[10px] font-bold text-white/20 uppercase tracking-widest py-4 text-center col-span-full">No available contacts to link</p>}
                         </div>
                       </div>
                     )}
@@ -578,13 +621,8 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
                               <button onClick={() => onUpdateEvent({...selectedEvent, contactIds: (Array.isArray(selectedEvent.contactIds) ? selectedEvent.contactIds : []).filter(id => id !== c.id)})} className="text-[8px] font-black text-rose-300 uppercase tracking-widest hover:text-rose-500 transition">Disconnect</button>
                             </div>
                           </div>
-                          <div className="flex items-center gap-5 mt-4">
-                             <div className="flex items-center gap-2 text-slate-400"><i className="fas fa-mobile-alt text-xs"></i><span className="text-[11px] font-black">{c.number}</span></div>
-                             <div className="flex items-center gap-2 text-slate-400"><i className="far fa-envelope text-xs"></i><span className="text-[11px] font-black uppercase tracking-tighter">Email Active</span></div>
-                          </div>
                         </div>
                       ))}
-                      {projectContacts.length === 0 && <div className="col-span-full py-20 text-center border-2 border-dashed border-slate-100 rounded-[2.5rem] text-[10px] font-black text-slate-300 uppercase tracking-widest">No stakeholders linked to project</div>}
                     </div>
                   </div>
                 </div>
@@ -618,13 +656,12 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
                           </div>
                         </div>
                       ))}
-                      {(!Array.isArray(selectedEvent.notes) || selectedEvent.notes.length === 0) && <div className="py-20 text-center border-2 border-dashed border-slate-100 rounded-[2.5rem] text-[10px] font-black text-slate-300 uppercase tracking-widest">Journal is currently empty</div>}
                     </div>
                   </div>
                 </div>
                 <div className="bg-slate-900 p-8 rounded-[3rem] shadow-2xl h-fit">
                    <h3 className="font-black text-white uppercase text-xs tracking-[0.2em] mb-8">Record Decision</h3>
-                   <textarea value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder="Document project development, decision logic, or unexpected findings..." className="w-full h-64 p-6 bg-white/5 border border-white/10 rounded-[2.5rem] text-white text-xs font-medium leading-relaxed resize-none focus:ring-2 focus:ring-indigo-500 mb-6 outline-none transition"></textarea>
+                   <textarea value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder="Document project development..." className="w-full h-64 p-6 bg-white/5 border border-white/10 rounded-[2.5rem] text-white text-xs font-medium leading-relaxed resize-none focus:ring-2 focus:ring-indigo-500 mb-6 outline-none transition"></textarea>
                    <button onClick={addNote} className="w-full py-5 bg-white text-slate-900 font-black rounded-[1.5rem] shadow-xl uppercase tracking-widest text-[9px] hover:bg-indigo-400 transition">Archive Entry</button>
                 </div>
               </div>
@@ -634,47 +671,39 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
               <div className="animate-in fade-in space-y-8">
                 <div className="bg-slate-50 border-2 border-indigo-100 p-12 rounded-[4rem] shadow-sm">
                   <h3 className="text-2xl font-black text-slate-900 tracking-tight mb-2">After-Action Report</h3>
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-12">Project Intelligence & Lifecycle Debriefing</p>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-12 mt-12">
                     <div className="space-y-6">
-                      <p className="text-[11px] font-black text-slate-800 uppercase tracking-[0.2em]">Final Operational Outcome</p>
+                      <p className="text-[11px] font-black text-slate-800 uppercase tracking-[0.2em]">Final Outcome</p>
                       <div className="flex gap-4">
-                        <button 
-                          onClick={() => onUpdateEvent({...selectedEvent, outcome: 'success'})}
-                          className={`flex-1 py-6 rounded-[2rem] font-black uppercase tracking-widest text-[10px] transition-all border-2 flex items-center justify-center gap-2 ${selectedEvent.outcome === 'success' ? 'bg-emerald-500 text-white border-emerald-400 shadow-2xl' : 'bg-white text-slate-400 border-slate-100'}`}
-                        >
-                          <i className="fas fa-trophy"></i> Success
-                        </button>
-                        <button 
-                          onClick={() => onUpdateEvent({...selectedEvent, outcome: 'failed'})}
-                          className={`flex-1 py-6 rounded-[2rem] font-black uppercase tracking-widest text-[10px] transition-all border-2 flex items-center justify-center gap-2 ${selectedEvent.outcome === 'failed' ? 'bg-rose-500 text-white border-rose-400 shadow-2xl' : 'bg-white text-slate-400 border-slate-100'}`}
-                        >
-                          <i className="fas fa-exclamation-triangle"></i> Failed
-                        </button>
+                        <button onClick={() => onUpdateEvent({...selectedEvent, outcome: 'success'})} className={`flex-1 py-6 rounded-[2rem] font-black uppercase tracking-widest text-[10px] transition-all border-2 flex items-center justify-center gap-2 ${selectedEvent.outcome === 'success' ? 'bg-emerald-500 text-white border-emerald-400 shadow-2xl' : 'bg-white text-slate-400 border-slate-100'}`}><i className="fas fa-trophy"></i> Success</button>
+                        <button onClick={() => onUpdateEvent({...selectedEvent, outcome: 'failed'})} className={`flex-1 py-6 rounded-[2rem] font-black uppercase tracking-widest text-[10px] transition-all border-2 flex items-center justify-center gap-2 ${selectedEvent.outcome === 'failed' ? 'bg-rose-500 text-white border-rose-400 shadow-2xl' : 'bg-white text-slate-400 border-slate-100'}`}><i className="fas fa-exclamation-triangle"></i> Failed</button>
                       </div>
                     </div>
                     <div className="space-y-6">
-                      <p className="text-[11px] font-black text-slate-800 uppercase tracking-[0.2em]">Institutional Lessons Learnt</p>
-                      <textarea 
-                        value={selectedEvent.lessonsLearnt || ''} 
-                        onChange={(e) => onUpdateEvent({...selectedEvent, lessonsLearnt: e.target.value})}
-                        className="w-full h-48 p-7 bg-white border border-slate-100 rounded-[3rem] outline-none font-medium text-sm text-slate-700 leading-relaxed resize-none focus:ring-4 focus:ring-indigo-100 transition shadow-inner"
-                        placeholder="Detail the critical findings, technical bottlenecks, or relationship breakthroughs identified in this project cycle..."
-                      ></textarea>
+                      <p className="text-[11px] font-black text-slate-800 uppercase tracking-[0.2em]">Lessons Learnt</p>
+                      <textarea value={selectedEvent.lessonsLearnt || ''} onChange={(e) => onUpdateEvent({...selectedEvent, lessonsLearnt: e.target.value})} className="w-full h-48 p-7 bg-white border border-slate-100 rounded-[3rem] outline-none font-medium text-sm text-slate-700 leading-relaxed resize-none focus:ring-4 focus:ring-indigo-100 transition shadow-inner" placeholder="Detail findings..."></textarea>
                     </div>
                   </div>
                 </div>
-
-                <div className="p-10 bg-white border border-slate-100 rounded-[3rem] flex flex-col md:flex-row md:items-center justify-between gap-6">
-                   <div>
-                     <h4 className="font-black text-rose-600 uppercase text-xs tracking-widest mb-1">Project Termination</h4>
-                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Destroying this project framework will delete all ledger data, files, and logs.</p>
-                   </div>
-                   <button onClick={() => { if(confirm('Permanently destroy project data?')) onDeleteEvent(selectedEvent.id); }} className="px-8 py-4 bg-rose-50 text-rose-600 font-black rounded-2xl text-[10px] uppercase tracking-widest hover:bg-rose-600 hover:text-white transition shadow-sm">Terminate Repository</button>
-                </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Edit Task Modal (Standard for edits) */}
+      {editingTask && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white w-full max-w-sm rounded-[3rem] p-8 shadow-2xl border border-slate-100">
+            <h3 className="text-xl font-black text-slate-800 mb-6 uppercase text-xs tracking-widest">Update Goal</h3>
+            <form onSubmit={handleUpdateTask} className="space-y-5">
+              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Requirement</label><textarea value={editingTask.text} onChange={e => setEditingTask({...editingTask, text: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold resize-none h-32" /></div>
+              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Deadline</label><input type="date" value={editingTask.dueDate || ''} onChange={e => setEditingTask({...editingTask, dueDate: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" /></div>
+              <div className="flex gap-2">
+                <button type="submit" className="flex-1 py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[10px] hover:bg-slate-900 transition">Update Goal</button>
+                <button type="button" onClick={() => setEditingTask(null)} className="flex-1 py-4 bg-slate-50 text-slate-400 font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-slate-100 transition">Cancel</button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -687,32 +716,9 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
             <form onSubmit={handleUpdateItem} className="space-y-5">
               <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Description</label><input value={editingItem.description} onChange={e => setEditingItem({...editingItem, description: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" /></div>
               <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Amount</label><input type="number" step="0.01" value={editingItem.amount} onChange={e => setEditingItem({...editingItem, amount: parseFloat(e.target.value)})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" /></div>
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Category</label>
-                <select value={editingItem.category} onChange={e => setEditingItem({...editingItem, category: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold">
-                  {EVENT_ITEM_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
               <div className="flex gap-2">
                 <button type="submit" className="flex-1 py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[10px] hover:bg-slate-900 transition">Save Changes</button>
                 <button type="button" onClick={() => setEditingItem(null)} className="flex-1 py-4 bg-slate-50 text-slate-400 font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-slate-100 transition">Cancel</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Edit Task Modal */}
-      {editingTask && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-white w-full max-w-sm rounded-[3rem] p-8 shadow-2xl border border-slate-100">
-            <h3 className="text-xl font-black text-slate-800 mb-6 uppercase text-xs tracking-widest">Update Objective</h3>
-            <form onSubmit={handleUpdateTask} className="space-y-5">
-              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Requirement</label><textarea value={editingTask.text} onChange={e => setEditingTask({...editingTask, text: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold resize-none h-32" /></div>
-              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Deadline</label><input type="date" value={editingTask.dueDate || ''} onChange={e => setEditingTask({...editingTask, dueDate: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" /></div>
-              <div className="flex gap-2">
-                <button type="submit" className="flex-1 py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[10px] hover:bg-slate-900 transition">Update Goal</button>
-                <button type="button" onClick={() => setEditingTask(null)} className="flex-1 py-4 bg-slate-50 text-slate-400 font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-slate-100 transition">Cancel</button>
               </div>
             </form>
           </div>

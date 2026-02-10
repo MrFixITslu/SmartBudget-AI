@@ -134,6 +134,7 @@ export interface ProjectTask {
   completed: boolean;
   dueDate?: string;
   completionDate?: string;
+  subTasks?: ProjectTask[]; // Support for nested tasks
 }
 
 export interface ProjectFile {

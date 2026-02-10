@@ -24,8 +24,9 @@ const EventPlanner: React.FC<Props> = ({ events, onAddEvent, onDeleteEvent, onUp
   );
 
   const calculatePnL = (event: BudgetEvent) => {
-    const income = event.items.filter(i => i.type === 'income').reduce((acc, i) => acc + i.amount, 0);
-    const expenses = event.items.filter(i => i.type === 'expense').reduce((acc, i) => acc + i.amount, 0);
+    // Explicitly type reduce as number to fix arithmetic errors
+    const income = event.items.filter(i => i.type === 'income').reduce<number>((acc, i) => acc + i.amount, 0);
+    const expenses = event.items.filter(i => i.type === 'expense').reduce<number>((acc, i) => acc + i.amount, 0);
     return { income, expenses, net: income - expenses };
   };
 
@@ -132,7 +133,7 @@ const EventPlanner: React.FC<Props> = ({ events, onAddEvent, onDeleteEvent, onUp
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {events.map(event => {
             const stats = calculatePnL(event);
-            const isOver = event.projectedBudget && stats.expenses > event.projectedBudget;
+            const isOver = !!(event.projectedBudget && stats.expenses > event.projectedBudget);
             return (
               <div 
                 key={event.id} 

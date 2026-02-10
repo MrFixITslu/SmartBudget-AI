@@ -1,5 +1,5 @@
 
-export type TransactionType = 'expense' | 'income' | 'savings' | 'withdrawal';
+export type TransactionType = 'expense' | 'income' | 'savings' | 'withdrawal' | 'transfer';
 export type InstitutionType = 'bank' | 'credit_union' | 'investment';
 
 export interface LineItem {
@@ -49,6 +49,7 @@ export interface Transaction {
   recurringId?: string;
   savingGoalId?: string;
   institution?: string;
+  destinationInstitution?: string; // New field for transfers
 }
 
 export interface PortfolioUpdate {
@@ -81,6 +82,13 @@ export interface SavingGoal {
   currentAmount: number;
   openingBalance: number;
   category: string;
+}
+
+export interface InvestmentGoal {
+  id: string;
+  name: string;
+  targetAmount: number;
+  provider: 'Binance' | 'Vanguard' | 'Both';
 }
 
 export interface RecurringExpense {
@@ -129,7 +137,7 @@ export interface EventItem {
 
 export const CATEGORIES = [
   'Food', 'Transport', 'Housing', 'Entertainment', 'Utilities', 
-  'Health', 'Shopping', 'Education', 'Personal', 'Income', 'Savings', 'Other', 'Investments'
+  'Health', 'Shopping', 'Education', 'Personal', 'Income', 'Savings', 'Other', 'Investments', 'Transfer'
 ];
 
 export const EVENT_ITEM_CATEGORIES = [

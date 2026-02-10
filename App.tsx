@@ -10,7 +10,7 @@ import BudgetAssistant from './components/BudgetAssistant';
 import EventPlanner from './components/EventPlanner';
 import VerificationQueue from './components/VerificationQueue';
 import { syncBankData, syncInvestmentHoldings } from './services/bankApiService';
-import { Transaction, AIAnalysisResult, RecurringExpense, RecurringIncome, SavingGoal, BankConnection, InvestmentAccount, MarketPrice, InstitutionType, BudgetEvent, PortfolioUpdate } from './types';
+import { Transaction, AIAnalysisResult, RecurringExpense, RecurringIncome, SavingGoal, BankConnection, InvestmentAccount, MarketPrice, InstitutionType, BudgetEvent, PortfolioUpdate, InvestmentGoal } from './types';
 
 // Simple obfuscated credentials
 const _U = "bnN2"; // nsv
@@ -21,6 +21,7 @@ const STORAGE_KEYS = {
   RECURRING_EXPENSES: 'budget_recurring',
   RECURRING_INCOMES: 'budget_recurring_incomes',
   SAVINGS_GOALS: 'budget_savings_goals',
+  INVESTMENT_GOALS: 'budget_investment_goals',
   SALARY: 'budget_salary',
   TARGET_MARGIN: 'budget_target_margin',
   CATEGORY_LIMITS: 'budget_category_limits',
@@ -49,6 +50,30 @@ const generateId = () => {
   return 'id-' + Math.random().toString(36).substr(2, 9) + '-' + Date.now();
 };
 
+const MarketTicker = ({ prices }: { prices: MarketPrice[] }) => {
+  return (
+    <div className="fixed top-0 left-0 right-0 z-[120] bg-slate-900 text-white overflow-hidden py-1.5 shadow-md border-b border-slate-800">
+      <div className="animate-marquee whitespace-nowrap flex items-center gap-12">
+        {[...prices, ...prices].map((p, idx) => (
+          <div key={idx} className="flex items-center gap-3">
+             <div className="w-5 h-5 rounded bg-white/10 flex items-center justify-center text-[8px] font-black text-white">
+               {p.symbol.substring(0, 1)}
+             </div>
+             <span className="font-black text-[9px] text-slate-400 tracking-[0.2em] uppercase">{p.symbol}</span>
+             <span className="font-black text-[10px] text-white tracking-tight">
+               ${p.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+             </span>
+             <div className={`flex items-center gap-1 text-[8px] font-black px-1.5 py-0.5 rounded ${p.change24h >= 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
+               <i className={`fas fa-caret-${p.change24h >= 0 ? 'up' : 'down'}`}></i>
+               {Math.abs(p.change24h).toFixed(2)}%
+             </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
     return localStorage.getItem(STORAGE_KEYS.AUTH) === 'true';
@@ -61,6 +86,7 @@ const App: React.FC = () => {
   const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>(() => safeParse(STORAGE_KEYS.RECURRING_EXPENSES, []));
   const [recurringIncomes, setRecurringIncomes] = useState<RecurringIncome[]>(() => safeParse(STORAGE_KEYS.RECURRING_INCOMES, []));
   const [savingGoals, setSavingGoals] = useState<SavingGoal[]>(() => safeParse(STORAGE_KEYS.SAVINGS_GOALS, []));
+  const [investmentGoals, setInvestmentGoals] = useState<InvestmentGoal[]>(() => safeParse(STORAGE_KEYS.INVESTMENT_GOALS, []));
   const [salary, setSalary] = useState<number>(() => parseFloat(localStorage.getItem(STORAGE_KEYS.SALARY) || '0'));
   const [targetMargin, setTargetMargin] = useState<number>(() => parseFloat(localStorage.getItem(STORAGE_KEYS.TARGET_MARGIN) || '0'));
   const [categoryBudgets, setCategoryBudgets] = useState<Record<string, number>>(() => safeParse(STORAGE_KEYS.CATEGORY_LIMITS, {}));
@@ -102,7 +128,6 @@ const App: React.FC = () => {
     if (lastCheck && lastCheck !== currentCycleYearMonth) {
       console.log("New cycle detected! Accruing unpaid balances and resetting income counters...");
       
-      // Calculate previous cycle start and end dates
       const prevCycleStart = new Date(now.getFullYear(), now.getMonth(), 25);
       if (now.getDate() < 25) prevCycleStart.setMonth(prevCycleStart.getMonth() - 2);
       else prevCycleStart.setMonth(prevCycleStart.getMonth() - 1);
@@ -124,14 +149,12 @@ const App: React.FC = () => {
         return bill;
       }));
 
-      // Reset accumulatedReceived for income items on cycle rollover
       setRecurringIncomes(prev => prev.map(inc => ({ ...inc, accumulatedReceived: 0 })));
     }
 
     localStorage.setItem(STORAGE_KEYS.LAST_CYCLE_CHECK, currentCycleYearMonth);
   }, [isAuthenticated, transactions]);
 
-  // Key Selection Check
   useEffect(() => {
     const checkKey = async () => {
       const aistudio = (window as any).aistudio;
@@ -145,7 +168,6 @@ const App: React.FC = () => {
     checkKey();
   }, []);
 
-  // Auth Handling
   useEffect(() => {
     const handleRemoteLogin = () => {
       const hash = window.location.hash;
@@ -165,7 +187,6 @@ const App: React.FC = () => {
     return () => window.removeEventListener('hashchange', handleRemoteLogin);
   }, []);
 
-  // Auto-Save Effects (Persistence)
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions)); }, [transactions]);
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.RECURRING_EXPENSES, JSON.stringify(recurringExpenses)); }, [recurringExpenses]);
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.RECURRING_INCOMES, JSON.stringify(recurringIncomes)); }, [recurringIncomes]);
@@ -173,12 +194,12 @@ const App: React.FC = () => {
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.TARGET_MARGIN, targetMargin.toString()); }, [targetMargin]);
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.CATEGORY_LIMITS, JSON.stringify(categoryBudgets)); }, [categoryBudgets]);
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.SAVINGS_GOALS, JSON.stringify(savingGoals)); }, [savingGoals]);
+  useEffect(() => { localStorage.setItem(STORAGE_KEYS.INVESTMENT_GOALS, JSON.stringify(investmentGoals)); }, [investmentGoals]);
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.BANK_CONNECTIONS, JSON.stringify(bankConnections)); }, [bankConnections]);
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.INVESTMENTS, JSON.stringify(investments)); }, [investments]);
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.EVENTS, JSON.stringify(events)); }, [events]);
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.REMINDERS, remindersEnabled.toString()); }, [remindersEnabled]);
 
-  // Notifications
   useEffect(() => {
     if (remindersEnabled && isAuthenticated && ("Notification" in window)) {
       const lastNotifyDate = localStorage.getItem('budget_last_notify_date');
@@ -205,7 +226,6 @@ const App: React.FC = () => {
     }
   }, [remindersEnabled, isAuthenticated]);
 
-  // Market Price Simulation
   useEffect(() => {
     const interval = setInterval(() => {
       setMarketPrices(prev => prev.map(p => {
@@ -225,11 +245,19 @@ const App: React.FC = () => {
     const primaryBank = bankConnections.find(c => c.institution.includes('1st National'));
     const opening = primaryBank?.openingBalance || 0;
     const relevantHistory = transactions.filter(t => 
-      t.institution === primaryBank?.institution || t.institution === 'Cash in Hand'
+      t.institution === primaryBank?.institution || 
+      t.destinationInstitution === primaryBank?.institution ||
+      t.institution === 'Cash in Hand' ||
+      t.destinationInstitution === 'Cash in Hand'
     );
     const flow = relevantHistory.reduce((acc, t) => {
-       if (t.type === 'income' || t.type === 'withdrawal') return acc + t.amount;
-       if (t.type === 'expense') return acc - t.amount;
+       if (t.destinationInstitution === '1st National Bank St. Lucia' || t.destinationInstitution === 'Cash in Hand') {
+         if (t.type === 'transfer' || t.type === 'withdrawal') return acc + t.amount;
+       }
+       if (t.institution === '1st National Bank St. Lucia' || t.institution === 'Cash in Hand') {
+         if (t.type === 'income') return acc + t.amount;
+         if (t.type === 'expense' || t.type === 'transfer' || t.type === 'withdrawal' || t.type === 'savings') return acc - t.amount;
+       }
        return acc;
     }, 0);
     return opening + flow;
@@ -395,11 +423,12 @@ const App: React.FC = () => {
   const handleWithdrawal = (institution: string, amount: number) => {
     addTransaction({
       amount,
-      description: `Withdrawal from ${institution}`,
+      description: `Withdrawal from ${institution} to Wallet`,
       category: 'Transfer',
-      type: 'withdrawal',
+      type: 'transfer',
       date: new Date().toISOString().split('T')[0],
-      institution: institution
+      institution: institution,
+      destinationInstitution: 'Cash in Hand'
     });
   };
 
@@ -427,7 +456,6 @@ const App: React.FC = () => {
       setIsLoading(false);
     } else {
       const provider = institution as 'Binance' | 'Vanguard';
-      
       const newInv: InvestmentAccount = {
         id: generateId(), 
         provider, 
@@ -435,7 +463,6 @@ const App: React.FC = () => {
         holdings: []
       };
       setInvestments(prev => [...prev.filter(i => i.provider !== institution), newInv]);
-
       setIsLoading(true);
       const holdingsData = await syncInvestmentHoldings(provider);
       if (holdingsData && holdingsData.length > 0) {
@@ -460,8 +487,10 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen pb-20 px-4 md:px-6 max-w-6xl mx-auto pt-8">
-      <header className="flex items-center justify-between mb-8">
+    <div className="min-h-screen pb-20 px-4 md:px-6 max-w-6xl mx-auto pt-16 relative">
+      <MarketTicker prices={marketPrices} />
+      
+      <header className="flex items-center justify-between mb-8 mt-4">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-900 flex items-center gap-2">
             <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white text-lg shadow-lg shadow-indigo-100"><i className="fas fa-chart-pie"></i></div>
@@ -483,7 +512,7 @@ const App: React.FC = () => {
         </nav>
       </div>
 
-      <section className="mb-10 sticky top-4 z-30">
+      <section className="mb-10 sticky top-12 z-30">
         <div className="max-w-2xl mx-auto bg-white/80 backdrop-blur-xl p-4 rounded-[2.5rem] border border-white shadow-2xl">
           <MagicInput onSuccess={handleAIAnalysis} onBulkSuccess={handleBulkAIAnalysis} onLoading={setIsLoading} onManualEntry={() => setShowManualEntry(true)} />
         </div>
@@ -498,6 +527,7 @@ const App: React.FC = () => {
               recurringExpenses={recurringExpenses} 
               recurringIncomes={recurringIncomes}
               savingGoals={savingGoals} 
+              investmentGoals={investmentGoals}
               investments={investments} 
               marketPrices={marketPrices}
               bankConnections={bankConnections} 
@@ -539,6 +569,7 @@ const App: React.FC = () => {
           recurringExpenses={recurringExpenses} onAddRecurring={(b) => setRecurringExpenses(p => [...p, {...b, id: generateId(), accumulatedOverdue: 0}])} onUpdateRecurring={(b) => setRecurringExpenses(p => p.map(x => x.id === b.id ? b : x))} onDeleteRecurring={(id) => setRecurringExpenses(p => p.filter(x => x.id !== id))} 
           recurringIncomes={recurringIncomes} onAddRecurringIncome={(i) => setRecurringIncomes(p => [...p, {...i, id: generateId(), accumulatedReceived: 0}])} onUpdateRecurringIncome={(i) => setRecurringIncomes(p => p.map(x => x.id === i.id ? i : x))} onDeleteRecurringIncome={(id) => setRecurringIncomes(p => p.filter(x => x.id !== id))} 
           savingGoals={savingGoals} onAddSavingGoal={(g) => setSavingGoals(p => [...p, {...g, id: generateId(), currentAmount: g.openingBalance}])} onDeleteSavingGoal={(id) => setSavingGoals(p => p.filter(x => x.id !== id))} 
+          investmentGoals={investmentGoals} onAddInvestmentGoal={(g) => setInvestmentGoals(p => [...p, {...g, id: generateId()}])} onDeleteInvestmentGoal={(id) => setInvestmentGoals(p => p.filter(x => x.id !== id))}
           onExportData={handleExportData} onResetData={handleResetData} onClose={() => setShowSettings(false)} onLogout={handleLogout}
           remindersEnabled={remindersEnabled} onToggleReminders={setRemindersEnabled}
           currentBank={bankConnections[0] || {institution: '', status: 'unlinked', institutionType: 'bank', openingBalance: 0}} onResetBank={() => {}} 

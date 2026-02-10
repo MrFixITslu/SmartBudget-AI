@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { CATEGORIES, RecurringExpense, RecurringIncome, SavingGoal, BankConnection } from '../types';
+import { CATEGORIES, RecurringExpense, RecurringIncome, SavingGoal, BankConnection, InvestmentGoal } from '../types';
 
 interface Props {
   salary: number;
@@ -20,6 +20,9 @@ interface Props {
   savingGoals: SavingGoal[];
   onAddSavingGoal: (item: Omit<SavingGoal, 'id' | 'currentAmount'>) => void;
   onDeleteSavingGoal: (id: string) => void;
+  investmentGoals: InvestmentGoal[];
+  onAddInvestmentGoal: (item: Omit<InvestmentGoal, 'id'>) => void;
+  onDeleteInvestmentGoal: (id: string) => void;
   onExportData: () => void;
   onResetData: () => void;
   onClose: () => void;
@@ -34,16 +37,19 @@ const Settings: React.FC<Props> = ({
   targetMargin, onUpdateTargetMargin, categoryBudgets, onUpdateCategoryBudgets, 
   recurringExpenses, onAddRecurring, onUpdateRecurring, onDeleteRecurring, 
   recurringIncomes, onAddRecurringIncome, onUpdateRecurringIncome, onDeleteRecurringIncome, 
+  investmentGoals, onAddInvestmentGoal, onDeleteInvestmentGoal,
   onExportData, onResetData, onClose, onLogout, remindersEnabled, onToggleReminders
 }) => {
   const [editingBill, setEditingBill] = useState<RecurringExpense | null>(null);
   const [editingIncome, setEditingIncome] = useState<RecurringIncome | null>(null);
-  
   const [isAddingBill, setIsAddingBill] = useState(false);
   const [billForm, setBillForm] = useState({ desc: '', amount: '', category: 'Utilities', day: '1', sync: false });
-
   const [isAddingIncome, setIsAddingIncome] = useState(false);
   const [incForm, setIncForm] = useState({ desc: '', amount: '', category: 'Income', day: '25' });
+
+  // Investment Goal Form
+  const [isAddingInvGoal, setIsAddingInvGoal] = useState(false);
+  const [invGoalForm, setInvGoalForm] = useState({ name: '', target: '', provider: 'Both' as const });
 
   const handleBudgetChange = (category: string, value: string) => {
     onUpdateCategoryBudgets({ ...categoryBudgets, [category]: parseFloat(value) || 0 });
@@ -54,40 +60,35 @@ const Settings: React.FC<Props> = ({
       if ("Notification" in window) {
         window.Notification.requestPermission().then(permission => {
           if (permission === "granted") onToggleReminders(true);
-          else alert("Notification permission denied. Please enable them in browser settings.");
+          else alert("Notification permission denied.");
         });
-      } else alert("This browser does not support desktop notifications.");
+      } else alert("Not supported.");
     } else onToggleReminders(false);
+  };
+
+  const saveInvGoal = () => {
+    const target = parseFloat(invGoalForm.target);
+    if (!invGoalForm.name || isNaN(target)) return;
+    onAddInvestmentGoal({
+      name: invGoalForm.name,
+      targetAmount: target,
+      provider: invGoalForm.provider as 'Binance' | 'Vanguard' | 'Both'
+    });
+    setInvGoalForm({ name: '', target: '', provider: 'Both' });
+    setIsAddingInvGoal(false);
   };
 
   const saveBill = () => {
     const amt = parseFloat(billForm.amount);
     const day = parseInt(billForm.day);
     if (!billForm.desc || isNaN(amt) || isNaN(day)) return;
-
     const nextDue = new Date();
     nextDue.setDate(day);
     if (nextDue < new Date()) nextDue.setMonth(nextDue.getMonth() + 1);
-
     if (editingBill) {
-      onUpdateRecurring({
-        ...editingBill,
-        description: billForm.desc,
-        amount: amt,
-        category: billForm.category,
-        dayOfMonth: day,
-        nextDueDate: nextDue.toISOString().split('T')[0],
-        externalSyncEnabled: billForm.sync
-      });
+      onUpdateRecurring({ ...editingBill, description: billForm.desc, amount: amt, category: billForm.category, dayOfMonth: day, nextDueDate: nextDue.toISOString().split('T')[0], externalSyncEnabled: billForm.sync });
     } else {
-      onAddRecurring({
-        description: billForm.desc,
-        amount: amt,
-        category: billForm.category,
-        dayOfMonth: day,
-        nextDueDate: nextDue.toISOString().split('T')[0],
-        externalSyncEnabled: billForm.sync
-      });
+      onAddRecurring({ description: billForm.desc, amount: amt, category: billForm.category, dayOfMonth: day, nextDueDate: nextDue.toISOString().split('T')[0], externalSyncEnabled: billForm.sync });
     }
     resetBillForm();
   };
@@ -98,44 +99,17 @@ const Settings: React.FC<Props> = ({
     setBillForm({ desc: '', amount: '', category: 'Utilities', day: '1', sync: false });
   };
 
-  const startEditBill = (bill: RecurringExpense) => {
-    setEditingBill(bill);
-    setBillForm({
-      desc: bill.description,
-      amount: bill.amount.toString(),
-      category: bill.category,
-      day: bill.dayOfMonth.toString(),
-      sync: bill.externalSyncEnabled || false
-    });
-    setIsAddingBill(true);
-  };
-
   const saveIncome = () => {
     const amt = parseFloat(incForm.amount);
     const day = parseInt(incForm.day);
     if (!incForm.desc || isNaN(amt) || isNaN(day)) return;
-
     const nextConf = new Date();
     nextConf.setDate(day);
     if (nextConf < new Date()) nextConf.setMonth(nextConf.getMonth() + 1);
-
     if (editingIncome) {
-      onUpdateRecurringIncome({
-        ...editingIncome,
-        description: incForm.desc,
-        amount: amt,
-        category: incForm.category,
-        dayOfMonth: day,
-        nextConfirmationDate: nextConf.toISOString().split('T')[0]
-      });
+      onUpdateRecurringIncome({ ...editingIncome, description: incForm.desc, amount: amt, category: incForm.category, dayOfMonth: day, nextConfirmationDate: nextConf.toISOString().split('T')[0] });
     } else {
-      onAddRecurringIncome({
-        description: incForm.desc,
-        amount: amt,
-        category: incForm.category,
-        dayOfMonth: day,
-        nextConfirmationDate: nextConf.toISOString().split('T')[0]
-      });
+      onAddRecurringIncome({ description: incForm.desc, amount: amt, category: incForm.category, dayOfMonth: day, nextConfirmationDate: nextConf.toISOString().split('T')[0] });
     }
     resetIncForm();
   };
@@ -144,17 +118,6 @@ const Settings: React.FC<Props> = ({
     setEditingIncome(null);
     setIsAddingIncome(false);
     setIncForm({ desc: '', amount: '', category: 'Income', day: '25' });
-  };
-
-  const startEditIncome = (inc: RecurringIncome) => {
-    setEditingIncome(inc);
-    setIncForm({
-      desc: inc.description,
-      amount: inc.amount.toString(),
-      category: inc.category,
-      day: inc.dayOfMonth.toString()
-    });
-    setIsAddingIncome(true);
   };
 
   return (
@@ -166,7 +129,6 @@ const Settings: React.FC<Props> = ({
         </div>
 
         <div className="p-8 space-y-10 overflow-y-auto custom-scrollbar flex-1">
-          {/* Notifications Toggle */}
           <section className="bg-indigo-50/50 p-6 rounded-[2rem] border border-indigo-100">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
@@ -177,7 +139,6 @@ const Settings: React.FC<Props> = ({
             </div>
           </section>
 
-          {/* Strategy Section */}
           <section className="p-8 bg-slate-900 text-white rounded-[2.5rem] shadow-xl">
             <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6">Financial Strategy Hub</label>
             <div className="space-y-8">
@@ -186,7 +147,25 @@ const Settings: React.FC<Props> = ({
             </div>
           </section>
 
-          {/* Recurring Commitments Management */}
+          {/* Investment Goals Section */}
+          <section className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div><h3 className="text-lg font-black text-slate-800">Investment Milestones</h3><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Wealth Targets & Retirement Goals</p></div>
+              <button onClick={() => setIsAddingInvGoal(true)} className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-600 hover:text-white transition">+ Add Goal</button>
+            </div>
+            <div className="space-y-4">
+              {investmentGoals.map(goal => (
+                <div key={goal.id} className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between group">
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-indigo-600 shadow-sm"><i className="fas fa-bullseye"></i></div>
+                    <div><p className="font-black text-sm text-slate-800">{goal.name}</p><p className="text-[9px] text-slate-400 font-bold uppercase">Target: ${goal.targetAmount.toLocaleString()} • Source: {goal.provider}</p></div>
+                  </div>
+                  <button onClick={() => onDeleteInvestmentGoal(goal.id)} className="w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-rose-600 transition flex items-center justify-center"><i className="fas fa-trash-alt text-[10px]"></i></button>
+                </div>
+              ))}
+            </div>
+          </section>
+
           <section className="space-y-6">
             <div className="flex items-center justify-between">
               <div><h3 className="text-lg font-black text-slate-800">Recurring Commitments</h3><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Manage Bills & Regular Income</p></div>
@@ -195,45 +174,21 @@ const Settings: React.FC<Props> = ({
                 <button onClick={() => setIsAddingBill(true)} className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-600 hover:text-white transition">+ Bill</button>
               </div>
             </div>
-
-            {/* Bills List */}
             <div className="space-y-4">
-              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Monthly Bills</h4>
               {recurringExpenses.map(bill => (
                 <div key={bill.id} className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between group">
                   <div className="flex items-center gap-4">
                     <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-rose-500 shadow-sm"><i className="fas fa-file-invoice"></i></div>
                     <div><p className="font-black text-sm text-slate-800">{bill.description}</p><p className="text-[9px] text-slate-400 font-bold uppercase">Due the {bill.dayOfMonth}th • ${bill.amount}</p></div>
                   </div>
-                  <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onClick={() => startEditBill(bill)} className="w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-indigo-600 transition flex items-center justify-center"><i className="fas fa-edit text-[10px]"></i></button>
+                  <div className="flex items-center gap-2">
                     <button onClick={() => onDeleteRecurring(bill.id)} className="w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-rose-600 transition flex items-center justify-center"><i className="fas fa-trash-alt text-[10px]"></i></button>
                   </div>
                 </div>
               ))}
-              {recurringExpenses.length === 0 && <p className="text-center py-6 text-xs text-slate-300 italic">No recurring bills configured.</p>}
-            </div>
-
-            {/* Income List */}
-            <div className="space-y-4 pt-4 border-t border-slate-100">
-              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Expected Incomes</h4>
-              {recurringIncomes.map(inc => (
-                <div key={inc.id} className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between group">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-emerald-500 shadow-sm"><i className="fas fa-hand-holding-dollar"></i></div>
-                    <div><p className="font-black text-sm text-slate-800">{inc.description}</p><p className="text-[9px] text-slate-400 font-bold uppercase">Arrives on the {inc.dayOfMonth}th • ${inc.amount}</p></div>
-                  </div>
-                  <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onClick={() => startEditIncome(inc)} className="w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-emerald-600 transition flex items-center justify-center"><i className="fas fa-edit text-[10px]"></i></button>
-                    <button onClick={() => onDeleteRecurringIncome(inc.id)} className="w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-rose-600 transition flex items-center justify-center"><i className="fas fa-trash-alt text-[10px]"></i></button>
-                  </div>
-                </div>
-              ))}
-              {recurringIncomes.length === 0 && <p className="text-center py-6 text-xs text-slate-300 italic">No recurring incomes configured.</p>}
             </div>
           </section>
 
-          {/* Backup & Data Controls */}
           <section className="bg-slate-50 p-6 rounded-[2rem] border border-slate-200 space-y-4">
              <div><h3 className="text-sm font-black text-slate-800">Data Management</h3><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Local JSON State Portability</p></div>
              <div className="flex gap-3">
@@ -247,6 +202,29 @@ const Settings: React.FC<Props> = ({
           </section>
         </div>
       </div>
+
+      {/* Investment Goal Modal */}
+      {isAddingInvGoal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white w-full max-w-sm rounded-[2rem] p-8 shadow-2xl">
+            <h3 className="text-lg font-black text-slate-800 mb-6">New Wealth Target</h3>
+            <div className="space-y-4">
+              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Goal Name</label><input value={invGoalForm.name} onChange={e => setInvGoalForm({...invGoalForm, name: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" placeholder="Retirement Fund" /></div>
+              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Target Amount ($)</label><input type="number" value={invGoalForm.target} onChange={e => setInvGoalForm({...invGoalForm, target: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" placeholder="500000" /></div>
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Linked Provider</label>
+                <select value={invGoalForm.provider} onChange={e => setInvGoalForm({...invGoalForm, provider: e.target.value as any})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold">
+                  <option value="Binance">Binance (Crypto)</option>
+                  <option value="Vanguard">Vanguard (Stocks)</option>
+                  <option value="Both">Both Portfolio Aggregator</option>
+                </select>
+              </div>
+              <button onClick={saveInvGoal} className="w-full py-4 bg-slate-900 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[11px] hover:bg-indigo-600 transition">Create Target</button>
+              <button onClick={() => setIsAddingInvGoal(false)} className="w-full py-2 text-slate-400 font-bold text-[10px] uppercase tracking-widest">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Inline Bill Form Modal */}
       {isAddingBill && (

@@ -253,7 +253,7 @@ const App: React.FC = () => {
         <div>
           <h1 className="text-2xl font-extrabold text-slate-900 flex items-center gap-2">
             <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white text-lg shadow-lg shadow-indigo-100"><i className="fas fa-chart-pie"></i></div>
-            Fire Finance <span className="text-indigo-600">Pro v0.5</span>
+            Fire Finance <span className="text-indigo-600">Pro v1</span>
           </h1>
           <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-1">Universal Command Center</p>
         </div>

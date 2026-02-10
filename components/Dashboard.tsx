@@ -62,7 +62,6 @@ const Dashboard: React.FC<Props> = ({
     const balances: Record<string, InstitutionalBalance> = {};
     bankConnections.forEach(conn => {
       const history = transactions.filter(t => t.institution === conn.institution || t.destinationInstitution === conn.institution);
-      // Fix: Explicitly typing accumulator as number to prevent "unknown" type errors in reduce
       const flow = history.reduce((acc: number, t) => {
         if (t.destinationInstitution === conn.institution && (t.type === 'transfer' || t.type === 'withdrawal')) return acc + t.amount;
         if (t.institution === conn.institution) {
@@ -74,7 +73,6 @@ const Dashboard: React.FC<Props> = ({
       balances[conn.institution] = { balance: (conn.openingBalance || 0) + flow, type: conn.institutionType, available: conn.institution.includes('1st National') };
     });
 
-    // Fix: Explicitly typing accumulator as number to prevent "unknown" type errors in reduce
     const cashFlow = transactions.filter(t => t.institution === 'Cash in Hand' || t.destinationInstitution === 'Cash in Hand').reduce((acc: number, t) => {
       if (t.destinationInstitution === 'Cash in Hand' && (t.type === 'transfer' || t.type === 'withdrawal')) return acc + t.amount;
       if (t.institution === 'Cash in Hand') {
@@ -86,14 +84,11 @@ const Dashboard: React.FC<Props> = ({
     balances['Cash in Hand'] = { balance: cashFlow, type: 'cash', available: true, isCash: true };
 
     investments.forEach(inv => {
-      // Fix: Explicitly typing accumulator as number to prevent "unknown" type errors in reduce
       const liveVal = inv.holdings.reduce((hAcc: number, h) => {
         const live = marketPrices.find(m => m.symbol === h.symbol)?.price || h.purchasePrice;
         return hAcc + (h.quantity * live);
       }, 0);
-      // Fix: Explicitly typing accumulator as number to prevent "unknown" type errors in reduce
       const withdrawFlow = transactions.filter(t => t.institution === inv.provider && (t.type === 'withdrawal' || t.type === 'transfer' || t.type === 'expense')).reduce((acc: number, t) => acc + t.amount, 0);
-      // Fix: Explicitly typing accumulator as number to prevent "unknown" type errors in reduce
       const depositFlow = transactions.filter(t => t.destinationInstitution === inv.provider && (t.type === 'transfer' || t.type === 'income')).reduce((acc: number, t) => acc + t.amount, 0);
       balances[inv.provider] = { balance: liveVal - withdrawFlow + depositFlow, type: 'investment', available: false, holdings: inv.holdings };
     });
@@ -106,12 +101,9 @@ const Dashboard: React.FC<Props> = ({
     return primary + cash;
   }, [institutionalBalances]);
 
-  // Fix: Explicitly typing accumulator as number to prevent "unknown" type errors in reduce
   const portfolioFunds = useMemo(() => (Object.values(institutionalBalances) as InstitutionalBalance[]).filter(b => b.type === 'investment').reduce((acc: number, b) => acc + b.balance, 0), [institutionalBalances]);
-  // Fix: Explicitly typing accumulator as number to prevent "unknown" type errors in reduce
   const netWorth: number = (Object.values(institutionalBalances) as InstitutionalBalance[]).reduce((acc: number, b) => acc + b.balance, 0);
 
-  // Fix: Added missing trendData calculation
   const trendData = useMemo(() => {
     const grouped: Record<string, number> = {};
     const filteredTransactions = transactions.filter(t => 
@@ -133,12 +125,13 @@ const Dashboard: React.FC<Props> = ({
       grouped[label] = (grouped[label] || 0) + t.amount;
     });
 
-    return Object.entries(grouped)
+    const entries = Object.entries(grouped)
       .map(([label, amount]) => ({ label, amount }))
       .sort((a, b) => a.label.localeCompare(b.label));
+    
+    return entries.length > 0 ? entries : [{ label: 'No Data', amount: 0 }];
   }, [transactions, trendTimeframe, trendCategory]);
 
-  // Fix: Added missing settlementProgress calculation
   const settlementProgress = useMemo(() => {
     const totalItems = recurringIncomes.length + recurringExpenses.length;
     if (totalItems === 0) return 100;
@@ -154,9 +147,7 @@ const Dashboard: React.FC<Props> = ({
     return ((incomesCleared + billsCleared) / totalItems) * 100;
   }, [recurringIncomes, recurringExpenses, transactions, cycleStartDate]);
 
-  // Fix: Explicitly typing accumulator as number to prevent "unknown" type errors in reduce
   const totalMonthlyIncomes = useMemo(() => recurringIncomes.reduce((acc: number, i) => acc + i.amount, 0), [recurringIncomes]);
-  // Fix: Explicitly typing accumulator as number to prevent "unknown" type errors in reduce and ensuring category budgets are treated as numbers
   const totalMonthlyExpenses = useMemo(() => recurringExpenses.reduce((acc: number, e) => acc + e.amount, 0) + (Object.values(categoryBudgets).reduce((a: number, b) => a + (Number(b) || 0), 0)), [recurringExpenses, categoryBudgets]);
   const savingsRate = useMemo(() => totalMonthlyIncomes === 0 ? 0 : ((totalMonthlyIncomes - totalMonthlyExpenses) / totalMonthlyIncomes) * 100, [totalMonthlyIncomes, totalMonthlyExpenses]);
   const burnRate = useMemo(() => totalMonthlyExpenses / 30, [totalMonthlyExpenses]);
@@ -196,20 +187,27 @@ const Dashboard: React.FC<Props> = ({
 
   useEffect(() => {
     const generateSummary = async () => {
-      if (transactions.length < 2) { setAiInsight("Welcome! Start logging spend to unlock Gemini Insights."); return; }
+      if (transactions.length < 1) { setAiInsight("Welcome! Start logging spend to unlock Gemini Insights."); return; }
       setIsGeneratingInsight(true);
       try {
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const context = `Liquid Hub: $${liquidFunds.toFixed(2)}, Savings Rate: ${savingsRate.toFixed(1)}%, Burn: $${burnRate.toFixed(2)}, Runway: ${runwayMonths.toFixed(1)} mo.`;
-        const response = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: `Context: ${context}\nAction: One punchy advice sentence.`, });
-        setAiInsight(response.text || "Finances are looking stable.");
-      } catch (e) { setAiInsight("Advisor currently unavailable."); } finally { setIsGeneratingInsight(false); }
+        const response = await ai.models.generateContent({ 
+          model: 'gemini-3-flash-preview', 
+          contents: { parts: [{ text: `Context: ${context}\nAction: Provide one short, helpful financial tip based on these numbers.` }] }
+        });
+        setAiInsight(response.text || "Your portfolio is healthy.");
+      } catch (e) { 
+        console.error("Insight Error:", e);
+        setAiInsight("Financial advisor is optimizing. Check back soon."); 
+      } finally { 
+        setIsGeneratingInsight(false); 
+      }
     };
     generateSummary();
-  }, [liquidFunds, netWorth, savingsRate, transactions.length, burnRate, runwayMonths, cycleProgress]);
+  }, [liquidFunds, netWorth, transactions.length]);
 
   const renderIncomeCard = (income: RecurringIncome) => {
-    // Fix: Explicitly typing accumulator as number to prevent "unknown" type errors in reduce
     const receivedTotal = transactions.filter(t => t.recurringId === income.id && new Date(t.date) >= cycleStartDate && t.type === 'income').reduce((acc: number, t) => acc + t.amount, 0);
     const fullyReceived = receivedTotal >= income.amount;
     const currentInput = incomeInputs[income.id] || (income.amount - receivedTotal).toString();
@@ -301,7 +299,6 @@ const Dashboard: React.FC<Props> = ({
         <div className="bg-slate-900 p-8 rounded-[3rem] shadow-xl flex flex-col items-center text-center"><div className="w-12 h-12 bg-white/10 text-emerald-400 rounded-2xl flex items-center justify-center mb-4"><i className="fas fa-clock"></i></div><h4 className="text-[10px] font-black text-white/40 uppercase tracking-[0.2em] mb-1">Financial Freedom Clock</h4><p className="text-3xl font-black text-white">{runwayMonths.toFixed(1)} <span className="text-sm text-white/40">Mo</span></p></div>
       </section>
 
-      {/* Investment Milestones Section */}
       {investmentGoalProgress.length > 0 && (
         <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
           <div className="flex justify-between items-center mb-8"><div><h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em]">Wealth Milestones</h3><p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-widest">Tracking Portfolio Growth Targets</p></div><i className="fas fa-trophy text-amber-400 text-xl"></i></div>
@@ -323,15 +320,24 @@ const Dashboard: React.FC<Props> = ({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <section className="lg:col-span-2 bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
           <div className="flex justify-between items-center mb-10"><div><h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em]">Spending Trends</h3><p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-widest">Interactive Cash Flow Analytics</p></div><div className="bg-slate-100 p-1 rounded-xl flex gap-1">{(['daily', 'weekly', 'monthly', 'yearly'] as Timeframe[]).map(tf => (<button key={tf} onClick={() => setTrendTimeframe(tf)} className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all ${trendTimeframe === tf ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>{tf}</button>))}</div></div>
-          <div className="h-[300px] w-full"><ResponsiveContainer width="100%" height="100%"><LineChart data={trendData}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" /><XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 9, fontWeight: 800, fill: '#94a3b8' }} dy={10} /><YAxis axisLine={false} tickLine={false} tick={{ fontSize: 9, fontWeight: 800, fill: '#94a3b8' }} tickFormatter={(val) => `$${val}`} /><Tooltip contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', fontSize: '11px', fontWeight: 'bold' }} /><Line type="monotone" dataKey="amount" stroke="#6366f1" strokeWidth={4} dot={{ fill: '#6366f1', strokeWidth: 2, r: 4, stroke: '#fff' }} activeDot={{ r: 6, strokeWidth: 0 }} animationDuration={1500} /></LineChart></ResponsiveContainer></div>
+          <div className="h-[300px] w-full min-h-[300px]">
+            <ResponsiveContainer width="100%" height="100%" minHeight={300}>
+              <LineChart data={trendData}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 9, fontWeight: 800, fill: '#94a3b8' }} dy={10} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 9, fontWeight: 800, fill: '#94a3b8' }} tickFormatter={(val) => `$${val}`} />
+                <Tooltip contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', fontSize: '11px', fontWeight: 'bold' }} />
+                <Line type="monotone" dataKey="amount" stroke="#6366f1" strokeWidth={4} dot={{ fill: '#6366f1', strokeWidth: 2, r: 4, stroke: '#fff' }} activeDot={{ r: 6, strokeWidth: 0 }} animationDuration={1500} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
         </section>
         <section className="bg-slate-900 p-10 rounded-[3rem] shadow-2xl text-white overflow-hidden flex flex-col">
           <div className="flex items-center justify-between mb-8"><div><h3 className="font-black uppercase text-xs tracking-[0.3em] text-white/80">Active Budgets</h3><p className="text-[10px] text-white/40 font-bold uppercase mt-1 tracking-widest">Target Limits This Cycle</p></div><i className="fas fa-bullseye text-indigo-400"></i></div>
           <div className="flex-1 space-y-6 overflow-y-auto no-scrollbar pr-1">{(Object.entries(categoryBudgets) as [string, number][]).filter(([_, limit]) => limit > 0).map(([cat, limit]) => {
-              // Fix: Explicitly typing accumulator as number to prevent "unknown" type errors in reduce
               const actual = transactions.filter(t => t.category === cat && new Date(t.date) >= cycleStartDate).reduce((a: number, b) => a + b.amount, 0);
               const percent = Math.min(100, (actual / limit) * 100);
-              return (<div key={cat} className="space-y-2"><div className="flex justify-between items-end"><div><p className="text-[10px] font-black text-white/90 uppercase tracking-widest">{cat}</p></div><div className="text-right"><p className={`text-xs font-black ${percent >= 90 ? 'text-rose-400' : 'text-indigo-400'}`}>${(limit - actual).toFixed(0)} left</p></div></div><div className="h-2 w-full bg-white/5 rounded-full overflow-hidden border border-white/5"><div className={`h-full transition-all duration-1000 ease-out ${percent >= 90 ? 'bg-rose-500' : 'bg-indigo-500'}`} style={{ width: `${percent}%` }}></div></div></div>);
+              return (<div key={cat} className="space-y-2"><div className="flex justify-between items-end"><div><p className="text-[10px] font-black text-white/90 uppercase tracking-widest">{cat}</p></div><div className="text-right"><p className={`text-xs font-black ${percent >= 90 ? 'text-rose-400' : 'text-indigo-400'}`}>${Math.max(0, limit - actual).toFixed(0)} left</p></div></div><div className="h-2 w-full bg-white/5 rounded-full overflow-hidden border border-white/5"><div className={`h-full transition-all duration-1000 ease-out ${percent >= 90 ? 'bg-rose-500' : 'bg-indigo-500'}`} style={{ width: `${percent}%` }}></div></div></div>);
             })}</div>
         </section>
       </div>

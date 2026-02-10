@@ -44,13 +44,15 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
 
   const projectContacts = useMemo(() => {
     if (!selectedEvent) return [];
-    return contacts.filter(c => selectedEvent.contactIds?.includes(c.id));
+    const contactIds = Array.isArray(selectedEvent.contactIds) ? selectedEvent.contactIds : [];
+    return (Array.isArray(contacts) ? contacts : []).filter(c => contactIds.includes(c.id));
   }, [selectedEvent, contacts]);
 
   const stats = useMemo(() => {
     if (!selectedEvent) return { income: 0, expenses: 0, net: 0 };
-    const income = selectedEvent.items.filter(i => i.type === 'income').reduce((acc, i) => acc + i.amount, 0);
-    const expenses = selectedEvent.items.filter(i => i.type === 'expense').reduce((acc, i) => acc + i.amount, 0);
+    const items = Array.isArray(selectedEvent.items) ? selectedEvent.items : [];
+    const income = items.filter(i => i.type === 'income').reduce((acc, i) => acc + i.amount, 0);
+    const expenses = items.filter(i => i.type === 'expense').reduce((acc, i) => acc + i.amount, 0);
     return { income, expenses, net: income - expenses };
   }, [selectedEvent]);
 
@@ -67,7 +69,8 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
       notes: formData.get('notes') as string,
       date: new Date().toISOString().split('T')[0]
     };
-    onUpdateEvent({ ...selectedEvent, items: [...selectedEvent.items, newItem] });
+    const items = Array.isArray(selectedEvent.items) ? selectedEvent.items : [];
+    onUpdateEvent({ ...selectedEvent, items: [...items, newItem] });
     e.currentTarget.reset();
   };
 
@@ -79,14 +82,16 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
       completed: false,
       dueDate: taskDueDate || undefined
     };
-    onUpdateEvent({ ...selectedEvent, tasks: [...(selectedEvent.tasks || []), newTask] });
+    const tasks = Array.isArray(selectedEvent.tasks) ? selectedEvent.tasks : [];
+    onUpdateEvent({ ...selectedEvent, tasks: [...tasks, newTask] });
     setTaskText('');
     setTaskDueDate('');
   };
 
   const toggleTask = (taskId: string) => {
     if (!selectedEvent) return;
-    const updatedTasks = selectedEvent.tasks.map(t => 
+    const tasks = Array.isArray(selectedEvent.tasks) ? selectedEvent.tasks : [];
+    const updatedTasks = tasks.map(t => 
       t.id === taskId ? { 
         ...t, 
         completed: !t.completed, 
@@ -107,16 +112,18 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
       email: cEmail
     };
     
-    onUpdateContacts([...contacts, newContact]);
-    onUpdateEvent({ ...selectedEvent, contactIds: [...(selectedEvent.contactIds || []), newContact.id] });
+    onUpdateContacts([...(Array.isArray(contacts) ? contacts : []), newContact]);
+    const contactIds = Array.isArray(selectedEvent.contactIds) ? selectedEvent.contactIds : [];
+    onUpdateEvent({ ...selectedEvent, contactIds: [...contactIds, newContact.id] });
     
     setCName(''); setCNum(''); setCEmail('');
   };
 
   const linkExistingContact = (contactId: string) => {
     if (!selectedEvent) return;
-    if (selectedEvent.contactIds?.includes(contactId)) return;
-    onUpdateEvent({ ...selectedEvent, contactIds: [...(selectedEvent.contactIds || []), contactId] });
+    const contactIds = Array.isArray(selectedEvent.contactIds) ? selectedEvent.contactIds : [];
+    if (contactIds.includes(contactId)) return;
+    onUpdateEvent({ ...selectedEvent, contactIds: [...contactIds, contactId] });
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -133,7 +140,8 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
         data: reader.result as string, // base64
         timestamp: new Date().toLocaleString()
       };
-      onUpdateEvent({ ...selectedEvent, files: [...(selectedEvent.files || []), newFile] });
+      const files = Array.isArray(selectedEvent.files) ? selectedEvent.files : [];
+      onUpdateEvent({ ...selectedEvent, files: [...files, newFile] });
     };
     reader.readAsDataURL(file);
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -141,7 +149,6 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
 
   const openFile = (file: ProjectFile) => {
     try {
-      // Decode the data URL to a blob for more reliable browser viewing
       const base64Parts = file.data.split(',');
       const mime = base64Parts[0].match(/:(.*?);/)?.[1] || file.type;
       const b64Data = base64Parts[1];
@@ -162,21 +169,17 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
       const blob = new Blob(byteArrays, { type: mime });
       const url = URL.createObjectURL(blob);
       
-      // Open in a new tab
       const newWindow = window.open(url, '_blank');
       if (!newWindow) {
-        // Fallback for popup blockers: force download
         const link = document.createElement('a');
         link.href = url;
         link.download = file.name;
         link.click();
       }
-      
-      // Clean up the URL object after some time to free memory
       setTimeout(() => URL.revokeObjectURL(url), 10000);
     } catch (error) {
       console.error("Failed to open file:", error);
-      alert("Unable to open file. The data may be corrupted or too large for this browser's URL limits.");
+      alert("Unable to open file.");
     }
   };
 
@@ -187,7 +190,8 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
       text: noteText,
       timestamp: new Date().toLocaleString()
     };
-    onUpdateEvent({ ...selectedEvent, notes: [newNote, ...(selectedEvent.notes || [])] });
+    const notes = Array.isArray(selectedEvent.notes) ? selectedEvent.notes : [];
+    onUpdateEvent({ ...selectedEvent, notes: [newNote, ...notes] });
     setNoteText('');
   };
 
@@ -227,9 +231,10 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
 
       {!selectedEventId ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {events.map(event => {
+          {(Array.isArray(events) ? events : []).map(event => {
             const evStats = calculatePnL(event);
-            const taskProgress = event.tasks?.length ? (event.tasks.filter(t => t.completed).length / event.tasks.length) * 100 : 0;
+            const tasks = Array.isArray(event.tasks) ? event.tasks : [];
+            const taskProgress = tasks.length ? (tasks.filter(t => t.completed).length / tasks.length) * 100 : 0;
             return (
               <div key={event.id} onClick={() => { setSelectedEventId(event.id); setActiveTab('ledger'); }} className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm cursor-pointer hover:shadow-xl hover:-translate-y-1 transition-all group flex flex-col justify-between h-full relative overflow-hidden">
                 {event.status === 'completed' && (
@@ -318,7 +323,7 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
                       </div>
                     </div>
                     <div className="space-y-4">
-                      {selectedEvent.items.map(item => (
+                      {(Array.isArray(selectedEvent.items) ? selectedEvent.items : []).map(item => (
                         <div key={item.id} className="flex items-center justify-between p-6 bg-slate-50 rounded-[2rem] border border-slate-100 transition shadow-sm">
                           <div className="flex items-center gap-5">
                             <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-white text-lg ${item.type === 'income' ? 'bg-emerald-500' : 'bg-rose-500'}`}><i className={`fas ${item.type === 'income' ? 'fa-arrow-up' : 'fa-arrow-down'}`}></i></div>
@@ -333,11 +338,11 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
                           </div>
                           <div className="text-right">
                             <p className={`font-black text-base ${item.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>{item.type === 'income' ? '+' : '-'}${item.amount.toLocaleString()}</p>
-                            <button onClick={() => onUpdateEvent({...selectedEvent, items: selectedEvent.items.filter(i => i.id !== item.id)})} className="text-[8px] font-black text-slate-300 uppercase tracking-widest hover:text-rose-500 transition">Delete</button>
+                            <button onClick={() => onUpdateEvent({...selectedEvent, items: (Array.isArray(selectedEvent.items) ? selectedEvent.items : []).filter(i => i.id !== item.id)})} className="text-[8px] font-black text-slate-300 uppercase tracking-widest hover:text-rose-500 transition">Delete</button>
                           </div>
                         </div>
                       ))}
-                      {selectedEvent.items.length === 0 && <div className="py-20 text-center border-2 border-dashed border-slate-100 rounded-[2rem]"><p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">No financial events recorded</p></div>}
+                      {(!Array.isArray(selectedEvent.items) || selectedEvent.items.length === 0) && <div className="py-20 text-center border-2 border-dashed border-slate-100 rounded-[2rem]"><p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">No financial events recorded</p></div>}
                     </div>
                   </div>
                 </div>
@@ -365,7 +370,7 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
                   <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
                     <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em] mb-8">Operational Roadmap</h3>
                     <div className="space-y-4">
-                      {selectedEvent.tasks?.map(task => {
+                      {(Array.isArray(selectedEvent.tasks) ? selectedEvent.tasks : []).map(task => {
                         const isOverdue = task.dueDate && new Date(task.dueDate) < new Date() && !task.completed;
                         return (
                           <div key={task.id} className={`flex items-center justify-between p-6 rounded-[2rem] border transition-all ${task.completed ? 'bg-slate-50 border-slate-100 opacity-60' : isOverdue ? 'bg-rose-50 border-rose-200' : 'bg-white border-slate-100 shadow-sm'}`}>
@@ -379,11 +384,11 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
                                 </div>
                               </div>
                             </div>
-                            <button onClick={() => onUpdateEvent({...selectedEvent, tasks: selectedEvent.tasks.filter(t => t.id !== task.id)})} className="text-slate-300 hover:text-rose-500 transition px-2"><i className="fas fa-trash-alt text-[10px]"></i></button>
+                            <button onClick={() => onUpdateEvent({...selectedEvent, tasks: (Array.isArray(selectedEvent.tasks) ? selectedEvent.tasks : []).filter(t => t.id !== task.id)})} className="text-slate-300 hover:text-rose-500 transition px-2"><i className="fas fa-trash-alt text-[10px]"></i></button>
                           </div>
                         );
                       })}
-                      {(!selectedEvent.tasks || selectedEvent.tasks.length === 0) && <div className="py-20 text-center border-2 border-dashed border-slate-100 rounded-[2.5rem] text-[10px] font-black text-slate-300 uppercase tracking-widest">No strategic tasks assigned</div>}
+                      {(!Array.isArray(selectedEvent.tasks) || selectedEvent.tasks.length === 0) && <div className="py-20 text-center border-2 border-dashed border-slate-100 rounded-[2.5rem] text-[10px] font-black text-slate-300 uppercase tracking-widest">No strategic tasks assigned</div>}
                     </div>
                   </div>
                 </div>
@@ -410,7 +415,7 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
                     <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
-                    {selectedEvent.files?.map(file => (
+                    {(Array.isArray(selectedEvent.files) ? selectedEvent.files : []).map(file => (
                       <div 
                         key={file.id} 
                         onClick={() => openFile(file)}
@@ -422,7 +427,7 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
                         <div className="mt-2 text-[8px] font-black text-indigo-500 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">Click to View</div>
                         <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button 
-                            onClick={(e) => { e.stopPropagation(); onUpdateEvent({...selectedEvent, files: selectedEvent.files.filter(f => f.id !== file.id)}); }} 
+                            onClick={(e) => { e.stopPropagation(); onUpdateEvent({...selectedEvent, files: (Array.isArray(selectedEvent.files) ? selectedEvent.files : []).filter(f => f.id !== file.id)}); }} 
                             className="w-6 h-6 bg-rose-50 text-rose-500 rounded-lg text-[8px] flex items-center justify-center hover:bg-rose-500 hover:text-white transition"
                           >
                             <i className="fas fa-times"></i>
@@ -430,7 +435,7 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
                         </div>
                       </div>
                     ))}
-                    {(!selectedEvent.files || selectedEvent.files.length === 0) && <div className="col-span-full py-20 text-center border-2 border-dashed border-slate-100 rounded-[2.5rem]"><p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.2em]">No assets in repository</p></div>}
+                    {(!Array.isArray(selectedEvent.files) || selectedEvent.files.length === 0) && <div className="col-span-full py-20 text-center border-2 border-dashed border-slate-100 rounded-[2.5rem]"><p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.2em]">No assets in repository</p></div>}
                   </div>
                 </div>
               </div>
@@ -450,13 +455,13 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
                       <div className="mb-10 p-8 bg-slate-900 rounded-[2rem] text-white">
                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">Universal Relationship Ledger</p>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {contacts.filter(c => !selectedEvent.contactIds?.includes(c.id)).map(c => (
+                          {(Array.isArray(contacts) ? contacts : []).filter(c => !((Array.isArray(selectedEvent.contactIds) ? selectedEvent.contactIds : [])).includes(c.id)).map(c => (
                             <div key={c.id} className="p-4 bg-white/5 border border-white/10 rounded-2xl flex justify-between items-center group">
                                <div><p className="font-black text-sm">{c.name}</p><p className="text-[9px] text-white/40 font-bold">{c.email}</p></div>
                                <button onClick={() => linkExistingContact(c.id)} className="px-4 py-2 bg-white/10 hover:bg-indigo-500 text-white rounded-xl text-[8px] font-black uppercase tracking-widest transition">Connect</button>
                             </div>
                           ))}
-                          {contacts.filter(c => !selectedEvent.contactIds?.includes(c.id)).length === 0 && <p className="text-[10px] font-bold text-white/20 uppercase tracking-widest py-4 text-center col-span-full">No available contacts to link</p>}
+                          {(Array.isArray(contacts) ? contacts : []).filter(c => !((Array.isArray(selectedEvent.contactIds) ? selectedEvent.contactIds : [])).includes(c.id)).length === 0 && <p className="text-[10px] font-bold text-white/20 uppercase tracking-widest py-4 text-center col-span-full">No available contacts to link</p>}
                         </div>
                       </div>
                     )}
@@ -468,7 +473,7 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
                               <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-indigo-600 shadow-sm"><i className="fas fa-user-tie"></i></div>
                               <div><p className="font-black text-base text-slate-800">{c.name}</p><p className="text-[10px] text-indigo-500 font-bold uppercase">{c.email}</p></div>
                             </div>
-                            <button onClick={() => onUpdateEvent({...selectedEvent, contactIds: selectedEvent.contactIds.filter(id => id !== c.id)})} className="text-slate-300 hover:text-rose-500 transition px-2"><i className="fas fa-user-minus text-[10px]"></i></button>
+                            <button onClick={() => onUpdateEvent({...selectedEvent, contactIds: (Array.isArray(selectedEvent.contactIds) ? selectedEvent.contactIds : []).filter(id => id !== c.id)})} className="text-slate-300 hover:text-rose-500 transition px-2"><i className="fas fa-user-minus text-[10px]"></i></button>
                           </div>
                           <div className="flex items-center gap-5 mt-4">
                              <div className="flex items-center gap-2 text-slate-400"><i className="fas fa-mobile-alt text-xs"></i><span className="text-[11px] font-black">{c.number}</span></div>
@@ -498,19 +503,19 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
                   <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm h-full max-h-[700px] overflow-y-auto no-scrollbar">
                     <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em] mb-10">Strategic Journal</h3>
                     <div className="space-y-10 relative before:absolute before:left-[19px] before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-100">
-                      {selectedEvent.notes?.map(note => (
+                      {(Array.isArray(selectedEvent.notes) ? selectedEvent.notes : []).map(note => (
                         <div key={note.id} className="relative pl-12">
                           <div className="absolute left-0 top-1 w-10 h-10 bg-white border-2 border-slate-100 rounded-2xl flex items-center justify-center z-10 text-indigo-500 shadow-sm"><i className="fas fa-pencil-alt text-[10px]"></i></div>
                           <div className="bg-slate-50 p-7 rounded-[2.5rem] border border-slate-100 shadow-sm group">
                             <p className="text-[13px] font-medium leading-relaxed text-slate-700">{note.text}</p>
                             <div className="flex justify-between items-center mt-5">
                               <p className="text-[8px] font-black uppercase text-slate-400 tracking-widest">{note.timestamp}</p>
-                              <button onClick={() => onUpdateEvent({...selectedEvent, notes: selectedEvent.notes.filter(n => n.id !== note.id)})} className="text-slate-300 hover:text-rose-500 transition opacity-0 group-hover:opacity-100"><i className="fas fa-trash-alt text-[9px]"></i></button>
+                              <button onClick={() => onUpdateEvent({...selectedEvent, notes: (Array.isArray(selectedEvent.notes) ? selectedEvent.notes : []).filter(n => n.id !== note.id)})} className="text-slate-300 hover:text-rose-500 transition opacity-0 group-hover:opacity-100"><i className="fas fa-trash-alt text-[9px]"></i></button>
                             </div>
                           </div>
                         </div>
                       ))}
-                      {(!selectedEvent.notes || selectedEvent.notes.length === 0) && <div className="py-20 text-center border-2 border-dashed border-slate-100 rounded-[2.5rem] text-[10px] font-black text-slate-300 uppercase tracking-widest">Journal is currently empty</div>}
+                      {(!Array.isArray(selectedEvent.notes) || selectedEvent.notes.length === 0) && <div className="py-20 text-center border-2 border-dashed border-slate-100 rounded-[2.5rem] text-[10px] font-black text-slate-300 uppercase tracking-widest">Journal is currently empty</div>}
                     </div>
                   </div>
                 </div>
@@ -576,8 +581,9 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, onAddEvent, onDeleteE
 
 // Internal utility
 function calculatePnL(event: BudgetEvent) {
-  const income = event.items.filter(i => i.type === 'income').reduce((acc, i) => acc + i.amount, 0);
-  const expenses = event.items.filter(i => i.type === 'expense').reduce((acc, i) => acc + i.amount, 0);
+  const items = Array.isArray(event.items) ? event.items : [];
+  const income = items.filter(i => i.type === 'income').reduce((acc, i) => acc + i.amount, 0);
+  const expenses = items.filter(i => i.type === 'expense').reduce((acc, i) => acc + i.amount, 0);
   return { income, expenses, net: income - expenses };
 }
 

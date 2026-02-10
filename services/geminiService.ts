@@ -49,11 +49,11 @@ export const parseInputToTransaction = async (
   try {
     const contents = isMedia 
       ? { parts: [{ inlineData: input as { data: string; mimeType: string } }, { text: "Parse this receipt or audio note. If it's a balance statement (e.g. 'Binance shows 1 BTC'), use portfolio update. Otherwise, use transaction." }] }
-      : `Analyze: "${input}". Extract details.`;
+      : { parts: [{ text: `Analyze: "${input}". Extract details.` }] };
 
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: contents as any,
+      contents: contents,
       config: {
         responseMimeType: "application/json",
         responseSchema: SCHEMA,

@@ -17,6 +17,132 @@ const generateId = () => Math.random().toString(36).substr(2, 9);
 
 type ProjectTab = 'ledger' | 'tasks' | 'vault' | 'contacts' | 'log' | 'review';
 
+// Separate TaskItem component to prevent re-definition on parent render
+interface TaskItemProps {
+  task: ProjectTask;
+  depth: number;
+  onToggle: (id: string) => void;
+  onDelete: (id: string) => void;
+  onEdit: (task: ProjectTask) => void;
+  onAddSub: (parentId: string, text: string) => void;
+}
+
+const TaskItem: React.FC<TaskItemProps> = ({ task, depth, onToggle, onDelete, onEdit, onAddSub }) => {
+  const [isAddingSub, setIsAddingSub] = useState(false);
+  const [subText, setSubText] = useState('');
+
+  const isOverdue = task.dueDate && new Date(task.dueDate) < new Date() && !task.completed;
+  const subProgress = task.subTasks && task.subTasks.length > 0 
+    ? (task.subTasks.filter(st => st.completed).length / task.subTasks.length) * 100 
+    : null;
+
+  const handleAddSub = () => {
+    if (!subText.trim()) return;
+    onAddSub(task.id, subText);
+    setSubText('');
+    setIsAddingSub(false);
+  };
+
+  return (
+    <div className="relative">
+      {/* Visual Connector Line for nested tasks */}
+      {depth > 0 && (
+        <div 
+          className="absolute left-[-24px] top-[-16px] w-[24px] h-[34px] border-l-2 border-b-2 border-slate-100 rounded-bl-xl pointer-events-none"
+          style={{ left: '-20px', width: '20px' }}
+        ></div>
+      )}
+      
+      <div className="space-y-3">
+        <div className={`flex items-center justify-between p-4 rounded-[1.5rem] border transition-all ${depth > 0 ? 'bg-slate-50/40' : 'bg-white border-slate-100 shadow-sm'} ${task.completed ? 'opacity-60 bg-slate-50/20' : isOverdue ? 'bg-rose-50 border-rose-200' : ''} group relative z-10`}>
+          <div className="flex items-center gap-4 flex-1 min-w-0">
+            <button 
+              onClick={() => onToggle(task.id)} 
+              className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all ${task.completed ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-transparent hover:bg-slate-200 hover:text-slate-400'}`}
+            >
+              <i className="fas fa-check text-[10px]"></i>
+            </button>
+            <div className="flex-1 min-w-0">
+              <p className={`font-black text-xs truncate ${task.completed ? 'line-through text-slate-400' : 'text-slate-800'}`}>{task.text}</p>
+              <div className="flex flex-wrap items-center gap-3 mt-1">
+                {task.dueDate && (
+                  <span className={`text-[7px] font-black uppercase tracking-widest ${isOverdue ? 'text-rose-600' : 'text-slate-400'}`}>
+                    <i className="far fa-clock mr-1"></i> {task.dueDate}
+                  </span>
+                )}
+                {subProgress !== null && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[7px] font-black uppercase tracking-widest text-indigo-500">{subProgress.toFixed(0)}% Sub-tasks</span>
+                    <div className="w-12 h-1 bg-slate-200 rounded-full overflow-hidden">
+                      <div className="h-full bg-indigo-500" style={{ width: `${subProgress}%` }}></div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            {depth < 3 && (
+              <button 
+                onClick={() => setIsAddingSub(!isAddingSub)} 
+                className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${isAddingSub ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100'}`} 
+                title="Add Sub-task"
+              >
+                <i className={`fas ${isAddingSub ? 'fa-times' : 'fa-plus'} text-[9px]`}></i>
+              </button>
+            )}
+            <button 
+              onClick={() => onEdit(task)} 
+              className="w-8 h-8 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center hover:bg-slate-800 hover:text-white transition"
+            >
+              <i className="fas fa-edit text-[9px]"></i>
+            </button>
+            <button 
+              onClick={() => onDelete(task.id)} 
+              className="w-8 h-8 rounded-lg bg-rose-50 text-rose-400 flex items-center justify-center hover:bg-rose-500 hover:text-white transition"
+            >
+              <i className="fas fa-trash-alt text-[9px]"></i>
+            </button>
+          </div>
+        </div>
+        
+        {isAddingSub && (
+          <div className="ml-10 p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100 animate-in slide-in-from-top-2 duration-200">
+            <div className="flex gap-2">
+              <input 
+                autoFocus
+                value={subText} 
+                onChange={(e) => setSubText(e.target.value)} 
+                onKeyDown={(e) => e.key === 'Enter' && handleAddSub()}
+                placeholder="New sub-task..." 
+                className="flex-1 p-2.5 bg-white border border-slate-200 rounded-xl text-[11px] font-bold outline-none focus:ring-2 focus:ring-indigo-500" 
+              />
+              <button onClick={handleAddSub} className="px-4 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase shadow-lg shadow-indigo-100">Add</button>
+            </div>
+          </div>
+        )}
+
+        {task.subTasks && task.subTasks.length > 0 && (
+          <div className="ml-10 mt-3 space-y-4">
+            {task.subTasks.map(st => (
+              <TaskItem 
+                key={st.id} 
+                task={st} 
+                depth={depth + 1} 
+                onToggle={onToggle} 
+                onDelete={onDelete} 
+                onEdit={onEdit} 
+                onAddSub={onAddSub} 
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAddEvent, onDeleteEvent, onUpdateEvent, onUpdateContacts }) => {
   const [showAddForm, setShowAddForm] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
@@ -37,10 +163,6 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
   const [taskText, setTaskText] = useState('');
   const [taskDueDate, setTaskDueDate] = useState('');
   const [noteText, setNoteText] = useState('');
-
-  // Sub-task State
-  const [addingSubTaskTo, setAddingSubTaskTo] = useState<string | null>(null);
-  const [subTaskText, setSubTaskText] = useState('');
 
   // Contact States
   const [cName, setCName] = useState('');
@@ -96,11 +218,11 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
     setEditingItem(null);
   };
 
-  // Task CRUD (Recursive support)
+  // Recursive Task Helpers
   const updateTaskInList = (tasks: ProjectTask[], taskId: string, updateFn: (task: ProjectTask) => ProjectTask): ProjectTask[] => {
     return tasks.map(t => {
       if (t.id === taskId) return updateFn(t);
-      if (t.subTasks) return { ...t, subTasks: updateTaskInList(t.subTasks, taskId, updateFn) };
+      if (t.subTasks && t.subTasks.length > 0) return { ...t, subTasks: updateTaskInList(t.subTasks, taskId, updateFn) };
       return t;
     });
   };
@@ -126,11 +248,11 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
     setTaskDueDate('');
   };
 
-  const addSubTask = (parentId: string) => {
-    if (!selectedEvent || !subTaskText.trim()) return;
+  const handleAddSubTask = (parentId: string, text: string) => {
+    if (!selectedEvent) return;
     const newSub: ProjectTask = {
       id: generateId(),
-      text: subTaskText,
+      text: text,
       completed: false,
       subTasks: []
     };
@@ -140,8 +262,6 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
       subTasks: [...(p.subTasks || []), newSub]
     }));
     onUpdateEvent({ ...selectedEvent, tasks: updatedTasks });
-    setSubTaskText('');
-    setAddingSubTaskTo(null);
   };
 
   const handleUpdateTask = (e: React.FormEvent) => {
@@ -153,7 +273,7 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
     setEditingTask(null);
   };
 
-  const toggleTask = (taskId: string) => {
+  const handleToggleTask = (taskId: string) => {
     if (!selectedEvent) return;
     const tasks = Array.isArray(selectedEvent.tasks) ? selectedEvent.tasks : [];
     const updatedTasks = updateTaskInList(tasks, taskId, (t) => ({
@@ -164,8 +284,9 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
     onUpdateEvent({ ...selectedEvent, tasks: updatedTasks });
   };
 
-  const deleteTask = (taskId: string) => {
+  const handleDeleteTask = (taskId: string) => {
     if (!selectedEvent) return;
+    if (!confirm('Permanently remove this task and all its sub-tasks?')) return;
     const tasks = Array.isArray(selectedEvent.tasks) ? selectedEvent.tasks : [];
     const updatedTasks = removeTaskFromList(tasks, taskId);
     onUpdateEvent({ ...selectedEvent, tasks: updatedTasks });
@@ -237,7 +358,7 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
       onUpdateEvent({ ...selectedEvent, files: [...files, newFile] });
     } catch (error) {
       console.error("Upload failed:", error);
-      alert("File upload failed. Ensure you have granted folder permissions if using disk sync.");
+      alert("File upload failed. Ensure folder permissions are granted if using disk sync.");
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -301,52 +422,6 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
     const notes = Array.isArray(selectedEvent.notes) ? selectedEvent.notes : [];
     onUpdateEvent({ ...selectedEvent, notes: [newNote, ...notes] });
     setNoteText('');
-  };
-
-  // Explicitly type TaskItem as React.FC to handle the 'key' prop in recursive calls and list rendering.
-  const TaskItem: React.FC<{ task: ProjectTask; depth?: number }> = ({ task, depth = 0 }) => {
-    const isOverdue = task.dueDate && new Date(task.dueDate) < new Date() && !task.completed;
-    const subProgress = task.subTasks && task.subTasks.length > 0 
-      ? (task.subTasks.filter(st => st.completed).length / task.subTasks.length) * 100 
-      : null;
-
-    return (
-      <div className="space-y-2">
-        <div className={`flex items-center justify-between p-4 rounded-[1.5rem] border transition-all ${depth > 0 ? 'ml-8 bg-slate-50/50' : 'bg-white border-slate-100 shadow-sm'} ${task.completed ? 'opacity-60' : isOverdue ? 'bg-rose-50 border-rose-200' : ''} group`}>
-          <div className="flex items-center gap-4">
-            <button onClick={() => toggleTask(task.id)} className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${task.completed ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-transparent hover:bg-slate-200'}`}><i className="fas fa-check text-[10px]"></i></button>
-            <div>
-              <p className={`font-black text-xs ${task.completed ? 'line-through text-slate-400' : 'text-slate-800'}`}>{task.text}</p>
-              <div className="flex flex-wrap items-center gap-3 mt-0.5">
-                {task.dueDate && <span className={`text-[7px] font-black uppercase tracking-widest ${isOverdue ? 'text-rose-600' : 'text-slate-400'}`}><i className="far fa-clock mr-1"></i> {task.dueDate}</span>}
-                {subProgress !== null && <span className="text-[7px] font-black uppercase tracking-widest text-indigo-500">{subProgress.toFixed(0)}% Sub-tasks Done</span>}
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            {depth < 2 && (
-              <button onClick={() => setAddingSubTaskTo(task.id)} className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center hover:bg-indigo-600 hover:text-white transition" title="Add Sub-task"><i className="fas fa-plus text-[8px]"></i></button>
-            )}
-            <button onClick={() => setEditingTask(task)} className="w-7 h-7 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center hover:bg-slate-800 hover:text-white transition"><i className="fas fa-edit text-[8px]"></i></button>
-            <button onClick={() => deleteTask(task.id)} className="w-7 h-7 rounded-lg bg-rose-50 text-rose-400 flex items-center justify-center hover:bg-rose-500 hover:text-white transition"><i className="fas fa-trash-alt text-[8px]"></i></button>
-          </div>
-        </div>
-        
-        {addingSubTaskTo === task.id && (
-          <div className="ml-12 p-3 bg-indigo-50/50 rounded-xl border border-indigo-100 animate-in slide-in-from-top-1">
-            <div className="flex gap-2">
-              <input value={subTaskText} onChange={(e) => setSubTaskText(e.target.value)} placeholder="Sub-task requirement..." className="flex-1 p-2 bg-white border border-slate-200 rounded-lg text-[10px] font-bold outline-none" />
-              <button onClick={() => addSubTask(task.id)} className="px-3 bg-indigo-600 text-white rounded-lg text-[9px] font-black uppercase">Add</button>
-              <button onClick={() => setAddingSubTaskTo(null)} className="px-3 bg-slate-200 text-slate-500 rounded-lg text-[9px] font-black uppercase">Cancel</button>
-            </div>
-          </div>
-        )}
-
-        {task.subTasks?.map(st => (
-          <TaskItem key={st.id} task={st} depth={depth + 1} />
-        ))}
-      </div>
-    );
   };
 
   return (
@@ -528,20 +603,28 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
                 <div className="lg:col-span-3 space-y-6">
                   <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
                     <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.3em] mb-8">Operational Roadmap</h3>
-                    <div className="space-y-4">
+                    <div className="space-y-6">
                       {(Array.isArray(selectedEvent.tasks) ? selectedEvent.tasks : []).map(task => (
-                        <TaskItem key={task.id} task={task} />
+                        <TaskItem 
+                          key={task.id} 
+                          task={task} 
+                          depth={0} 
+                          onToggle={handleToggleTask} 
+                          onDelete={handleDeleteTask} 
+                          onEdit={setEditingTask} 
+                          onAddSub={handleAddSubTask} 
+                        />
                       ))}
                       {(!Array.isArray(selectedEvent.tasks) || selectedEvent.tasks.length === 0) && <div className="py-20 text-center border-2 border-dashed border-slate-100 rounded-[2.5rem] text-[10px] font-black text-slate-300 uppercase tracking-widest">No strategic tasks assigned</div>}
                     </div>
                   </div>
                 </div>
-                <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm h-fit">
-                  <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.2em] mb-8">New Primary Objective</h3>
+                <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm h-fit sticky top-24">
+                  <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.2em] mb-8">New Root Objective</h3>
                   <div className="space-y-5">
-                    <textarea value={taskText} onChange={(e) => setTaskText(e.target.value)} placeholder="Operational requirement..." className="w-full h-32 p-5 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold text-xs resize-none"></textarea>
-                    <div><label className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1 mb-2 block">Deadline</label><input type="date" value={taskDueDate} onChange={(e) => setTaskDueDate(e.target.value)} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none text-[10px] font-bold" /></div>
-                    <button onClick={addTask} className="w-full py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[9px] hover:bg-slate-900 transition">Assign Root Task</button>
+                    <textarea value={taskText} onChange={(e) => setTaskText(e.target.value)} placeholder="What is the primary requirement?" className="w-full h-32 p-5 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold text-xs resize-none focus:ring-2 focus:ring-indigo-500"></textarea>
+                    <div><label className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1 mb-2 block">Deadline (Optional)</label><input type="date" value={taskDueDate} onChange={(e) => setTaskDueDate(e.target.value)} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none text-[10px] font-bold focus:ring-2 focus:ring-indigo-500" /></div>
+                    <button onClick={addTask} className="w-full py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[9px] hover:bg-slate-900 transition">Assign Primary Task</button>
                   </div>
                 </div>
               </div>
@@ -629,9 +712,9 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
                 <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm h-fit">
                    <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.2em] mb-8">New Global Link</h3>
                    <form onSubmit={addContactToProject} className="space-y-5">
-                     <div><label className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1 mb-2 block">Full Name</label><input value={cName} onChange={e => setCName(e.target.value)} required placeholder="Neil V." className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold text-xs" /></div>
-                     <div><label className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1 mb-2 block">Mobile Line</label><input value={cNum} onChange={e => setCNum(e.target.value)} placeholder="+1 (758)..." className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold text-xs" /></div>
-                     <div><label className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1 mb-2 block">E-Mail Address</label><input value={cEmail} onChange={e => setCEmail(e.target.value)} placeholder="contact@pro.hub" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold text-xs" /></div>
+                     <div><label className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1 mb-2 block">Full Name</label><input value={cName} onChange={e => setCName(e.target.value)} required placeholder="Neil V." className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold text-xs focus:ring-2 focus:ring-indigo-500" /></div>
+                     <div><label className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1 mb-2 block">Mobile Line</label><input value={cNum} onChange={e => setCNum(e.target.value)} placeholder="+1 (758)..." className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold text-xs focus:ring-2 focus:ring-indigo-500" /></div>
+                     <div><label className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1 mb-2 block">E-Mail Address</label><input value={cEmail} onChange={e => setCEmail(e.target.value)} placeholder="contact@pro.hub" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold text-xs focus:ring-2 focus:ring-indigo-500" /></div>
                      <button type="submit" className="w-full py-4 bg-slate-900 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[9px] hover:bg-indigo-600 transition">Archive & Connect</button>
                    </form>
                 </div>
@@ -691,14 +774,14 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
         </div>
       )}
 
-      {/* Edit Task Modal (Standard for edits) */}
+      {/* Edit Task Modal */}
       {editingTask && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white w-full max-w-sm rounded-[3rem] p-8 shadow-2xl border border-slate-100">
             <h3 className="text-xl font-black text-slate-800 mb-6 uppercase text-xs tracking-widest">Update Goal</h3>
             <form onSubmit={handleUpdateTask} className="space-y-5">
-              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Requirement</label><textarea value={editingTask.text} onChange={e => setEditingTask({...editingTask, text: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold resize-none h-32" /></div>
-              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Deadline</label><input type="date" value={editingTask.dueDate || ''} onChange={e => setEditingTask({...editingTask, dueDate: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" /></div>
+              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Requirement</label><textarea value={editingTask.text} onChange={e => setEditingTask({...editingTask, text: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold resize-none h-32 focus:ring-2 focus:ring-indigo-500" /></div>
+              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Deadline</label><input type="date" value={editingTask.dueDate || ''} onChange={e => setEditingTask({...editingTask, dueDate: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold focus:ring-2 focus:ring-indigo-500" /></div>
               <div className="flex gap-2">
                 <button type="submit" className="flex-1 py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[10px] hover:bg-slate-900 transition">Update Goal</button>
                 <button type="button" onClick={() => setEditingTask(null)} className="flex-1 py-4 bg-slate-50 text-slate-400 font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-slate-100 transition">Cancel</button>
@@ -714,8 +797,8 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
           <div className="bg-white w-full max-w-sm rounded-[3rem] p-8 shadow-2xl border border-slate-100">
             <h3 className="text-xl font-black text-slate-800 mb-6 uppercase text-xs tracking-widest">Update Ledger Entry</h3>
             <form onSubmit={handleUpdateItem} className="space-y-5">
-              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Description</label><input value={editingItem.description} onChange={e => setEditingItem({...editingItem, description: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" /></div>
-              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Amount</label><input type="number" step="0.01" value={editingItem.amount} onChange={e => setEditingItem({...editingItem, amount: parseFloat(e.target.value)})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" /></div>
+              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Description</label><input value={editingItem.description} onChange={e => setEditingItem({...editingItem, description: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold focus:ring-2 focus:ring-indigo-500" /></div>
+              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Amount</label><input type="number" step="0.01" value={editingItem.amount} onChange={e => setEditingItem({...editingItem, amount: parseFloat(e.target.value)})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold focus:ring-2 focus:ring-indigo-500" /></div>
               <div className="flex gap-2">
                 <button type="submit" className="flex-1 py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[10px] hover:bg-slate-900 transition">Save Changes</button>
                 <button type="button" onClick={() => setEditingItem(null)} className="flex-1 py-4 bg-slate-50 text-slate-400 font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-slate-100 transition">Cancel</button>
@@ -731,9 +814,9 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
           <div className="bg-white w-full max-w-sm rounded-[3rem] p-8 shadow-2xl border border-slate-100">
             <h3 className="text-xl font-black text-slate-800 mb-6 uppercase text-xs tracking-widest">Update Stakeholder</h3>
             <form onSubmit={handleUpdateContact} className="space-y-5">
-              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Full Name</label><input value={editingContact.name} onChange={e => setEditingContact({...editingContact, name: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" /></div>
-              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Mobile Line</label><input value={editingContact.number} onChange={e => setEditingContact({...editingContact, number: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" /></div>
-              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Email Address</label><input value={editingContact.email} onChange={e => setEditingContact({...editingContact, email: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" /></div>
+              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Full Name</label><input value={editingContact.name} onChange={e => setEditingContact({...editingContact, name: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold focus:ring-2 focus:ring-indigo-500" /></div>
+              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Mobile Line</label><input value={editingContact.number} onChange={e => setEditingContact({...editingContact, number: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold focus:ring-2 focus:ring-indigo-500" /></div>
+              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Email Address</label><input value={editingContact.email} onChange={e => setEditingContact({...editingContact, email: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold focus:ring-2 focus:ring-indigo-500" /></div>
               <div className="flex gap-2">
                 <button type="submit" className="flex-1 py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[10px] hover:bg-slate-900 transition">Save Data</button>
                 <button type="button" onClick={() => setEditingContact(null)} className="flex-1 py-4 bg-slate-50 text-slate-400 font-black rounded-2xl uppercase tracking-widest text-[10px] hover:bg-slate-100 transition">Cancel</button>

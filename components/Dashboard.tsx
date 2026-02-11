@@ -55,6 +55,7 @@ const Dashboard: React.FC<Props> = ({
     return start;
   }, []);
 
+  // Fix: Move institutionalBalances declaration before its usage in dailySpendLimit useMemo
   const institutionalBalances = useMemo<Record<string, InstitutionalBalance>>(() => {
     const balances: Record<string, InstitutionalBalance> = {};
     bankConnections.forEach(conn => {
@@ -92,11 +93,32 @@ const Dashboard: React.FC<Props> = ({
     return balances;
   }, [bankConnections, investments, transactions, marketPrices]);
 
+  // Fix: Move liquidFunds declaration before its usage in dailySpendLimit useMemo
   const liquidFunds = useMemo(() => {
     const primary = institutionalBalances['1st National Bank St. Lucia']?.balance || 0;
     const cash = institutionalBalances['Cash in Hand']?.balance || 0;
     return primary + cash;
   }, [institutionalBalances]);
+
+  const { dailySpendLimit, daysRemaining, nextCycleDate, cycleProgress } = useMemo(() => {
+    const now = new Date();
+    let target = new Date(now.getFullYear(), now.getMonth(), 25);
+    if (now.getDate() >= 25) target = new Date(now.getFullYear(), now.getMonth + 1, 25);
+    
+    const diffTime = target.getTime() - now.getTime();
+    const safeDays = Math.max(1, Math.ceil(diffTime / 86400000));
+    
+    // Calculate progress through a 30-day average month
+    const progress = Math.min(100, Math.max(0, ((30 - safeDays) / 30) * 100));
+    
+    const dailyLimit = liquidFunds / safeDays;
+    return { 
+      dailySpendLimit: dailyLimit > 0 ? dailyLimit : 0,
+      daysRemaining: safeDays,
+      nextCycleDate: target.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+      cycleProgress: progress
+    };
+  }, [liquidFunds]);
 
   const portfolioFunds = useMemo(() => (Object.values(institutionalBalances) as InstitutionalBalance[]).filter(b => b.type === 'investment').reduce((acc: number, b) => acc + b.balance, 0), [institutionalBalances]);
   const netWorth: number = (Object.values(institutionalBalances) as InstitutionalBalance[]).reduce((acc: number, b) => acc + b.balance, 0);
@@ -129,33 +151,7 @@ const Dashboard: React.FC<Props> = ({
 
   const totalMonthlyIncomes = useMemo(() => recurringIncomes.reduce((acc: number, i) => acc + i.amount, 0), [recurringIncomes]);
   const totalMonthlyExpenses = useMemo(() => recurringExpenses.reduce((acc: number, e) => acc + e.amount, 0) + (Object.values(categoryBudgets).reduce((a: number, b) => a + (Number(b) || 0), 0)), [recurringExpenses, categoryBudgets]);
-  const savingsRate = useMemo(() => totalMonthlyIncomes === 0 ? 0 : ((totalMonthlyIncomes - totalMonthlyExpenses) / totalMonthlyIncomes) * 100, [totalMonthlyIncomes, totalMonthlyExpenses]);
   const burnRate = useMemo(() => totalMonthlyExpenses / 30, [totalMonthlyExpenses]);
-  const runwayMonths = useMemo(() => burnRate > 0 ? (liquidFunds / (burnRate * 30)) : 0, [liquidFunds, burnRate]);
-
-  const { daysUntil25th, dailySpendLimit, cycleProgress } = useMemo(() => {
-    const now = new Date();
-    let target = new Date(now.getFullYear(), now.getMonth(), 25);
-    if (now.getDate() >= 25) target = new Date(now.getFullYear(), now.getMonth() + 1, 25);
-    let start = new Date(target);
-    start.setMonth(start.getMonth() - 1);
-    const totalDuration = target.getTime() - start.getTime();
-    const elapsed = now.getTime() - start.getTime();
-    const cycleProgress = Math.min(100, Math.max(0, (elapsed / totalDuration) * 100));
-    const safeDays = Math.max(1, Math.ceil((target.getTime() - now.getTime()) / 86400000));
-    const dailySpendLimit = liquidFunds / safeDays;
-    return { daysUntil25th: safeDays, dailySpendLimit: dailySpendLimit > 0 ? dailySpendLimit : 0, cycleProgress };
-  }, [liquidFunds]);
-
-  const investmentGoalProgress = useMemo(() => {
-    return investmentGoals.map(goal => {
-      let currentVal = 0;
-      if (goal.provider === 'Binance' || goal.provider === 'Both') currentVal += institutionalBalances['Binance']?.balance || 0;
-      if (goal.provider === 'Vanguard' || goal.provider === 'Both') currentVal += institutionalBalances['Vanguard']?.balance || 0;
-      const percent = Math.min(100, (currentVal / goal.targetAmount) * 100);
-      return { ...goal, currentVal, percent };
-    });
-  }, [investmentGoals, institutionalBalances]);
 
   useEffect(() => {
     const generateSummary = async () => {
@@ -163,7 +159,7 @@ const Dashboard: React.FC<Props> = ({
       setIsGeneratingInsight(true);
       try {
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const context = `Liquid: $${liquidFunds.toFixed(2)}, Savings: ${savingsRate.toFixed(1)}%, Burn: $${burnRate.toFixed(2)}.`;
+        const context = `Liquid: $${liquidFunds.toFixed(2)}, Net: $${netWorth.toFixed(2)}, Burn: $${burnRate.toFixed(2)}.`;
         const response = await ai.models.generateContent({ 
           model: 'gemini-3-flash-preview', 
           contents: { parts: [{ text: `Context: ${context}\nAction: One ultra-concise finance tip.` }] }
@@ -176,7 +172,7 @@ const Dashboard: React.FC<Props> = ({
       }
     };
     generateSummary();
-  }, [liquidFunds, netWorth, transactions.length]);
+  }, [liquidFunds, netWorth, transactions.length, burnRate]);
 
   const renderIncomeCard = (income: RecurringIncome) => {
     const receivedTotal = transactions.filter(t => t.recurringId === income.id && new Date(t.date) >= cycleStartDate && t.type === 'income').reduce((acc: number, t) => acc + t.amount, 0);
@@ -225,7 +221,7 @@ const Dashboard: React.FC<Props> = ({
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500">
+    <div className="space-y-6 animate-in fade-in duration-500 pb-24">
       <div className="bg-slate-900 p-8 rounded-[3rem] shadow-2xl relative overflow-hidden group">
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="flex-1">
@@ -239,7 +235,16 @@ const Dashboard: React.FC<Props> = ({
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-        <div className="bg-white md:col-span-2 p-10 rounded-[3rem] border border-slate-100">
+        <div className="bg-white md:col-span-2 p-10 rounded-[3rem] border border-slate-100 shadow-sm relative overflow-hidden">
+          <div className="absolute top-0 right-0 p-8">
+            <div className="flex flex-col items-end">
+              <div className={`px-4 py-2 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 ${daysRemaining <= 5 ? 'bg-rose-50 text-rose-600 animate-pulse' : 'bg-slate-50 text-slate-500'}`}>
+                <i className="fas fa-hourglass-half"></i>
+                {daysRemaining} Days Left
+              </div>
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-2 mr-1">Next Cycle: {nextCycleDate}</p>
+            </div>
+          </div>
           <p className="text-slate-400 text-[10px] font-black uppercase mb-3 tracking-widest">Consolidated Net Worth</p>
           <h2 className="text-5xl font-black text-slate-900 tracking-tight">${netWorth.toLocaleString('en-US', { minimumFractionDigits: 2 })}</h2>
           <div className="flex items-center gap-6 mt-10">
@@ -248,14 +253,32 @@ const Dashboard: React.FC<Props> = ({
           </div>
         </div>
         <div className={`${liquidFunds >= 0 ? 'bg-indigo-600 shadow-indigo-100' : 'bg-rose-600 shadow-rose-100'} p-8 rounded-[3rem] shadow-xl text-white flex flex-col justify-center transition-colors`}>
-           <p className="text-white text-[10px] font-black uppercase tracking-widest mb-1">Cycle Margin</p>
-           <h3 className="text-4xl font-black mb-4">${liquidFunds.toLocaleString()}</h3>
-           <div className="bg-black/10 rounded-[2rem] p-5 border border-white/10 backdrop-blur-sm"><p className="text-[9px] text-white font-black uppercase tracking-widest mb-1">Daily Spend Limit</p><h4 className="text-3xl font-black text-white">${dailySpendLimit.toLocaleString('en-US', { maximumFractionDigits: 2 })}</h4></div>
+           <div className="flex justify-between items-center mb-1">
+             <p className="text-white text-[10px] font-black uppercase tracking-widest">Cycle Margin</p>
+             <p className="text-[9px] font-black uppercase text-white/60">{daysRemaining}D Remaining</p>
+           </div>
+           <h3 className="text-4xl font-black mb-6">${liquidFunds.toLocaleString()}</h3>
+           
+           <div className="space-y-4">
+             <div className="bg-black/10 rounded-[2rem] p-5 border border-white/10 backdrop-blur-sm">
+               <p className="text-[9px] text-white font-black uppercase tracking-widest mb-1">Daily Spend Limit</p>
+               <h4 className="text-3xl font-black text-white">${dailySpendLimit.toLocaleString('en-US', { maximumFractionDigits: 2 })}</h4>
+             </div>
+             <div className="space-y-1.5 px-1">
+               <div className="flex justify-between items-center text-[8px] font-black uppercase tracking-widest">
+                 <span>Cycle Progress</span>
+                 <span>{cycleProgress.toFixed(0)}%</span>
+               </div>
+               <div className="h-1 w-full bg-white/20 rounded-full overflow-hidden">
+                 <div className="h-full bg-white transition-all duration-1000" style={{ width: `${cycleProgress}%` }}></div>
+               </div>
+             </div>
+           </div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <section className="lg:col-span-2 bg-white p-10 rounded-[3rem] border border-slate-100 overflow-hidden min-h-[400px]">
+        <section className="lg:col-span-2 bg-white p-10 rounded-[3rem] border border-slate-100 overflow-hidden min-h-[400px] shadow-sm">
           <div className="flex justify-between items-center mb-10"><div><h3 className="font-black text-slate-800 uppercase text-xs">Spending Trends</h3></div></div>
           <div style={{ width: '100%', height: 300, minHeight: 300 }}>
             <ResponsiveContainer width="100%" height="100%" minHeight={300}>
@@ -279,11 +302,59 @@ const Dashboard: React.FC<Props> = ({
         </section>
       </div>
 
-      <section className="bg-white p-10 rounded-[3rem] border border-slate-100">
+      <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
         <h3 className="font-black text-slate-800 uppercase text-xs mb-10">Verification & Summary</h3>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
           <div className="space-y-6"><h4 className="text-[10px] font-black text-emerald-600 uppercase px-2 tracking-widest">Revenue</h4>{recurringIncomes.map(income => renderIncomeCard(income))}</div>
           <div className="space-y-6"><h4 className="text-[10px] font-black text-rose-600 uppercase px-2 tracking-widest">Bills</h4>{recurringExpenses.map(bill => renderBillCard(bill))}</div>
+        </div>
+      </section>
+
+      {/* Connected Infrastructure Section at the Bottom */}
+      <section className="mt-12">
+        <div className="flex items-center gap-3 px-2 mb-6">
+          <div className="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-lg flex items-center justify-center text-xs shadow-sm">
+            <i className="fas fa-plug"></i>
+          </div>
+          <div>
+            <h3 className="font-black text-slate-800 uppercase text-[10px] tracking-widest">Connected Infrastructure</h3>
+            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Live API & Secure Gateway Status</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+          {bankConnections.map(conn => (
+            <div key={conn.institution} className="p-5 bg-white border border-slate-100 rounded-[2rem] shadow-sm flex flex-col items-center text-center group hover:border-indigo-200 transition-all">
+               <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 mb-3 group-hover:bg-indigo-50 group-hover:text-indigo-500 transition-colors">
+                 <i className={`fas ${conn.institutionType === 'investment' ? 'fa-coins' : 'fa-building-columns'} text-sm`}></i>
+               </div>
+               <p className="text-[10px] font-black text-slate-800 truncate w-full px-1">{conn.institution}</p>
+               <div className="flex items-center gap-2 mt-2">
+                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                 <p className="text-[8px] font-black text-emerald-600 uppercase tracking-widest">{conn.status}</p>
+               </div>
+            </div>
+          ))}
+          {investments.map(inv => {
+            // Check if already in bankConnections to avoid duplicates
+            if (bankConnections.some(c => c.institution === inv.provider)) return null;
+            return (
+              <div key={inv.provider} className="p-5 bg-white border border-slate-100 rounded-[2rem] shadow-sm flex flex-col items-center text-center group hover:border-indigo-200 transition-all">
+                <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 mb-3 group-hover:bg-indigo-50 group-hover:text-indigo-500 transition-colors">
+                  <i className="fas fa-chart-line text-sm"></i>
+                </div>
+                <p className="text-[10px] font-black text-slate-800 truncate w-full px-1">{inv.provider}</p>
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <p className="text-[8px] font-black text-emerald-600 uppercase tracking-widest">Live API</p>
+                </div>
+              </div>
+            );
+          })}
+          {bankConnections.length === 0 && investments.length === 0 && (
+            <div className="col-span-full py-10 text-center border-2 border-dashed border-slate-200 rounded-[2rem]">
+              <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest">No active API links detected</p>
+            </div>
+          )}
         </div>
       </section>
 

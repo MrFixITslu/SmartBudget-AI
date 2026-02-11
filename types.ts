@@ -143,7 +143,7 @@ export interface ProjectFile {
   type: string;
   size: number;
   timestamp: string;
-  storageRef: string; 
+  storageRef: string; // URL or FileSystem Path or IndexedDB Key
   storageType: 'indexeddb' | 'filesystem' | 'url';
 }
 

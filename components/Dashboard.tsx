@@ -55,7 +55,6 @@ const Dashboard: React.FC<Props> = ({
     return start;
   }, []);
 
-  // Fix: Move institutionalBalances declaration before its usage in dailySpendLimit useMemo
   const institutionalBalances = useMemo<Record<string, InstitutionalBalance>>(() => {
     const balances: Record<string, InstitutionalBalance> = {};
     bankConnections.forEach(conn => {
@@ -93,7 +92,6 @@ const Dashboard: React.FC<Props> = ({
     return balances;
   }, [bankConnections, investments, transactions, marketPrices]);
 
-  // Fix: Move liquidFunds declaration before its usage in dailySpendLimit useMemo
   const liquidFunds = useMemo(() => {
     const primary = institutionalBalances['1st National Bank St. Lucia']?.balance || 0;
     const cash = institutionalBalances['Cash in Hand']?.balance || 0;
@@ -102,15 +100,14 @@ const Dashboard: React.FC<Props> = ({
 
   const { dailySpendLimit, daysRemaining, nextCycleDate, cycleProgress } = useMemo(() => {
     const now = new Date();
+    // Fix: Added () to getMonth() call
     let target = new Date(now.getFullYear(), now.getMonth(), 25);
-    if (now.getDate() >= 25) target = new Date(now.getFullYear(), now.getMonth + 1, 25);
+    // Fix: Added () to getMonth() call to fix "Operator '+' cannot be applied to types '() => number' and 'number'"
+    if (now.getDate() >= 25) target = new Date(now.getFullYear(), now.getMonth() + 1, 25);
     
     const diffTime = target.getTime() - now.getTime();
     const safeDays = Math.max(1, Math.ceil(diffTime / 86400000));
-    
-    // Calculate progress through a 30-day average month
     const progress = Math.min(100, Math.max(0, ((30 - safeDays) / 30) * 100));
-    
     const dailyLimit = liquidFunds / safeDays;
     return { 
       dailySpendLimit: dailyLimit > 0 ? dailyLimit : 0,
@@ -119,6 +116,25 @@ const Dashboard: React.FC<Props> = ({
       cycleProgress: progress
     };
   }, [liquidFunds]);
+
+  const accountTypeTotals = useMemo(() => {
+    let bank = 0;
+    let creditUnion = 0;
+    let crypto = 0;
+    let investmentsTotal = 0;
+
+    // Fix: Explicitly type entries to avoid "Property 'type' does not exist on type 'unknown'" error
+    (Object.entries(institutionalBalances) as [string, InstitutionalBalance][]).forEach(([name, data]) => {
+      if (data.type === 'bank') bank += data.balance;
+      else if (data.type === 'credit_union') creditUnion += data.balance;
+      else if (data.type === 'investment') {
+        if (name.toLowerCase().includes('binance')) crypto += data.balance;
+        else investmentsTotal += data.balance;
+      }
+    });
+
+    return { bank, creditUnion, crypto, investmentsTotal };
+  }, [institutionalBalances]);
 
   const portfolioFunds = useMemo(() => (Object.values(institutionalBalances) as InstitutionalBalance[]).filter(b => b.type === 'investment').reduce((acc: number, b) => acc + b.balance, 0), [institutionalBalances]);
   const netWorth: number = (Object.values(institutionalBalances) as InstitutionalBalance[]).reduce((acc: number, b) => acc + b.balance, 0);
@@ -149,7 +165,6 @@ const Dashboard: React.FC<Props> = ({
     return entries.length > 0 ? entries : [{ label: 'No Data', amount: 0 }];
   }, [transactions, trendTimeframe]);
 
-  const totalMonthlyIncomes = useMemo(() => recurringIncomes.reduce((acc: number, i) => acc + i.amount, 0), [recurringIncomes]);
   const totalMonthlyExpenses = useMemo(() => recurringExpenses.reduce((acc: number, e) => acc + e.amount, 0) + (Object.values(categoryBudgets).reduce((a: number, b) => a + (Number(b) || 0), 0)), [recurringExpenses, categoryBudgets]);
   const burnRate = useMemo(() => totalMonthlyExpenses / 30, [totalMonthlyExpenses]);
 
@@ -247,9 +262,23 @@ const Dashboard: React.FC<Props> = ({
           </div>
           <p className="text-slate-400 text-[10px] font-black uppercase mb-3 tracking-widest">Consolidated Net Worth</p>
           <h2 className="text-5xl font-black text-slate-900 tracking-tight">${netWorth.toLocaleString('en-US', { minimumFractionDigits: 2 })}</h2>
-          <div className="flex items-center gap-6 mt-10">
-             <div className="bg-slate-50 px-5 py-4 rounded-[1.5rem] border border-slate-100"><p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Liquid</p><p className="text-xl font-black text-emerald-600">${liquidFunds.toLocaleString()}</p></div>
-             <div className="bg-slate-50 px-5 py-4 rounded-[1.5rem] border border-slate-100"><p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Assets</p><p className="text-xl font-black text-indigo-600">${portfolioFunds.toLocaleString()}</p></div>
+          <div className="flex flex-wrap items-center gap-4 mt-10">
+             <div className="bg-slate-50 px-5 py-4 rounded-[1.5rem] border border-slate-100 flex-1 min-w-[120px]">
+               <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Bank</p>
+               <p className="text-xl font-black text-slate-800">${accountTypeTotals.bank.toLocaleString()}</p>
+             </div>
+             <div className="bg-slate-50 px-5 py-4 rounded-[1.5rem] border border-slate-100 flex-1 min-w-[120px]">
+               <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Credit Union</p>
+               <p className="text-xl font-black text-indigo-600">${accountTypeTotals.creditUnion.toLocaleString()}</p>
+             </div>
+             <div className="bg-slate-50 px-5 py-4 rounded-[1.5rem] border border-slate-100 flex-1 min-w-[120px]">
+               <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Crypto</p>
+               <p className="text-xl font-black text-amber-500">${accountTypeTotals.crypto.toLocaleString()}</p>
+             </div>
+             <div className="bg-slate-50 px-5 py-4 rounded-[1.5rem] border border-slate-100 flex-1 min-w-[120px]">
+               <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Investments</p>
+               <p className="text-xl font-black text-emerald-600">${accountTypeTotals.investmentsTotal.toLocaleString()}</p>
+             </div>
           </div>
         </div>
         <div className={`${liquidFunds >= 0 ? 'bg-indigo-600 shadow-indigo-100' : 'bg-rose-600 shadow-rose-100'} p-8 rounded-[3rem] shadow-xl text-white flex flex-col justify-center transition-colors`}>
@@ -335,7 +364,6 @@ const Dashboard: React.FC<Props> = ({
             </div>
           ))}
           {investments.map(inv => {
-            // Check if already in bankConnections to avoid duplicates
             if (bankConnections.some(c => c.institution === inv.provider)) return null;
             return (
               <div key={inv.provider} className="p-5 bg-white border border-slate-100 rounded-[2rem] shadow-sm flex flex-col items-center text-center group hover:border-indigo-200 transition-all">

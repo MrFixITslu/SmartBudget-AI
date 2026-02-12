@@ -173,13 +173,25 @@ const Dashboard: React.FC<Props> = ({
     });
   }, [recurringExpenses, transactions, cycleStartDate]);
 
+  // Identify expected incomes not yet confirmed in current cycle
+  const unconfirmedIncomes = useMemo(() => {
+    return recurringIncomes.filter(inc => {
+      const alreadyReceived = transactions.some(t => 
+        t.description.includes(inc.description) && 
+        t.type === 'income' &&
+        new Date(t.date) >= cycleStartDate
+      );
+      return !alreadyReceived;
+    });
+  }, [recurringIncomes, transactions, cycleStartDate]);
+
   useEffect(() => {
     const generateSummary = async () => {
       if (transactions.length < 1) { setAiInsight("Welcome! Log spend to unlock insights."); return; }
       setIsGeneratingInsight(true);
       try {
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const context = `Actual Income: $${totalActualIncome.toFixed(2)}, Actual Spending: $${totalActualExpenses.toFixed(2)}, Net Worth: $${netWorth.toFixed(2)}, Runway: ${survivalMonths.toFixed(1)} months. Unpaid Bills: ${unpaidBills.length}.`;
+        const context = `Actual Income: $${totalActualIncome.toFixed(2)}, Actual Spending: $${totalActualExpenses.toFixed(2)}, Net Worth: $${netWorth.toFixed(2)}, Runway: ${survivalMonths.toFixed(1)} months. Unpaid Bills: ${unpaidBills.length}. Expected Income: ${unconfirmedIncomes.length}.`;
         const response = await ai.models.generateContent({ 
           model: 'gemini-3-flash-preview', 
           contents: { parts: [{ text: `Context: ${context}\nAction: One ultra-concise finance tip.` }] }
@@ -192,7 +204,7 @@ const Dashboard: React.FC<Props> = ({
       }
     };
     generateSummary();
-  }, [totalActualIncome, totalActualExpenses, netWorth, transactions.length, survivalMonths, unpaidBills.length]);
+  }, [totalActualIncome, totalActualExpenses, netWorth, transactions.length, survivalMonths, unpaidBills.length, unconfirmedIncomes.length]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-24">
@@ -208,26 +220,26 @@ const Dashboard: React.FC<Props> = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-5">
-        <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-center">
+      <div className="grid grid-cols-1 md:flex flex-wrap lg:grid lg:grid-cols-5 gap-5">
+        <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-center flex-1 min-w-[150px]">
            <p className="text-slate-400 text-[9px] font-black uppercase tracking-widest mb-1">Monthly Actual Income</p>
            <h3 className="text-xl font-black text-emerald-600">${totalActualIncome.toLocaleString()}</h3>
         </div>
-        <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-center">
+        <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-center flex-1 min-w-[150px]">
            <p className="text-slate-400 text-[9px] font-black uppercase tracking-widest mb-1">Monthly Actual Spending</p>
            <h3 className="text-xl font-black text-rose-600">${totalActualExpenses.toLocaleString()}</h3>
         </div>
-        <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-center">
+        <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-center flex-1 min-w-[150px]">
            <p className="text-slate-400 text-[9px] font-black uppercase tracking-widest mb-1">Cycle Surplus/Deficit</p>
            <h3 className={`text-xl font-black ${(totalActualIncome - totalActualExpenses) >= 0 ? 'text-indigo-600' : 'text-rose-600'}`}>
              ${(totalActualIncome - totalActualExpenses).toLocaleString()}
            </h3>
         </div>
-        <div className="bg-indigo-600 p-6 rounded-[2.5rem] shadow-xl text-white flex flex-col justify-center">
+        <div className="bg-indigo-600 p-6 rounded-[2.5rem] shadow-xl text-white flex flex-col justify-center flex-1 min-w-[150px]">
            <p className="text-white/60 text-[9px] font-black uppercase tracking-widest mb-1">Survival Runway</p>
            <h3 className="text-xl font-black">{survivalMonths.toFixed(1)} <span className="text-[10px] text-white/40 uppercase">Months</span></h3>
         </div>
-        <div className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800 shadow-xl text-white flex flex-col justify-center">
+        <div className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800 shadow-xl text-white flex flex-col justify-center flex-1 min-w-[150px]">
            <p className="text-white/40 text-[9px] font-black uppercase tracking-widest mb-1">Total Assets</p>
            <h3 className="text-xl font-black">${netWorth.toLocaleString()}</h3>
         </div>
@@ -372,6 +384,32 @@ const Dashboard: React.FC<Props> = ({
                 );
               })}
               {Object.keys(categoryBudgets).length === 0 && <p className="text-center text-[10px] text-slate-300 font-black uppercase py-10">No budgets configured</p>}
+            </div>
+          </section>
+
+          <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+            <h3 className="font-black text-slate-800 uppercase text-xs mb-10 tracking-widest">Expected Inflows</h3>
+            <div className="space-y-4">
+              {unconfirmedIncomes.map(inc => (
+                <div key={inc.id} className="p-4 bg-emerald-50 border border-emerald-100 rounded-2xl flex items-center justify-between group">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-emerald-600 shadow-sm">
+                      <i className="fas fa-hand-holding-dollar text-xs"></i>
+                    </div>
+                    <div>
+                      <p className="text-xs font-black text-slate-800">{inc.description}</p>
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Expected {inc.dayOfMonth}th • ${inc.amount.toLocaleString()}</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => onReceiveRecurringIncome(inc, inc.amount)}
+                    className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-900 transition-all shadow-lg shadow-emerald-100"
+                  >
+                    Confirm
+                  </button>
+                </div>
+              ))}
+              {unconfirmedIncomes.length === 0 && <p className="text-center text-[10px] text-slate-300 font-black uppercase py-10">All income received</p>}
             </div>
           </section>
 

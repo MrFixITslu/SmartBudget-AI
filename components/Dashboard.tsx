@@ -158,7 +158,20 @@ const Dashboard: React.FC<Props> = ({
   }, [transactions, searchTerm]);
 
   const totalTargetExpenses = useMemo(() => recurringExpenses.reduce((acc: number, e) => acc + e.amount, 0) + (Object.values(categoryBudgets).reduce((a: number, b) => a + (Number(b) || 0), 0)), [recurringExpenses, categoryBudgets]);
-  const burnRate = useMemo(() => totalTargetExpenses / 30, [totalTargetExpenses]);
+  
+  // Calculate how many months user can survive with total assets (Net Worth)
+  const survivalMonths = useMemo(() => totalTargetExpenses > 0 ? netWorth / totalTargetExpenses : 0, [netWorth, totalTargetExpenses]);
+
+  // Identify unpaid bills in current cycle
+  const unpaidBills = useMemo(() => {
+    return recurringExpenses.filter(bill => {
+      const alreadyPaid = transactions.some(t => 
+        t.recurringId === bill.id && 
+        new Date(t.date) >= cycleStartDate
+      );
+      return !alreadyPaid;
+    });
+  }, [recurringExpenses, transactions, cycleStartDate]);
 
   useEffect(() => {
     const generateSummary = async () => {
@@ -166,7 +179,7 @@ const Dashboard: React.FC<Props> = ({
       setIsGeneratingInsight(true);
       try {
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const context = `Actual Income: $${totalActualIncome.toFixed(2)}, Actual Spending: $${totalActualExpenses.toFixed(2)}, Net Worth: $${netWorth.toFixed(2)}.`;
+        const context = `Actual Income: $${totalActualIncome.toFixed(2)}, Actual Spending: $${totalActualExpenses.toFixed(2)}, Net Worth: $${netWorth.toFixed(2)}, Runway: ${survivalMonths.toFixed(1)} months. Unpaid Bills: ${unpaidBills.length}.`;
         const response = await ai.models.generateContent({ 
           model: 'gemini-3-flash-preview', 
           contents: { parts: [{ text: `Context: ${context}\nAction: One ultra-concise finance tip.` }] }
@@ -179,7 +192,7 @@ const Dashboard: React.FC<Props> = ({
       }
     };
     generateSummary();
-  }, [totalActualIncome, totalActualExpenses, netWorth, transactions.length]);
+  }, [totalActualIncome, totalActualExpenses, netWorth, transactions.length, survivalMonths, unpaidBills.length]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-24">
@@ -195,24 +208,28 @@ const Dashboard: React.FC<Props> = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-5">
+        <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-center">
            <p className="text-slate-400 text-[9px] font-black uppercase tracking-widest mb-1">Monthly Actual Income</p>
-           <h3 className="text-2xl font-black text-emerald-600">${totalActualIncome.toLocaleString()}</h3>
+           <h3 className="text-xl font-black text-emerald-600">${totalActualIncome.toLocaleString()}</h3>
         </div>
-        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
+        <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-center">
            <p className="text-slate-400 text-[9px] font-black uppercase tracking-widest mb-1">Monthly Actual Spending</p>
-           <h3 className="text-2xl font-black text-rose-600">${totalActualExpenses.toLocaleString()}</h3>
+           <h3 className="text-xl font-black text-rose-600">${totalActualExpenses.toLocaleString()}</h3>
         </div>
-        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
+        <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-center">
            <p className="text-slate-400 text-[9px] font-black uppercase tracking-widest mb-1">Cycle Surplus/Deficit</p>
-           <h3 className={`text-2xl font-black ${(totalActualIncome - totalActualExpenses) >= 0 ? 'text-indigo-600' : 'text-rose-600'}`}>
+           <h3 className={`text-xl font-black ${(totalActualIncome - totalActualExpenses) >= 0 ? 'text-indigo-600' : 'text-rose-600'}`}>
              ${(totalActualIncome - totalActualExpenses).toLocaleString()}
            </h3>
         </div>
-        <div className="bg-slate-900 p-8 rounded-[2.5rem] border border-slate-800 shadow-xl text-white">
-           <p className="text-white/40 text-[9px] font-black uppercase tracking-widest mb-1">Net Worth</p>
-           <h3 className="text-2xl font-black">${netWorth.toLocaleString()}</h3>
+        <div className="bg-indigo-600 p-6 rounded-[2.5rem] shadow-xl text-white flex flex-col justify-center">
+           <p className="text-white/60 text-[9px] font-black uppercase tracking-widest mb-1">Survival Runway</p>
+           <h3 className="text-xl font-black">{survivalMonths.toFixed(1)} <span className="text-[10px] text-white/40 uppercase">Months</span></h3>
+        </div>
+        <div className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800 shadow-xl text-white flex flex-col justify-center">
+           <p className="text-white/40 text-[9px] font-black uppercase tracking-widest mb-1">Total Assets</p>
+           <h3 className="text-xl font-black">${netWorth.toLocaleString()}</h3>
         </div>
       </div>
 
@@ -332,30 +349,58 @@ const Dashboard: React.FC<Props> = ({
           </div>
         </section>
 
-        <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
-          <h3 className="font-black text-slate-800 uppercase text-xs mb-10 tracking-widest">Active Budgets</h3>
-          <div className="space-y-8">
-            {(Object.entries(categoryBudgets) as [string, number][]).filter(([_, limit]) => limit > 0).map(([cat, limit]) => {
-              const actual = transactions.filter(t => t.category === cat && new Date(t.date) >= cycleStartDate).reduce((a: number, b) => a + b.amount, 0);
-              const percent = Math.min(100, (actual / limit) * 100);
-              return (
-                <div key={cat} className="space-y-3">
-                  <div className="flex justify-between items-end">
-                    <div>
-                      <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-1">{cat}</p>
-                      <p className="text-xs font-black text-slate-400">${actual.toLocaleString()} / ${limit.toLocaleString()}</p>
+        <div className="space-y-6">
+          <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+            <h3 className="font-black text-slate-800 uppercase text-xs mb-10 tracking-widest">Active Budgets</h3>
+            <div className="space-y-8">
+              {(Object.entries(categoryBudgets) as [string, number][]).filter(([_, limit]) => limit > 0).map(([cat, limit]) => {
+                const actual = transactions.filter(t => t.category === cat && new Date(t.date) >= cycleStartDate).reduce((a: number, b) => a + b.amount, 0);
+                const percent = Math.min(100, (actual / limit) * 100);
+                return (
+                  <div key={cat} className="space-y-3">
+                    <div className="flex justify-between items-end">
+                      <div>
+                        <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-1">{cat}</p>
+                        <p className="text-xs font-black text-slate-400">${actual.toLocaleString()} / ${limit.toLocaleString()}</p>
+                      </div>
+                      <p className={`text-xs font-black ${percent >= 90 ? 'text-rose-600' : 'text-indigo-600'}`}>{percent.toFixed(0)}%</p>
                     </div>
-                    <p className={`text-xs font-black ${percent >= 90 ? 'text-rose-600' : 'text-indigo-600'}`}>{percent.toFixed(0)}%</p>
+                    <div className="h-2.5 w-full bg-slate-50 rounded-full overflow-hidden border border-slate-100 shadow-inner">
+                      <div className={`h-full transition-all duration-1000 ${percent >= 90 ? 'bg-rose-500' : 'bg-indigo-500'}`} style={{ width: `${percent}%` }}></div>
+                    </div>
                   </div>
-                  <div className="h-2.5 w-full bg-slate-50 rounded-full overflow-hidden border border-slate-100 shadow-inner">
-                    <div className={`h-full transition-all duration-1000 ${percent >= 90 ? 'bg-rose-500' : 'bg-indigo-500'}`} style={{ width: `${percent}%` }}></div>
+                );
+              })}
+              {Object.keys(categoryBudgets).length === 0 && <p className="text-center text-[10px] text-slate-300 font-black uppercase py-10">No budgets configured</p>}
+            </div>
+          </section>
+
+          <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+            <h3 className="font-black text-slate-800 uppercase text-xs mb-10 tracking-widest">Upcoming Commitments</h3>
+            <div className="space-y-4">
+              {unpaidBills.map(bill => (
+                <div key={bill.id} className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between group">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-indigo-600 shadow-sm">
+                      <i className="fas fa-calendar-day text-xs"></i>
+                    </div>
+                    <div>
+                      <p className="text-xs font-black text-slate-800">{bill.description}</p>
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Due on the {bill.dayOfMonth}th • ${bill.amount.toLocaleString()}</p>
+                    </div>
                   </div>
+                  <button 
+                    onClick={() => onPayRecurring(bill, bill.amount)}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-900 transition-all shadow-lg shadow-indigo-100"
+                  >
+                    Pay
+                  </button>
                 </div>
-              );
-            })}
-            {Object.keys(categoryBudgets).length === 0 && <p className="text-center text-[10px] text-slate-300 font-black uppercase py-10">No budgets configured</p>}
-          </div>
-        </section>
+              ))}
+              {unpaidBills.length === 0 && <p className="text-center text-[10px] text-slate-300 font-black uppercase py-10">All bills settled</p>}
+            </div>
+          </section>
+        </div>
       </div>
 
       <section className="bg-slate-900 p-12 rounded-[4rem] text-white shadow-2xl relative overflow-hidden">

@@ -174,14 +174,33 @@ const Dashboard: React.FC<Props> = ({
   }, [recurringExpenses, transactions, cycleStartDate]);
 
   // Identify expected incomes not yet confirmed in current cycle
+  // Updated with 14-day visibility logic
   const unconfirmedIncomes = useMemo(() => {
+    const now = new Date();
     return recurringIncomes.filter(inc => {
+      // 1. Check if already received in this cycle
       const alreadyReceived = transactions.some(t => 
         t.description.includes(inc.description) && 
         t.type === 'income' &&
         new Date(t.date) >= cycleStartDate
       );
-      return !alreadyReceived;
+      if (alreadyReceived) return false;
+
+      // 2. Determine target date for visibility check
+      let expectedDate = new Date(now.getFullYear(), now.getMonth(), inc.dayOfMonth);
+      
+      // Handle cycle transition logic
+      if (now.getDate() >= 25 && inc.dayOfMonth < 25) {
+        expectedDate.setMonth(expectedDate.getMonth() + 1);
+      } else if (now.getDate() < 25 && inc.dayOfMonth >= 25) {
+        expectedDate.setMonth(expectedDate.getMonth() - 1);
+      }
+
+      const diffTime = expectedDate.getTime() - now.getTime();
+      const diffDays = diffTime / (1000 * 60 * 60 * 24);
+
+      // Show if it's due within 14 days OR it's already overdue (diffDays <= 0)
+      return diffDays <= 14;
     });
   }, [recurringIncomes, transactions, cycleStartDate]);
 

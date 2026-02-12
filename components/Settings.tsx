@@ -90,6 +90,29 @@ const Settings: React.FC<Props> = ({
     setIsAddingInvGoal(false);
   };
 
+  const handleEditBill = (bill: RecurringExpense) => {
+    setEditingBill(bill);
+    setBillForm({
+      desc: bill.description,
+      amount: bill.amount.toString(),
+      category: bill.category,
+      day: bill.dayOfMonth.toString(),
+      sync: !!bill.externalSyncEnabled
+    });
+    setIsAddingBill(true);
+  };
+
+  const handleEditIncome = (income: RecurringIncome) => {
+    setEditingIncome(income);
+    setIncForm({
+      desc: income.description,
+      amount: income.amount.toString(),
+      category: income.category,
+      day: income.dayOfMonth.toString()
+    });
+    setIsAddingIncome(true);
+  };
+
   const saveBill = () => {
     const amt = parseFloat(billForm.amount);
     const day = parseInt(billForm.day);
@@ -97,10 +120,26 @@ const Settings: React.FC<Props> = ({
     const nextDue = new Date();
     nextDue.setDate(day);
     if (nextDue < new Date()) nextDue.setMonth(nextDue.getMonth() + 1);
+    
     if (editingBill) {
-      onUpdateRecurring({ ...editingBill, description: billForm.desc, amount: amt, category: billForm.category, dayOfMonth: day, nextDueDate: nextDue.toISOString().split('T')[0], externalSyncEnabled: billForm.sync });
+      onUpdateRecurring({ 
+        ...editingBill, 
+        description: billForm.desc, 
+        amount: amt, 
+        category: billForm.category, 
+        dayOfMonth: day, 
+        nextDueDate: nextDue.toISOString().split('T')[0], 
+        externalSyncEnabled: billForm.sync 
+      });
     } else {
-      onAddRecurring({ description: billForm.desc, amount: amt, category: billForm.category, dayOfMonth: day, nextDueDate: nextDue.toISOString().split('T')[0], externalSyncEnabled: billForm.sync });
+      onAddRecurring({ 
+        description: billForm.desc, 
+        amount: amt, 
+        category: billForm.category, 
+        dayOfMonth: day, 
+        nextDueDate: nextDue.toISOString().split('T')[0], 
+        externalSyncEnabled: billForm.sync 
+      });
     }
     resetBillForm();
   };
@@ -118,10 +157,24 @@ const Settings: React.FC<Props> = ({
     const nextConf = new Date();
     nextConf.setDate(day);
     if (nextConf < new Date()) nextConf.setMonth(nextConf.getMonth() + 1);
+    
     if (editingIncome) {
-      onUpdateRecurringIncome({ ...editingIncome, description: incForm.desc, amount: amt, category: incForm.category, dayOfMonth: day, nextConfirmationDate: nextConf.toISOString().split('T')[0] });
+      onUpdateRecurringIncome({ 
+        ...editingIncome, 
+        description: incForm.desc, 
+        amount: amt, 
+        category: incForm.category, 
+        dayOfMonth: day, 
+        nextConfirmationDate: nextConf.toISOString().split('T')[0] 
+      });
     } else {
-      onAddRecurringIncome({ description: incForm.desc, amount: amt, category: incForm.category, dayOfMonth: day, nextConfirmationDate: nextConf.toISOString().split('T')[0] });
+      onAddRecurringIncome({ 
+        description: incForm.desc, 
+        amount: amt, 
+        category: incForm.category, 
+        dayOfMonth: day, 
+        nextConfirmationDate: nextConf.toISOString().split('T')[0] 
+      });
     }
     resetIncForm();
   };
@@ -198,22 +251,53 @@ const Settings: React.FC<Props> = ({
             <div className="flex items-center justify-between">
               <div><h3 className="text-lg font-black text-slate-800">Recurring Commitments</h3><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Manage Bills & Regular Income</p></div>
               <div className="flex gap-2">
-                <button onClick={() => setIsAddingIncome(true)} className="px-4 py-2 bg-emerald-50 text-emerald-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 hover:text-white transition">+ Income</button>
-                <button onClick={() => setIsAddingBill(true)} className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-600 hover:text-white transition">+ Bill</button>
+                <button onClick={() => { resetIncForm(); setIsAddingIncome(true); }} className="px-4 py-2 bg-emerald-50 text-emerald-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 hover:text-white transition">+ Income</button>
+                <button onClick={() => { resetBillForm(); setIsAddingBill(true); }} className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-600 hover:text-white transition">+ Bill</button>
               </div>
             </div>
-            <div className="space-y-4">
-              {recurringExpenses.map(bill => (
-                <div key={bill.id} className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between group">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-rose-500 shadow-sm"><i className="fas fa-file-invoice"></i></div>
-                    <div><p className="font-black text-sm text-slate-800">{bill.description}</p><p className="text-[9px] text-slate-400 font-bold uppercase">Due the {bill.dayOfMonth}th • ${bill.amount}</p></div>
+            
+            <div className="space-y-6">
+              {/* Recurring Incomes List */}
+              <div className="space-y-4">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Expected Incomes</p>
+                {recurringIncomes.map(income => (
+                  <div key={income.id} className="p-4 bg-emerald-50/50 border border-emerald-100 rounded-2xl flex items-center justify-between group">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-emerald-600 shadow-sm"><i className="fas fa-hand-holding-dollar"></i></div>
+                      <div>
+                        <p className="font-black text-sm text-slate-800">{income.description}</p>
+                        <p className="text-[9px] text-slate-400 font-bold uppercase">Received the {income.dayOfMonth}th • ${income.amount}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => handleEditIncome(income)} className="w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-emerald-600 transition flex items-center justify-center"><i className="fas fa-edit text-[10px]"></i></button>
+                      <button onClick={() => onDeleteRecurringIncome(income.id)} className="w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-rose-600 transition flex items-center justify-center"><i className="fas fa-trash-alt text-[10px]"></i></button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => onDeleteRecurring(bill.id)} className="w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-rose-600 transition flex items-center justify-center"><i className="fas fa-trash-alt text-[10px]"></i></button>
+                ))}
+                {recurringIncomes.length === 0 && <p className="text-[10px] italic text-slate-300 font-bold uppercase tracking-widest ml-2">No recurring incomes setup</p>}
+              </div>
+
+              {/* Recurring Bills List */}
+              <div className="space-y-4">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Active Bills</p>
+                {recurringExpenses.map(bill => (
+                  <div key={bill.id} className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between group">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-rose-500 shadow-sm"><i className="fas fa-file-invoice"></i></div>
+                      <div>
+                        <p className="font-black text-sm text-slate-800">{bill.description}</p>
+                        <p className="text-[9px] text-slate-400 font-bold uppercase">Due the {bill.dayOfMonth}th • ${bill.amount}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => handleEditBill(bill)} className="w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-indigo-600 transition flex items-center justify-center"><i className="fas fa-edit text-[10px]"></i></button>
+                      <button onClick={() => onDeleteRecurring(bill.id)} className="w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-rose-600 transition flex items-center justify-center"><i className="fas fa-trash-alt text-[10px]"></i></button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+                {recurringExpenses.length === 0 && <p className="text-[10px] italic text-slate-300 font-bold uppercase tracking-widest ml-2">No recurring bills setup</p>}
+              </div>
             </div>
           </section>
 
@@ -265,7 +349,9 @@ const Settings: React.FC<Props> = ({
                 <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Amount</label><input type="number" value={billForm.amount} onChange={e => setBillForm({...billForm, amount: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" /></div>
                 <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Day of Month</label><input type="number" min="1" max="31" value={billForm.day} onChange={e => setBillForm({...billForm, day: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" /></div>
               </div>
-              <button onClick={saveBill} className="w-full py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[11px] hover:bg-slate-900 transition">Save Commitment</button>
+              <button onClick={saveBill} className="w-full py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[11px] hover:bg-slate-900 transition">
+                {editingBill ? 'Update Commitment' : 'Save Commitment'}
+              </button>
               <button onClick={resetBillForm} className="w-full py-2 text-slate-400 font-bold text-[10px] uppercase tracking-widest">Cancel</button>
             </div>
           </div>
@@ -283,7 +369,9 @@ const Settings: React.FC<Props> = ({
                 <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Amount</label><input type="number" value={incForm.amount} onChange={e => setIncForm({...incForm, amount: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" /></div>
                 <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Day of Month</label><input type="number" min="1" max="31" value={incForm.day} onChange={e => setIncForm({...incForm, day: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" /></div>
               </div>
-              <button onClick={saveIncome} className="w-full py-4 bg-emerald-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[11px] hover:bg-slate-900 transition">Save Commitment</button>
+              <button onClick={saveIncome} className="w-full py-4 bg-emerald-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[11px] hover:bg-slate-900 transition">
+                {editingIncome ? 'Update Commitment' : 'Save Commitment'}
+              </button>
               <button onClick={resetIncForm} className="w-full py-2 text-slate-400 font-bold text-[10px] uppercase tracking-widest">Cancel</button>
             </div>
           </div>

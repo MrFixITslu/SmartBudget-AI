@@ -31,27 +31,54 @@ const MagicInput: React.FC<Props> = ({ onSuccess, onBulkSuccess, onLoading, onMa
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
     onLoading(true);
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      const base64 = (reader.result as string).split(',')[1];
-      const fileData = { data: base64, mimeType: file.type };
+    // Explicitly cast to File[] to ensure 'file' is not 'unknown' in the map callback
+    const fileList = Array.from(files) as File[];
+    
+    // Turbo Mode: Batch Processing
+    const processingPromises = fileList.map((file: File) => {
+      return new Promise<AIAnalysisResult | AIAnalysisResult[] | null>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = async () => {
+          const resultRaw = reader.result;
+          if (typeof resultRaw !== 'string') {
+            resolve(null);
+            return;
+          }
+          const base64 = resultRaw.split(',')[1];
+          const fileData = { data: base64, mimeType: file.type };
 
-      if (file.type === 'application/pdf' || file.name.endsWith('.csv')) {
-        const results = await parseStatementToTransactions(fileData);
-        if (results.length > 0) onBulkSuccess(results);
-      } else {
-        const result = await parseInputToTransaction(fileData, true);
-        if (result) onSuccess(result);
-      }
-      onLoading(false);
-    };
-    reader.readAsDataURL(file);
-    // Reset input
-    e.target.value = '';
+          // Use 'file' properties correctly now that it's typed as File
+          if (file.type === 'application/pdf' || file.name.endsWith('.csv')) {
+            const results = await parseStatementToTransactions(fileData);
+            resolve(results);
+          } else {
+            const result = await parseInputToTransaction(fileData, true);
+            resolve(result);
+          }
+        };
+        // Fix line 56: explicitly typed 'file' is now a valid Blob/File
+        reader.readAsDataURL(file);
+      });
+    });
+
+    const results = await Promise.all(processingPromises);
+    const flattenedResults: AIAnalysisResult[] = [];
+    
+    results.forEach(res => {
+      if (Array.isArray(res)) flattenedResults.push(...res);
+      else if (res) flattenedResults.push(res);
+    });
+
+    if (flattenedResults.length > 0) {
+      onBulkSuccess(flattenedResults);
+    }
+
+    onLoading(false);
+    e.target.value = ''; // Reset input
   };
 
   const startRecording = async () => {
@@ -65,7 +92,12 @@ const MagicInput: React.FC<Props> = ({ onSuccess, onBulkSuccess, onLoading, onMa
         const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
         const reader = new FileReader();
         reader.onloadend = async () => {
-          const base64 = (reader.result as string).split(',')[1];
+          const resultRaw = reader.result;
+          if (typeof resultRaw !== 'string') {
+            onLoading(false);
+            return;
+          }
+          const base64 = resultRaw.split(',')[1];
           onLoading(true);
           const result = await parseInputToTransaction({ data: base64, mimeType: 'audio/webm' }, true);
           if (result) onSuccess(result);
@@ -94,8 +126,8 @@ const MagicInput: React.FC<Props> = ({ onSuccess, onBulkSuccess, onLoading, onMa
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            className="w-full bg-transparent px-3 py-2 text-slate-800 outline-none placeholder:text-slate-400"
-            placeholder="Log coffee, or upload 1st National statement..."
+            className="w-full bg-transparent px-3 py-2 text-slate-800 outline-none placeholder:text-slate-400 font-medium"
+            placeholder="Log coffee, or upload receipts batch..."
           />
         </div>
         
@@ -124,9 +156,9 @@ const MagicInput: React.FC<Props> = ({ onSuccess, onBulkSuccess, onLoading, onMa
             type="button"
             onClick={() => fileInputRef.current?.click()}
             className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-slate-100 text-slate-500 transition"
-            title="Upload Receipt or Statement"
+            title="Upload Multi-Receipt (Turbo Mode)"
           >
-            <i className="fas fa-file-import"></i>
+            <i className="fas fa-images"></i>
           </button>
 
           <button
@@ -145,11 +177,12 @@ const MagicInput: React.FC<Props> = ({ onSuccess, onBulkSuccess, onLoading, onMa
         onChange={handleFileUpload}
         className="hidden"
         accept="image/*,application/pdf,.csv"
+        multiple
       />
 
-      <div className="absolute -bottom-6 left-3 text-[10px] text-slate-400 flex gap-4 uppercase font-bold tracking-wider">
-        <span>AI-Powered Parsing Hub</span>
-        <i className="fas fa-check-circle text-indigo-400"></i>
+      <div className="absolute -bottom-6 left-3 text-[10px] text-slate-400 flex gap-4 uppercase font-black tracking-wider">
+        <span>Turbo Batch Engine Active</span>
+        <i className="fas fa-bolt text-amber-400"></i>
       </div>
     </div>
   );

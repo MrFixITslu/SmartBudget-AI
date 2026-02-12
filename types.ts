@@ -102,6 +102,7 @@ export interface RecurringExpense {
   lastBilledDate?: string;
   externalPortalUrl?: string; 
   externalSyncEnabled?: boolean;
+  isSubscription?: boolean;
 }
 
 export interface RecurringIncome {
@@ -143,8 +144,17 @@ export interface ProjectFile {
   type: string;
   size: number;
   timestamp: string;
-  storageRef: string; // URL or FileSystem Path or IndexedDB Key
+  storageRef: string;
   storageType: 'indexeddb' | 'filesystem' | 'url';
+}
+
+export interface IOU {
+  id: string;
+  contactId: string;
+  amount: number;
+  description: string;
+  type: 'debt' | 'claim';
+  settled: boolean;
 }
 
 export interface BudgetEvent {
@@ -156,6 +166,7 @@ export interface BudgetEvent {
   tasks: ProjectTask[];
   files: ProjectFile[];
   contactIds: string[];
+  ious: IOU[];
   status: 'planned' | 'active' | 'completed';
   outcome?: 'success' | 'failed';
   lessonsLearnt?: string;
@@ -170,6 +181,12 @@ export interface EventItem {
   category: string;
   notes?: string;
   date: string;
+  splitWithContactIds?: string[];
+}
+
+export interface NetWorthSnapshot {
+  date: string;
+  value: number;
 }
 
 export const CATEGORIES = [

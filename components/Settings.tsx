@@ -60,22 +60,21 @@ const Settings: React.FC<Props> = ({
 
   const handleSetLocalVault = async () => {
     try {
-      const handle = await (window as any).showDirectoryPicker();
-      onSetDirectory(handle);
-    } catch (err) {
-      console.error("Directory access denied", err);
-    }
-  };
-
-  const handleReminderToggle = (enabled: boolean) => {
-    if (enabled) {
-      if ("Notification" in window) {
-        window.Notification.requestPermission().then(permission => {
-          if (permission === "granted") onToggleReminders(true);
-          else alert("Notification permission denied.");
+      // Modern browsers support showDirectoryPicker directly
+      if ('showDirectoryPicker' in window) {
+        const handle = await (window as any).showDirectoryPicker({
+          mode: 'readwrite'
         });
-      } else alert("Not supported.");
-    } else onToggleReminders(false);
+        onSetDirectory(handle);
+      } else {
+        alert("The File System Access API is not supported by your browser. Please use a modern Chromium-based browser.");
+      }
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        console.error("Directory access denied", err);
+        alert("Failed to access directory: " + err.message);
+      }
+    }
   };
 
   const saveInvGoal = () => {
@@ -216,7 +215,7 @@ const Settings: React.FC<Props> = ({
                 <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-indigo-600 shadow-sm"><i className="fas fa-bell"></i></div>
                 <div><h3 className="text-sm font-black text-slate-800">Daily Desktop Reminders</h3><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Notification Alert for Data Entry</p></div>
               </div>
-              <button onClick={() => handleReminderToggle(!remindersEnabled)} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${remindersEnabled ? 'bg-indigo-600' : 'bg-slate-300'}`}><span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${remindersEnabled ? 'translate-x-6' : 'translate-x-1'}`} /></button>
+              <button onClick={() => onToggleReminders(!remindersEnabled)} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${remindersEnabled ? 'bg-indigo-600' : 'bg-slate-300'}`}><span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${remindersEnabled ? 'translate-x-6' : 'translate-x-1'}`} /></button>
             </div>
           </section>
 

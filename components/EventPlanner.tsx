@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo, useRef } from 'react';
 import { BudgetEvent, EventItem, EVENT_ITEM_CATEGORIES, ProjectTask, ProjectFile, ProjectNote, Contact, IOU } from '../types';
+import { saveFileToHardDrive } from '../services/fileStorageService';
 
 interface Props {
   events: BudgetEvent[];
@@ -92,18 +93,33 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
     setNoteText('');
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!selectedEvent || !file) return;
+
+    let storageRef = 'temp';
+    let storageType: 'indexeddb' | 'filesystem' = 'indexeddb';
+
+    // turbo mode: if hard drive vault is connected, save there
+    if (directoryHandle) {
+      try {
+        storageRef = await saveFileToHardDrive(directoryHandle, selectedEvent.name, file.name, file);
+        storageType = 'filesystem';
+      } catch (err) {
+        console.warn("Falling back to IndexedDB due to FileSystem error:", err);
+      }
+    }
+
     const newFile: ProjectFile = {
       id: generateId(),
       name: file.name,
       type: file.type,
       size: file.size,
       timestamp: new Date().toISOString(),
-      storageRef: 'temp',
-      storageType: 'indexeddb'
+      storageRef,
+      storageType
     };
+    
     onUpdateEvent({ ...selectedEvent, files: [...(selectedEvent.files || []), newFile] });
   };
 
@@ -283,6 +299,11 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
                           </div>
                           <p className="font-black text-[10px] text-slate-800 truncate w-full mb-1">{file.name}</p>
                           <p className="text-[8px] font-black text-slate-400 uppercase">{(file.size / 1024).toFixed(1)} KB</p>
+                          {file.storageType === 'filesystem' && (
+                            <div className="absolute top-4 right-4 text-emerald-500" title="Saved to Hard Drive">
+                              <i className="fas fa-hard-drive text-[10px]"></i>
+                            </div>
+                          )}
                         </div>
                       ))}
                       {(!selectedEvent?.files || selectedEvent.files.length === 0) && <div className="col-span-full py-20 text-center text-slate-300 font-black uppercase text-[10px] tracking-widest">No Assets Found</div>}
@@ -293,10 +314,12 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, onAd
                   <h3 className="font-black text-slate-800 uppercase text-[11px] tracking-[0.3em] mb-6">Archive Asset</h3>
                   <div className="p-10 border-4 border-dashed border-slate-100 rounded-[2.5rem] text-center group cursor-pointer hover:border-indigo-200 transition-all" onClick={() => fileInputRef.current?.click()}>
                     <i className="fas fa-cloud-upload text-3xl text-slate-200 group-hover:text-indigo-400 mb-4 transition-colors"></i>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Select Files</p>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Select Files {directoryHandle && "(to Hard Drive)"}</p>
                     <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
                   </div>
-                  <p className="text-[8px] text-slate-300 font-black uppercase text-center mt-4 tracking-widest">Standardized IndexedDB Encryption</p>
+                  <p className="text-[8px] text-slate-300 font-black uppercase text-center mt-4 tracking-widest">
+                    {directoryHandle ? "Direct Local Storage Active" : "Standardized IndexedDB Encryption"}
+                  </p>
                 </div>
               </div>
             )}

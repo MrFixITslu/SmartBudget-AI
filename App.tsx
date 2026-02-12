@@ -8,6 +8,7 @@ import Settings from './components/Settings';
 import BankSyncModal from './components/BankSyncModal';
 import BudgetAssistant from './components/BudgetAssistant';
 import EventPlanner from './components/EventPlanner';
+import Projections from './components/Projections';
 import VerificationQueue from './components/VerificationQueue';
 import { Transaction, AIAnalysisResult, RecurringExpense, RecurringIncome, SavingGoal, BankConnection, InvestmentAccount, MarketPrice, BudgetEvent, Contact, InvestmentGoal, NetWorthSnapshot } from './types';
 
@@ -65,7 +66,7 @@ const MarketTicker = ({ prices }: { prices: MarketPrice[] }) => {
 
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => localStorage.getItem(STORAGE_KEYS.AUTH) === 'true');
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'events'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'events' | 'projections'>('dashboard');
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
   const [directoryHandle, setDirectoryHandle] = useState<FileSystemDirectoryHandle | null>(null);
 
@@ -177,9 +178,10 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      <div className="flex justify-center mb-10">
-        <nav className="flex bg-white/50 backdrop-blur-sm p-1.5 rounded-[1.5rem] border border-slate-200 shadow-sm">
+      <div className="flex justify-center mb-10 overflow-x-auto no-scrollbar">
+        <nav className="flex bg-white/50 backdrop-blur-sm p-1.5 rounded-[1.5rem] border border-slate-200 shadow-sm min-w-max">
           <button onClick={() => setActiveTab('dashboard')} className={`px-6 py-2.5 rounded-2xl text-[10px] font-black uppercase transition-all ${activeTab === 'dashboard' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' : 'text-slate-400 hover:text-slate-600'}`}>Dashboard</button>
+          <button onClick={() => setActiveTab('projections')} className={`px-6 py-2.5 rounded-2xl text-[10px] font-black uppercase transition-all ${activeTab === 'projections' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' : 'text-slate-400 hover:text-slate-600'}`}>Projections</button>
           <button onClick={() => setActiveTab('events')} className={`px-6 py-2.5 rounded-2xl text-[10px] font-black uppercase transition-all ${activeTab === 'events' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' : 'text-slate-400 hover:text-slate-600'}`}>Project Matrix</button>
         </nav>
       </div>
@@ -196,6 +198,16 @@ const App: React.FC = () => {
             <VerificationQueue pendingItems={pendingApprovals} onApprove={(idx) => { const item = pendingApprovals[idx]; if (item.transaction) addTransaction(item.transaction as Transaction); setPendingApprovals(p => p.filter((_, i) => i !== idx)); }} onDiscard={(idx) => setPendingApprovals(p => p.filter((_, i) => i !== idx))} onEdit={() => {}} onDiscardAll={() => setPendingApprovals([])} />
             <Dashboard transactions={transactions} recurringExpenses={recurringExpenses} recurringIncomes={recurringIncomes} savingGoals={savingGoals} investmentGoals={investmentGoals} investments={investments} marketPrices={marketPrices} bankConnections={bankConnections} targetMargin={targetMargin} categoryBudgets={categoryBudgets} onEdit={(t) => setTransactions(prev => prev.map(item => item.id === t.id ? t : item))} onDelete={(id) => setTransactions(prev => prev.filter(t => t.id !== id))} onPayRecurring={(rec, amt) => addTransaction({ amount: amt, description: rec.description, category: rec.category, type: 'expense', date: new Date().toISOString().split('T')[0], recurringId: rec.id })} onReceiveRecurringIncome={() => {}} onContributeSaving={() => {}} onWithdrawSaving={() => {}} onWithdrawal={() => {}} onAddIncome={() => {}} />
           </>
+        ) : activeTab === 'projections' ? (
+          <Projections 
+            transactions={transactions} 
+            recurringIncomes={recurringIncomes} 
+            recurringExpenses={recurringExpenses} 
+            investments={investments} 
+            marketPrices={marketPrices} 
+            categoryBudgets={categoryBudgets}
+            currentNetWorth={currentNetWorth}
+          />
         ) : (
           <EventPlanner events={events} contacts={contacts} directoryHandle={directoryHandle} onAddEvent={(e) => setEvents(prev => [...prev, { ...e, id: generateId(), items: [], notes: [], tasks: [], files: [], contactIds: [], ious: [] }])} onDeleteEvent={(id) => setEvents(prev => prev.filter(e => e.id !== id))} onUpdateEvent={(updated) => setEvents(prev => prev.map(e => e.id === updated.id ? updated : e))} onUpdateContacts={setContacts} />
         )}

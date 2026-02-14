@@ -9,22 +9,23 @@ const SCHEMA = {
     transaction: {
       type: Type.OBJECT,
       properties: {
-        amount: { type: Type.NUMBER },
-        category: { type: Type.STRING },
-        description: { type: Type.STRING },
-        type: { type: Type.STRING, enum: ['expense', 'income', 'savings', 'withdrawal'] },
-        date: { type: Type.STRING },
-        vendor: { type: Type.STRING },
+        amount: { type: Type.NUMBER, description: "Total amount including tax." },
+        category: { type: Type.STRING, description: "One of the provided financial categories." },
+        description: { type: Type.STRING, description: "A friendly summary of the purchase." },
+        type: { type: Type.STRING, enum: ['expense', 'income', 'savings', 'withdrawal'], description: "The nature of the transaction." },
+        date: { type: Type.STRING, description: "ISO date format (YYYY-MM-DD)." },
+        vendor: { type: Type.STRING, description: "The merchant or business name extracted from the header." },
         lineItems: {
           type: Type.ARRAY,
           items: {
             type: Type.OBJECT,
             properties: {
-              name: { type: Type.STRING },
-              price: { type: Type.NUMBER },
-              quantity: { type: Type.NUMBER }
+              name: { type: Type.STRING, description: "Name of the individual product or service." },
+              price: { type: Type.NUMBER, description: "Unit price or total for this item row." },
+              quantity: { type: Type.NUMBER, description: "Number of units purchased." }
             }
-          }
+          },
+          description: "A detailed list of every item listed on the receipt."
         }
       }
     },
@@ -48,8 +49,13 @@ export const parseInputToTransaction = async (
   
   try {
     const contents = isMedia 
-      ? { parts: [{ inlineData: input as { data: string; mimeType: string } }, { text: "Parse this receipt or audio note. If it's a balance statement (e.g. 'Binance shows 1 BTC'), use portfolio update. Otherwise, use transaction." }] }
-      : { parts: [{ text: `Analyze: "${input}". Extract details.` }] };
+      ? { 
+          parts: [
+            { inlineData: input as { data: string; mimeType: string } }, 
+            { text: "CRITICAL: Perform deep OCR on this receipt. 1. Identify the Merchant/Vendor name. 2. Extract every single line item, its quantity, and price. 3. Determine the total amount. 4. If it's a balance statement (e.g. 'Binance shows 1 BTC'), use portfolio update. Otherwise, use transaction." }
+          ] 
+        }
+      : { parts: [{ text: `Analyze this financial intent: "${input}". Extract merchant, items, and total amount.` }] };
 
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
@@ -57,7 +63,11 @@ export const parseInputToTransaction = async (
       config: {
         responseMimeType: "application/json",
         responseSchema: SCHEMA,
-        systemInstruction: "You are a financial parsing engine. Categorize transactions into: " + CATEGORIES.join(", ") + ". Be precise with merchant names and quantities."
+        systemInstruction: `You are an elite Receipt & Financial Parsing Engine. 
+        Your goal is 100% accuracy in merchant detection and line-item extraction. 
+        Categories available: ${CATEGORIES.join(", ")}. 
+        Always return structured JSON. 
+        For receipts, always populate the 'vendor' and 'lineItems' fields with high detail.`
       }
     });
 
@@ -80,7 +90,7 @@ export const parseStatementToTransactions = async (
       contents: { 
         parts: [
           { inlineData: fileData }, 
-          { text: "Extract every transaction from this bank statement." }
+          { text: "Extract every individual transaction from this bank statement. For each row, identify the merchant and the total value." }
         ] 
       },
       config: {

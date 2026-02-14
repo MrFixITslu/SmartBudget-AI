@@ -1,7 +1,6 @@
 
 import React, { useMemo, useState, useEffect } from 'react';
-// Added missing Legend import from recharts
-import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, AreaChart, Area, BarChart, Bar, Cell, Legend } from 'recharts';
+import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Legend, AreaChart, Area } from 'recharts';
 import { Transaction, RecurringExpense, RecurringIncome, SavingGoal, InvestmentAccount, MarketPrice, BankConnection, InvestmentGoal } from '../types';
 import { GoogleGenAI } from "@google/genai";
 import TransactionForm from './TransactionForm';
@@ -35,16 +34,17 @@ interface Props {
   onAddIncome: (amount: number, description: string, notes: string) => void;
 }
 
-type Timeframe = 'daily' | 'weekly' | 'monthly' | 'yearly';
+type Timeframe = 'daily' | 'monthly' | 'yearly';
 
 const Dashboard: React.FC<Props> = ({ 
   transactions, investments, marketPrices, bankConnections, recurringExpenses, recurringIncomes, savingGoals, categoryBudgets, onDelete, onPayRecurring, onReceiveRecurringIncome, onEdit
 }) => {
   const [trendTimeframe, setTrendTimeframe] = useState<Timeframe>('monthly');
-  const [transactionToEdit, setTransactionToEdit] = useState<Transaction | null>(null);
   const [aiInsight, setAiInsight] = useState<string>("");
   const [isGeneratingInsight, setIsGeneratingInsight] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [activePaymentId, setActivePaymentId] = useState<string | null>(null);
+  const [partialAmount, setPartialAmount] = useState<string>("");
 
   const cycleStartDate = useMemo(() => {
     const now = new Date();
@@ -55,7 +55,6 @@ const Dashboard: React.FC<Props> = ({
     return start;
   }, []);
 
-  // Actual Totals for current cycle
   const { totalActualIncome, totalActualExpenses } = useMemo(() => {
     const current = transactions.filter(t => new Date(t.date) >= cycleStartDate);
     return {
@@ -109,22 +108,25 @@ const Dashboard: React.FC<Props> = ({
 
   const netWorth: number = (Object.values(institutionalBalances) as InstitutionalBalance[]).reduce((acc: number, b) => acc + b.balance, 0);
 
-  const { dailySpendLimit, daysRemaining, nextCycleDate, cycleProgress } = useMemo(() => {
-    const now = new Date();
-    let target = new Date(now.getFullYear(), now.getMonth(), 25);
-    if (now.getDate() >= 25) target = new Date(now.getFullYear(), now.getMonth() + 1, 25);
+  // Rollover Calculation: Total of all transactions before the current cycle start
+  const cycleRollover = useMemo(() => {
+    const pastTransactions = transactions.filter(t => new Date(t.date) < cycleStartDate);
+    const openingBalancesTotal = bankConnections.reduce((acc, conn) => acc + conn.openingBalance, 0);
     
-    const diffTime = target.getTime() - now.getTime();
-    const safeDays = Math.max(1, Math.ceil(diffTime / 86400000));
-    const progress = Math.min(100, Math.max(0, ((30 - safeDays) / 30) * 100));
-    const dailyLimit = liquidFunds / safeDays;
-    return { 
-      dailySpendLimit: dailyLimit > 0 ? dailyLimit : 0,
-      daysRemaining: safeDays,
-      nextCycleDate: target.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
-      cycleProgress: progress
-    };
-  }, [liquidFunds]);
+    const historicalCashflow = pastTransactions.reduce((acc, t) => {
+      // Focus on liquid accounts for rollover context
+      if (t.institution === '1st National Bank St. Lucia' || t.institution === 'Cash in Hand') {
+        if (t.type === 'income') return acc + t.amount;
+        if (t.type === 'expense' || t.type === 'savings' || t.type === 'withdrawal') return acc - t.amount;
+      }
+      if (t.destinationInstitution === '1st National Bank St. Lucia' || t.destinationInstitution === 'Cash in Hand') {
+        if (t.type === 'transfer' || t.type === 'withdrawal') return acc + t.amount;
+      }
+      return acc;
+    }, 0);
+
+    return openingBalancesTotal + historicalCashflow;
+  }, [transactions, cycleStartDate, bankConnections]);
 
   const cashflowTrends = useMemo(() => {
     const grouped: Record<string, { income: number; expense: number }> = {};
@@ -132,17 +134,29 @@ const Dashboard: React.FC<Props> = ({
 
     filtered.forEach(t => {
       const date = new Date(t.date);
-      const label = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      let label = "";
+      
+      if (trendTimeframe === 'daily') {
+        label = t.date;
+      } else if (trendTimeframe === 'monthly') {
+        label = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      } else {
+        label = `${date.getFullYear()}`;
+      }
+
       if (!grouped[label]) grouped[label] = { income: 0, expense: 0 };
       if (t.type === 'income') grouped[label].income += t.amount;
       else grouped[label].expense += t.amount;
     });
 
-    return Object.entries(grouped)
+    const sortedData = Object.entries(grouped)
       .map(([label, data]) => ({ label, ...data }))
-      .sort((a, b) => a.label.localeCompare(b.label))
-      .slice(-6); // Last 6 months
-  }, [transactions]);
+      .sort((a, b) => a.label.localeCompare(b.label));
+
+    if (trendTimeframe === 'daily') return sortedData.slice(-30);
+    if (trendTimeframe === 'monthly') return sortedData.slice(-12);
+    return sortedData;
+  }, [transactions, trendTimeframe]);
 
   const filteredTransactions = useMemo(() => {
     return transactions.filter(t => {
@@ -158,11 +172,8 @@ const Dashboard: React.FC<Props> = ({
   }, [transactions, searchTerm]);
 
   const totalTargetExpenses = useMemo(() => recurringExpenses.reduce((acc: number, e) => acc + e.amount, 0) + (Object.values(categoryBudgets).reduce((a: number, b) => a + (Number(b) || 0), 0)), [recurringExpenses, categoryBudgets]);
-  
-  // Calculate how many months user can survive with total assets (Net Worth)
   const survivalMonths = useMemo(() => totalTargetExpenses > 0 ? netWorth / totalTargetExpenses : 0, [netWorth, totalTargetExpenses]);
 
-  // Identify unpaid bills in current cycle
   const unpaidBills = useMemo(() => {
     return recurringExpenses.filter(bill => {
       const alreadyPaid = transactions.some(t => 
@@ -173,12 +184,9 @@ const Dashboard: React.FC<Props> = ({
     });
   }, [recurringExpenses, transactions, cycleStartDate]);
 
-  // Identify expected incomes not yet confirmed in current cycle
-  // Updated with 14-day visibility logic
   const unconfirmedIncomes = useMemo(() => {
     const now = new Date();
     return recurringIncomes.filter(inc => {
-      // 1. Check if already received in this cycle
       const alreadyReceived = transactions.some(t => 
         t.description.includes(inc.description) && 
         t.type === 'income' &&
@@ -186,10 +194,7 @@ const Dashboard: React.FC<Props> = ({
       );
       if (alreadyReceived) return false;
 
-      // 2. Determine target date for visibility check
       let expectedDate = new Date(now.getFullYear(), now.getMonth(), inc.dayOfMonth);
-      
-      // Handle cycle transition logic
       if (now.getDate() >= 25 && inc.dayOfMonth < 25) {
         expectedDate.setMonth(expectedDate.getMonth() + 1);
       } else if (now.getDate() < 25 && inc.dayOfMonth >= 25) {
@@ -198,8 +203,6 @@ const Dashboard: React.FC<Props> = ({
 
       const diffTime = expectedDate.getTime() - now.getTime();
       const diffDays = diffTime / (1000 * 60 * 60 * 24);
-
-      // Show if it's due within 14 days OR it's already overdue (diffDays <= 0)
       return diffDays <= 14;
     });
   }, [recurringIncomes, transactions, cycleStartDate]);
@@ -210,7 +213,7 @@ const Dashboard: React.FC<Props> = ({
       setIsGeneratingInsight(true);
       try {
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const context = `Actual Income: $${totalActualIncome.toFixed(2)}, Actual Spending: $${totalActualExpenses.toFixed(2)}, Net Worth: $${netWorth.toFixed(2)}, Runway: ${survivalMonths.toFixed(1)} months. Unpaid Bills: ${unpaidBills.length}. Expected Income: ${unconfirmedIncomes.length}.`;
+        const context = `Actual Income: $${totalActualIncome.toFixed(2)}, Actual Spending: $${totalActualExpenses.toFixed(2)}, Net Worth: $${netWorth.toFixed(2)}, Rollover: $${cycleRollover.toFixed(2)}.`;
         const response = await ai.models.generateContent({ 
           model: 'gemini-3-flash-preview', 
           contents: { parts: [{ text: `Context: ${context}\nAction: One ultra-concise finance tip.` }] }
@@ -223,285 +226,221 @@ const Dashboard: React.FC<Props> = ({
       }
     };
     generateSummary();
-  }, [totalActualIncome, totalActualExpenses, netWorth, transactions.length, survivalMonths, unpaidBills.length, unconfirmedIncomes.length]);
+  }, [totalActualIncome, totalActualExpenses, netWorth, transactions.length, cycleRollover]);
+
+  const handlePrint = () => window.print();
+
+  const handleQuickPaymentAction = (item: RecurringExpense | RecurringIncome, isIncome: boolean) => {
+    const amt = parseFloat(partialAmount) || item.amount;
+    if (isIncome) {
+      onReceiveRecurringIncome(item as RecurringIncome, amt);
+    } else {
+      onPayRecurring(item as RecurringExpense, amt);
+    }
+    setActivePaymentId(null);
+    setPartialAmount("");
+  };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500 pb-24">
-      <div className="bg-slate-900 p-8 rounded-[3rem] shadow-2xl relative overflow-hidden group">
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="flex-1">
-            <div className="flex items-center gap-3 mb-2">
-              <span className="flex h-3 w-3 relative"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span><span className="relative inline-flex rounded-full h-3 w-3 bg-indigo-500"></span></span>
-              <p className="text-white text-[10px] font-black uppercase tracking-[0.3em]">Gemini Strategic Advisor</p>
-            </div>
-            {isGeneratingInsight ? <div className="h-6 w-3/4 bg-white/5 animate-pulse rounded-lg"></div> : <h2 className="text-white text-lg md:text-xl font-medium italic">"{aiInsight}"</h2>}
-          </div>
+    <div className="space-y-6 animate-in fade-in duration-500 pb-24 print:p-0">
+      <div className="hidden print:block border-b-2 border-slate-900 pb-6 mb-8">
+        <h1 className="text-3xl font-black text-slate-900 uppercase tracking-tighter">Financial Audit Statement</h1>
+        <div className="flex justify-between mt-2 text-[10px] font-black uppercase text-slate-400">
+          <span>Standardized Fire Finance Ledger</span>
+          <span>Period: {cycleStartDate.toLocaleDateString()} - {new Date().toLocaleDateString()}</span>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:flex flex-wrap lg:grid lg:grid-cols-5 gap-5">
-        <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-center flex-1 min-w-[150px]">
-           <p className="text-slate-400 text-[9px] font-black uppercase tracking-widest mb-1">Monthly Actual Income</p>
-           <h3 className="text-xl font-black text-emerald-600">${totalActualIncome.toLocaleString()}</h3>
+      <div className="bg-slate-900 p-8 rounded-[3rem] shadow-2xl relative overflow-hidden group print:rounded-none">
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="flex-1">
+            <div className="flex items-center gap-3 mb-2">
+              <span className="flex h-3 w-3 relative print:hidden">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-indigo-500"></span>
+              </span>
+              <p className="text-white text-[10px] font-black uppercase tracking-[0.3em]">Strategic Advisor Insight</p>
+            </div>
+            {isGeneratingInsight ? <div className="h-6 w-3/4 bg-white/5 animate-pulse rounded-lg"></div> : <h2 className="text-white text-lg md:text-xl font-medium italic">"{aiInsight}"</h2>}
+          </div>
+          <button 
+            onClick={handlePrint}
+            className="px-6 py-3 bg-white/10 hover:bg-white/20 border border-white/20 rounded-2xl text-[10px] font-black uppercase tracking-widest text-white transition-all shadow-xl backdrop-blur-sm print:hidden"
+          >
+            <i className="fas fa-file-pdf mr-2"></i> Export Report
+          </button>
         </div>
-        <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-center flex-1 min-w-[150px]">
-           <p className="text-slate-400 text-[9px] font-black uppercase tracking-widest mb-1">Monthly Actual Spending</p>
-           <h3 className="text-xl font-black text-rose-600">${totalActualExpenses.toLocaleString()}</h3>
+      </div>
+
+      {/* Stats Grid - Now with Rollover Balance */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div className="bg-white p-5 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-center">
+           <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1">Rollover</p>
+           <h3 className="text-sm font-black text-slate-500">${cycleRollover.toLocaleString()}</h3>
         </div>
-        <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-center flex-1 min-w-[150px]">
-           <p className="text-slate-400 text-[9px] font-black uppercase tracking-widest mb-1">Cycle Surplus/Deficit</p>
-           <h3 className={`text-xl font-black ${(totalActualIncome - totalActualExpenses) >= 0 ? 'text-indigo-600' : 'text-rose-600'}`}>
-             ${(totalActualIncome - totalActualExpenses).toLocaleString()}
-           </h3>
+        <div className="bg-white p-5 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-center">
+           <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1">Cycle Income</p>
+           <h3 className="text-sm font-black text-emerald-600">+${totalActualIncome.toLocaleString()}</h3>
         </div>
-        <div className="bg-indigo-600 p-6 rounded-[2.5rem] shadow-xl text-white flex flex-col justify-center flex-1 min-w-[150px]">
-           <p className="text-white/60 text-[9px] font-black uppercase tracking-widest mb-1">Survival Runway</p>
-           <h3 className="text-xl font-black">{survivalMonths.toFixed(1)} <span className="text-[10px] text-white/40 uppercase">Months</span></h3>
+        <div className="bg-white p-5 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-center">
+           <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1">Cycle Spend</p>
+           <h3 className="text-sm font-black text-rose-600">-${totalActualExpenses.toLocaleString()}</h3>
         </div>
-        <div className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800 shadow-xl text-white flex flex-col justify-center flex-1 min-w-[150px]">
-           <p className="text-white/40 text-[9px] font-black uppercase tracking-widest mb-1">Total Assets</p>
-           <h3 className="text-xl font-black">${netWorth.toLocaleString()}</h3>
+        <div className="bg-indigo-600 p-5 rounded-[2.5rem] shadow-xl text-white flex flex-col justify-center print:bg-slate-100 print:text-slate-900">
+           <p className="text-white/60 text-[8px] font-black uppercase tracking-widest mb-1 print:text-slate-400">Available Cash</p>
+           <h3 className="text-sm font-black">${liquidFunds.toLocaleString()}</h3>
+        </div>
+        <div className="bg-white p-5 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-center">
+           <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1">Runway</p>
+           <h3 className="text-sm font-black text-indigo-600">{survivalMonths.toFixed(1)} <span className="text-[8px] text-slate-400 uppercase">Mos</span></h3>
+        </div>
+        <div className="bg-slate-900 p-5 rounded-[2.5rem] border border-slate-800 shadow-xl text-white flex flex-col justify-center print:border-slate-200 print:bg-white print:text-slate-900">
+           <p className="text-white/40 text-[8px] font-black uppercase tracking-widest mb-1 print:text-slate-400">Net Worth</p>
+           <h3 className="text-sm font-black">${netWorth.toLocaleString()}</h3>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <section className="lg:col-span-2 bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm relative overflow-hidden flex flex-col">
-          <div className="flex justify-between items-center mb-10">
+        <section className="lg:col-span-2 bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm relative overflow-hidden flex flex-col min-h-[450px]">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-10">
             <div>
-              <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.1em]">Cashflow Analysis</h3>
-              <p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-widest">Income vs Expenses (Last 6 Months)</p>
+              <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.1em]">Cashflow Trajectory</h3>
+              <p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-widest">Inflow vs Outflow Historicals</p>
+            </div>
+            <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100 print:hidden">
+              {(['daily', 'monthly', 'yearly'] as Timeframe[]).map(tf => (
+                <button
+                  key={tf}
+                  onClick={() => setTrendTimeframe(tf)}
+                  className={`px-4 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${trendTimeframe === tf ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                  {tf}
+                </button>
+              ))}
             </div>
           </div>
-          <div className="h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={cashflowTrends} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+          
+          <div className="flex-1 min-h-[300px] w-full" style={{ position: 'relative' }}>
+            <ResponsiveContainer width="100%" height="100%" minHeight={300}>
+              <AreaChart data={cashflowTrends} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorIncome" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.1}/>
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                  </linearGradient>
+                  <linearGradient id="colorExpense" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.1}/>
+                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 9, fontWeight: 800, fill: '#94a3b8' }} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 9, fontWeight: 800, fill: '#94a3b8' }} />
-                <Tooltip 
-                  cursor={{ fill: '#f8fafc' }}
-                  contentStyle={{ borderRadius: '20px', border: 'none', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', fontSize: '11px', fontWeight: 'bold' }} 
-                />
-                <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', fontWeight: 'black', textTransform: 'uppercase', paddingBottom: '20px' }} />
-                <Bar dataKey="income" name="Income" fill="#10b981" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="expense" name="Expenses" fill="#f43f5e" radius={[4, 4, 0, 0]} />
-              </BarChart>
+                <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 9, fontBold: 800, fill: '#94a3b8' }} interval={trendTimeframe === 'daily' ? 6 : 0} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 9, fontBold: 800, fill: '#94a3b8' }} />
+                <Tooltip contentStyle={{ borderRadius: '20px', border: 'none', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', fontSize: '11px', fontBold: 'bold' }} />
+                <Legend verticalAlign="top" align="right" iconType="circle" wrapperStyle={{ paddingBottom: '20px', fontSize: '10px', fontBold: 'bold', textTransform: 'uppercase' }} />
+                <Area type="monotone" dataKey="income" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorIncome)" name="Inflow" />
+                <Area type="monotone" dataKey="expense" stroke="#ef4444" strokeWidth={3} fillOpacity={1} fill="url(#colorExpense)" name="Outflow" />
+              </AreaChart>
             </ResponsiveContainer>
           </div>
         </section>
 
-        <section className="bg-indigo-600 p-10 rounded-[3rem] shadow-xl text-white flex flex-col justify-between">
-           <div>
-             <div className="flex justify-between items-center mb-1">
-               <p className="text-white/80 text-[10px] font-black uppercase tracking-widest">Cycle Margin</p>
-               <p className="text-[9px] font-black uppercase text-white/60">{daysRemaining}D Left</p>
-             </div>
-             <h3 className="text-4xl font-black mb-10">${liquidFunds.toLocaleString()}</h3>
-             
-             <div className="bg-black/10 rounded-[2rem] p-6 border border-white/10 backdrop-blur-sm mb-8">
-               <p className="text-[9px] text-white/60 font-black uppercase tracking-widest mb-1">Daily Spend Limit</p>
-               <h4 className="text-3xl font-black text-white">${dailySpendLimit.toLocaleString('en-US', { maximumFractionDigits: 2 })}</h4>
-             </div>
-           </div>
-
-           <div className="space-y-2">
-             <div className="flex justify-between items-center text-[8px] font-black uppercase tracking-widest">
-               <span>Month Completion</span>
-               <span>{cycleProgress.toFixed(0)}%</span>
-             </div>
-             <div className="h-1.5 w-full bg-white/20 rounded-full overflow-hidden">
-               <div className="h-full bg-white transition-all duration-1000" style={{ width: `${cycleProgress}%` }}></div>
-             </div>
-           </div>
-        </section>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <section className="lg:col-span-2 bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm flex flex-col min-h-[500px]">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-10">
-            <div>
-              <h3 className="font-black text-slate-800 uppercase text-xs">Transaction Ledger</h3>
-              <p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-widest">Real-time searchable history</p>
-            </div>
-            <div className="relative flex-1 md:max-w-xs">
+        <section className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm flex flex-col h-full">
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="font-black text-slate-800 uppercase text-[10px] tracking-[0.2em]">Transaction Ledger</h3>
+            <div className="relative print:hidden">
               <input 
-                type="text"
-                placeholder="Search description, amount or category..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-100 transition-all"
+                type="text" placeholder="Search..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-8 pr-4 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[10px] font-bold focus:ring-2 focus:ring-indigo-500 outline-none w-32"
               />
-              <i className="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 text-[10px]"></i>
+              <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[8px]"></i>
             </div>
           </div>
-
-          <div className="flex-1 overflow-y-auto max-h-[600px] custom-scrollbar pr-2">
-            <div className="space-y-3">
-              {filteredTransactions.length > 0 ? filteredTransactions.map((t) => (
-                <div key={t.id} className="p-5 bg-white border border-slate-100 rounded-[2rem] flex items-center justify-between group hover:border-indigo-100 transition-all hover:shadow-lg hover:shadow-indigo-50/50">
-                  <div className="flex items-center gap-5">
-                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xs ${t.type === 'income' ? 'bg-emerald-50 text-emerald-600' : t.type === 'expense' ? 'bg-rose-50 text-rose-600' : 'bg-slate-50 text-slate-400'}`}>
-                      <i className={`fas ${t.type === 'income' ? 'fa-arrow-up' : t.type === 'expense' ? 'fa-arrow-down' : 'fa-exchange-alt'}`}></i>
-                    </div>
-                    <div>
-                      <p className="text-sm font-black text-slate-800">{t.description}</p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest bg-slate-50 px-2 py-0.5 rounded-md">{t.category}</span>
-                        <span className="text-[9px] font-black uppercase text-slate-300 tracking-widest">{t.date}</span>
-                      </div>
-                    </div>
+          
+          <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-2">
+            {filteredTransactions.slice(0, 15).map(t => (
+              <div key={t.id} className="p-4 bg-slate-50/50 hover:bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between group transition-all">
+                <div className="flex items-center gap-4">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white text-xs ${t.type === 'income' ? 'bg-emerald-500' : t.type === 'transfer' ? 'bg-indigo-600' : 'bg-rose-500'}`}>
+                    <i className={`fas ${t.type === 'income' ? 'fa-arrow-up' : t.type === 'transfer' ? 'fa-exchange-alt' : 'fa-arrow-down'}`}></i>
                   </div>
-                  <div className="flex items-center gap-8">
-                    <div className="text-right">
-                      <p className={`text-lg font-black ${t.type === 'income' ? 'text-emerald-600' : 'text-slate-800'}`}>
-                        {t.type === 'income' ? '+' : '-'}${t.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                      </p>
-                      <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest">{t.institution || 'Cash'}</p>
-                    </div>
-                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={() => setTransactionToEdit(t)} className="w-10 h-10 rounded-xl bg-slate-50 text-slate-400 hover:text-indigo-600 transition flex items-center justify-center">
-                        <i className="fas fa-edit text-xs"></i>
-                      </button>
-                      <button onClick={() => onDelete(t.id)} className="w-10 h-10 rounded-xl bg-slate-50 text-slate-400 hover:text-rose-600 transition flex items-center justify-center">
-                        <i className="fas fa-trash-alt text-xs"></i>
-                      </button>
-                    </div>
+                  <div>
+                    <p className="text-[11px] font-black text-slate-800 truncate w-24 md:w-32">{t.description}</p>
+                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">{t.category}</p>
                   </div>
                 </div>
-              )) : (
-                <div className="py-24 text-center">
-                   <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-200">
-                     <i className="fas fa-search text-2xl"></i>
-                   </div>
-                   <p className="text-slate-300 font-black uppercase text-[10px] tracking-[0.3em]">Zero matches for "{searchTerm}"</p>
+                <div className="text-right">
+                  <p className={`text-xs font-black ${t.type === 'income' ? 'text-emerald-600' : 'text-slate-900'}`}>
+                    {t.type === 'income' ? '+' : '-'}${t.amount.toLocaleString()}
+                  </p>
+                  <p className="text-[7px] font-black text-slate-400 uppercase">{new Date(t.date).toLocaleDateString()}</p>
                 </div>
-              )}
-            </div>
+              </div>
+            ))}
           </div>
         </section>
-
-        <div className="space-y-6">
-          <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
-            <h3 className="font-black text-slate-800 uppercase text-xs mb-10 tracking-widest">Active Budgets</h3>
-            <div className="space-y-8">
-              {(Object.entries(categoryBudgets) as [string, number][]).filter(([_, limit]) => limit > 0).map(([cat, limit]) => {
-                const actual = transactions.filter(t => t.category === cat && new Date(t.date) >= cycleStartDate).reduce((a: number, b) => a + b.amount, 0);
-                const percent = Math.min(100, (actual / limit) * 100);
-                return (
-                  <div key={cat} className="space-y-3">
-                    <div className="flex justify-between items-end">
-                      <div>
-                        <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-1">{cat}</p>
-                        <p className="text-xs font-black text-slate-400">${actual.toLocaleString()} / ${limit.toLocaleString()}</p>
-                      </div>
-                      <p className={`text-xs font-black ${percent >= 90 ? 'text-rose-600' : 'text-indigo-600'}`}>{percent.toFixed(0)}%</p>
-                    </div>
-                    <div className="h-2.5 w-full bg-slate-50 rounded-full overflow-hidden border border-slate-100 shadow-inner">
-                      <div className={`h-full transition-all duration-1000 ${percent >= 90 ? 'bg-rose-500' : 'bg-indigo-500'}`} style={{ width: `${percent}%` }}></div>
-                    </div>
-                  </div>
-                );
-              })}
-              {Object.keys(categoryBudgets).length === 0 && <p className="text-center text-[10px] text-slate-300 font-black uppercase py-10">No budgets configured</p>}
-            </div>
-          </section>
-
-          <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
-            <h3 className="font-black text-slate-800 uppercase text-xs mb-10 tracking-widest">Expected Inflows</h3>
-            <div className="space-y-4">
-              {unconfirmedIncomes.map(inc => (
-                <div key={inc.id} className="p-4 bg-emerald-50 border border-emerald-100 rounded-2xl flex items-center justify-between group">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-emerald-600 shadow-sm">
-                      <i className="fas fa-hand-holding-dollar text-xs"></i>
-                    </div>
-                    <div>
-                      <p className="text-xs font-black text-slate-800">{inc.description}</p>
-                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Expected {inc.dayOfMonth}th • ${inc.amount.toLocaleString()}</p>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={() => onReceiveRecurringIncome(inc, inc.amount)}
-                    className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-900 transition-all shadow-lg shadow-emerald-100"
-                  >
-                    Confirm
-                  </button>
-                </div>
-              ))}
-              {unconfirmedIncomes.length === 0 && <p className="text-center text-[10px] text-slate-300 font-black uppercase py-10">All income received</p>}
-            </div>
-          </section>
-
-          <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
-            <h3 className="font-black text-slate-800 uppercase text-xs mb-10 tracking-widest">Upcoming Commitments</h3>
-            <div className="space-y-4">
-              {unpaidBills.map(bill => (
-                <div key={bill.id} className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between group">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-indigo-600 shadow-sm">
-                      <i className="fas fa-calendar-day text-xs"></i>
-                    </div>
-                    <div>
-                      <p className="text-xs font-black text-slate-800">{bill.description}</p>
-                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Due on the {bill.dayOfMonth}th • ${bill.amount.toLocaleString()}</p>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={() => onPayRecurring(bill, bill.amount)}
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-900 transition-all shadow-lg shadow-indigo-100"
-                  >
-                    Pay
-                  </button>
-                </div>
-              ))}
-              {unpaidBills.length === 0 && <p className="text-center text-[10px] text-slate-300 font-black uppercase py-10">All bills settled</p>}
-            </div>
-          </section>
-        </div>
       </div>
 
-      <section className="bg-slate-900 p-12 rounded-[4rem] text-white shadow-2xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 p-12 opacity-5 scale-150 pointer-events-none"><i className="fas fa-vault text-[120px]"></i></div>
-        <div className="relative z-10">
-          <h3 className="font-black uppercase text-[11px] text-indigo-400 mb-10 tracking-[0.4em]">Smart Savings Buckets</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-            {savingGoals.map(goal => {
-              const progress = Math.min(100, (goal.currentAmount / goal.targetAmount) * 100);
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <section className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm">
+          <h3 className="font-black text-slate-800 uppercase text-[10px] tracking-[0.2em] mb-6">Upcoming Commitments</h3>
+          <div className="space-y-4">
+            {unpaidBills.concat(unconfirmedIncomes as any).length > 0 ? unpaidBills.concat(unconfirmedIncomes as any).slice(0, 5).map((bill: any) => {
+              const isIncome = 'nextConfirmationDate' in bill;
+              const isActive = activePaymentId === bill.id;
+
               return (
-                <div key={goal.id} className="bg-white/5 border border-white/10 rounded-[2.5rem] p-8 relative group overflow-hidden transition-all hover:bg-white/10">
-                  <div className="relative z-10">
-                    <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-1">{goal.category}</p>
-                    <h4 className="text-xl font-black mb-4 truncate">{goal.name}</h4>
-                    <div className="flex justify-between items-end mb-6">
-                      <div>
-                        <p className="text-[10px] font-black text-white/40 uppercase">Saved</p>
-                        <p className="text-2xl font-black">${goal.currentAmount.toLocaleString()}</p>
+                <div key={bill.id} className="p-4 bg-slate-50 border border-slate-100 rounded-2xl transition-all">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shadow-sm ${isIncome ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-500'}`}>
+                        <i className={`fas ${isIncome ? 'fa-hand-holding-dollar' : 'fa-file-invoice'}`}></i>
                       </div>
-                      <p className="text-sm font-black text-indigo-400">{progress.toFixed(0)}%</p>
+                      <div>
+                        <p className="font-black text-[11px] text-slate-800">{bill.description}</p>
+                        <p className="text-[8px] font-black text-slate-400 uppercase">Target: ${bill.amount} • Day {bill.dayOfMonth}</p>
+                      </div>
                     </div>
-                  </div>
-                  <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-white/5">
-                    <div className="h-full bg-indigo-500 shadow-[0_0_20px_rgba(99,102,241,0.5)] transition-all duration-1000" style={{ width: `${progress}%` }}></div>
+                    {isActive ? (
+                      <div className="flex gap-2 items-center animate-in slide-in-from-right-2 duration-300">
+                        <input 
+                          type="number" 
+                          autoFocus
+                          placeholder={bill.amount.toString()}
+                          value={partialAmount}
+                          onChange={(e) => setPartialAmount(e.target.value)}
+                          className="w-24 px-3 py-2 bg-white border-2 border-indigo-500 rounded-xl text-[10px] font-black outline-none shadow-sm"
+                        />
+                        <button onClick={() => handleQuickPaymentAction(bill, isIncome)} className="w-9 h-9 bg-indigo-600 text-white rounded-xl flex items-center justify-center text-[10px] shadow-lg shadow-indigo-100 hover:bg-slate-900 transition-colors"><i className="fas fa-check"></i></button>
+                        <button onClick={() => { setActivePaymentId(null); setPartialAmount(""); }} className="w-9 h-9 bg-slate-100 text-slate-400 rounded-xl flex items-center justify-center text-[10px] hover:bg-rose-50 hover:text-rose-600 transition-colors"><i className="fas fa-times"></i></button>
+                      </div>
+                    ) : (
+                      <button onClick={() => { setActivePaymentId(bill.id); setPartialAmount(bill.amount.toString()); }} className="px-5 py-2.5 bg-slate-900 text-white text-[9px] font-black uppercase tracking-widest rounded-xl hover:bg-indigo-600 transition-all shadow-md print:hidden">Record</button>
+                    )}
                   </div>
                 </div>
               );
-            })}
-            {savingGoals.length === 0 && <div className="col-span-full py-20 opacity-30 italic text-center text-xs font-black uppercase tracking-widest">No active savings buckets</div>}
+            }) : <p className="py-10 text-center text-slate-300 font-black uppercase text-[9px] tracking-widest">All commitments clear</p>}
           </div>
-        </div>
-      </section>
+        </section>
 
-      {transactionToEdit && (
-        <div className="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-xl rounded-[3rem] shadow-2xl p-2">
-            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <h2 className="text-xl font-black text-slate-800">Modify Entry</h2>
-              <button onClick={() => setTransactionToEdit(null)} className="text-slate-400 hover:text-slate-800"><i className="fas fa-times"></i></button>
-            </div>
-            <TransactionForm initialData={transactionToEdit} onAdd={(t) => { onEdit({ ...t, id: transactionToEdit.id } as Transaction); setTransactionToEdit(null); }} onCancel={() => setTransactionToEdit(null)} />
+        <section className="bg-slate-900 p-8 rounded-[3rem] text-white shadow-2xl">
+          <h3 className="font-black uppercase text-[10px] tracking-[0.2em] text-indigo-400 mb-6">Asset Distribution</h3>
+          <div className="grid grid-cols-2 gap-4">
+            {marketPrices.slice(0, 4).map(p => (
+              <div key={p.symbol} className="p-4 bg-white/5 border border-white/5 rounded-[2rem] flex flex-col justify-between">
+                <div className="flex justify-between items-start">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{p.symbol}</span>
+                  <div className={`text-[8px] font-black px-1.5 py-0.5 rounded ${p.change24h >= 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
+                    {p.change24h > 0 ? '+' : ''}{p.change24h.toFixed(1)}%
+                  </div>
+                </div>
+                <h4 className="text-sm font-black mt-2">${p.price.toLocaleString()}</h4>
+              </div>
+            ))}
           </div>
-        </div>
-      )}
+        </section>
+      </div>
     </div>
   );
 };

@@ -2,6 +2,21 @@
 export type TransactionType = 'expense' | 'income' | 'savings' | 'withdrawal' | 'transfer';
 export type InstitutionType = 'bank' | 'credit_union' | 'investment';
 
+export interface User {
+  id: string;
+  name: string;
+  role: 'admin' | 'collaborator';
+  avatar?: string;
+  online: boolean;
+}
+
+export interface StoredUser {
+  username: string;
+  password?: string; // Only stored locally for this demo
+  role: 'admin' | 'collaborator';
+  createdAt: string;
+}
+
 export interface LineItem {
   name: string;
   price: number;
@@ -127,6 +142,8 @@ export interface ProjectNote {
   id: string;
   text: string;
   timestamp: string;
+  authorId: string;
+  version: number;
 }
 
 export interface ProjectTask {
@@ -135,6 +152,7 @@ export interface ProjectTask {
   completed: boolean;
   dueDate?: string;
   completionDate?: string;
+  assignedToId?: string;
   subTasks?: ProjectTask[]; 
 }
 
@@ -146,6 +164,8 @@ export interface ProjectFile {
   timestamp: string;
   storageRef: string;
   storageType: 'indexeddb' | 'filesystem' | 'url';
+  version: number;
+  lastModifiedBy: string;
 }
 
 export interface IOU {
@@ -166,11 +186,14 @@ export interface BudgetEvent {
   tasks: ProjectTask[];
   files: ProjectFile[];
   contactIds: string[];
+  memberUsernames: string[]; // List of usernames who can access this project
   ious: IOU[];
   status: 'planned' | 'active' | 'completed';
   outcome?: 'success' | 'failed';
   lessonsLearnt?: string;
   projectedBudget?: number;
+  lastUpdated: string;
+  activeCollaborators?: string[];
 }
 
 export interface EventItem {

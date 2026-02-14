@@ -3,9 +3,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { InstitutionType, Transaction, AIAnalysisResult } from "../types";
 
 /**
- * Since many regional banks don't have public REST APIs,
- * this service acts as an "Intelligent Gateway" that mimics API behavior
- * using Gemini to parse document-based data or simulate live feeds.
+ * Intelligent Gateway for regional institutions and investment platforms.
  */
 export const syncBankData = async (
   institution: string,
@@ -19,15 +17,14 @@ export const syncBankData = async (
   try {
     const isCreditUnion = institution.toLowerCase().includes('credit union');
     const specificContext = isCreditUnion 
-      ? `This is a Credit Union institution (${institution}). Include entries like 'Member Dividends', 'Loan Repayment', 'Share Contribution', or 'Co-op Purchase'.`
+      ? `This is a Credit Union institution (${institution}). Include entries like 'Member Dividends', 'Loan Repayment', 'Share Contribution'.`
       : `This is a standard commercial bank (${institution}).`;
 
     const prompt = `
       Simulate a JSON API response for ${institution}. 
-      The last sync was ${lastSynced}.
+      Last sync: ${lastSynced}.
       ${specificContext}
-      Generate a list of 2-3 realistic recent transactions that might have occurred since the last sync.
-      Include categories like 'Food', 'Transport', 'Shopping', 'Savings'.
+      Generate 2-3 realistic recent transactions.
     `;
 
     const response = await ai.models.generateContent({
@@ -61,8 +58,8 @@ export const syncBankData = async (
 };
 
 /**
- * Specifically for Investment platforms like Binance.
- * Pulls current holdings/quantities instead of just transactions.
+ * Investment Extraction (Binance/Vanguard).
+ * Now structured to return portfolio updates instead of just transactions.
  */
 export const syncInvestmentHoldings = async (
   provider: 'Binance' | 'Vanguard'
@@ -72,10 +69,10 @@ export const syncInvestmentHoldings = async (
 
   try {
     const prompt = `
-      Simulate a ${provider} API response for the current user's portfolio state.
-      Return a list of current holdings. 
-      For Binance, include BTC, ETH, and SOL with realistic "whale-like" quantities.
+      Simulate a ${provider} Portfolio API response.
+      For Binance, include current BTC, ETH, and SOL holdings with precise quantities.
       For Vanguard, include VOO and VOOG.
+      Format the response as a verification queue payload with updateType 'portfolio'.
     `;
 
     const response = await ai.models.generateContent({
@@ -112,19 +109,9 @@ export const syncInvestmentHoldings = async (
   }
 };
 
-/**
- * Specialized LUCELEC Portal Scraper Simulation
- * Target: https://myaccount.lucelec.com/app/login.jsp
- * User: NeilV
- */
 export const syncLucelecPortal = async (): Promise<{ balance: number; dueDate: string } | null> => {
-  // Simulate portal navigation and login
   console.log("Navigating to LUCELEC portal...");
   await new Promise(r => setTimeout(r, 1000));
-  console.log("Authenticating as NeilV...");
-  await new Promise(r => setTimeout(r, 1500));
-  
-  // Simulation of finding "My Current Bill" header
   const mockBalance = Math.floor(Math.random() * 150) + 85.50;
   const nextMonth = new Date();
   nextMonth.setMonth(nextMonth.getMonth() + 1);

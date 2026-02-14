@@ -36,13 +36,36 @@ const VerificationQueue: React.FC<Props> = ({ pendingItems, onApprove, onDiscard
                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white ${item.updateType === 'portfolio' ? 'bg-blue-500' : 'bg-indigo-600'}`}>
                   <i className={`fas ${item.updateType === 'portfolio' ? 'fa-chart-line' : 'fa-receipt'}`}></i>
                 </div>
-                <div>
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{item.updateType === 'portfolio' ? 'Portfolio Adjustment' : 'Suggested Transaction'}</p>
-                  <p className="font-black text-sm text-slate-800">{item.updateType === 'portfolio' ? `${item.portfolio?.provider}: Update ${item.portfolio?.symbol}` : item.transaction?.description || 'Extracted Entry'}</p>
+                <div className="flex-1">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                    {item.updateType === 'portfolio' ? 'Portfolio Adjustment' : (item.transaction?.vendor ? `Merchant: ${item.transaction.vendor}` : 'Suggested Transaction')}
+                  </p>
+                  <p className="font-black text-sm text-slate-800 truncate max-w-[150px]">
+                    {item.updateType === 'portfolio' ? `${item.portfolio?.provider}: Update ${item.portfolio?.symbol}` : item.transaction?.description || 'Extracted Entry'}
+                  </p>
                 </div>
               </div>
               <p className="font-black text-slate-900">{item.updateType === 'portfolio' ? `${item.portfolio?.quantity || 0}` : `$${(item.transaction?.amount || 0).toFixed(2)}`}</p>
             </div>
+
+            {/* Itemized Preview */}
+            {item.transaction?.lineItems && item.transaction.lineItems.length > 0 && (
+              <div className="mb-4 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Itemized Details</p>
+                <div className="space-y-1">
+                  {item.transaction.lineItems.slice(0, 3).map((li, lIdx) => (
+                    <div key={lIdx} className="flex justify-between text-[9px] font-bold text-slate-600">
+                      <span>{li.quantity}x {li.name}</span>
+                      <span>${li.price?.toFixed(2)}</span>
+                    </div>
+                  ))}
+                  {item.transaction.lineItems.length > 3 && (
+                    <p className="text-[8px] text-indigo-500 font-black italic">+{item.transaction.lineItems.length - 3} more items...</p>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="flex gap-2">
               <button onClick={() => onApprove(idx)} className="flex-1 py-3 bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest rounded-xl shadow-lg hover:bg-slate-800 transition active:scale-95">{item.updateType === 'portfolio' ? 'Sync Portfolio' : 'Quick Approve'}</button>
               <button onClick={() => onEdit(idx)} className="px-4 py-3 bg-slate-100 text-slate-600 text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-slate-200 transition">Edit</button>

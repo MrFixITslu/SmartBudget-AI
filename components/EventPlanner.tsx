@@ -69,7 +69,7 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
     return () => clearInterval(interval);
   }, [isVideoCallActive]);
 
-  // Initialize Network Bridge with Fallback Path
+  // Initialize Media Bridge with robust Fallback Path to prevent "Stuck" state
   useEffect(() => {
     if (isVideoCallActive && !localStream) {
       const initMedia = async () => {
@@ -82,11 +82,12 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
           setLocalStream(stream);
           setIsSimulated(false);
         } catch (err) {
-          console.warn("Network Access Denied - Switching to Strategy Mode (Simulator)");
+          console.warn("Hardware Access Denied - Switching to Strategy Mode (Simulator)");
           setIsSimulated(true);
           setIsCameraOff(true);
         } finally {
-          setIsConnecting(false);
+          // Use a small delay to ensure the UI transitions smoothly
+          setTimeout(() => setIsConnecting(false), 800);
         }
       };
       initMedia();
@@ -221,21 +222,21 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
 
   return (
     <div className={`space-y-6 pb-20 max-w-6xl mx-auto px-2 ${!isAdmin ? 'text-slate-200' : ''}`}>
-      {/* Presence Header - Real-time Network Status */}
-      <div className="flex items-center justify-between bg-slate-900/70 p-4 rounded-[3rem] border border-slate-800 backdrop-blur-3xl mb-8 shadow-2xl relative overflow-hidden group">
+      {/* Presence Header - Reverted to Satellite theme */}
+      <div className="flex items-center justify-between bg-slate-900/60 p-4 rounded-[3rem] border border-slate-800 backdrop-blur-2xl mb-8 shadow-2xl relative overflow-hidden group">
         <div className="absolute inset-0 bg-indigo-600/10 opacity-0 group-hover:opacity-100 transition-opacity"></div>
         <div className="flex items-center gap-5 relative z-10">
           <div className="flex -space-x-4">
             {MOCK_ONLINE_USERS.filter(u => u.online).map(u => (
-              <div key={u.id} className="w-12 h-12 rounded-full bg-slate-800 border-2 border-slate-900 flex items-center justify-center text-[11px] font-black uppercase ring-2 ring-indigo-500/30 shadow-2xl" title={`${u.name} online`}>
+              <div key={u.id} className="w-12 h-12 rounded-full bg-slate-800 border-2 border-slate-900 flex items-center justify-center text-[11px] font-black uppercase ring-2 ring-indigo-500/20 shadow-2xl" title={`${u.name} online`}>
                 {u.name[0]}
                 <span className="absolute bottom-0.5 right-0.5 w-3.5 h-3.5 bg-emerald-500 rounded-full border-2 border-slate-900 shadow-lg"></span>
               </div>
             ))}
           </div>
           <div>
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] block leading-none mb-1.5">Network Node Active</span>
-            <span className="text-[9px] font-extrabold text-emerald-400 uppercase tracking-widest bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">{MOCK_ONLINE_USERS.filter(u => u.online).length} Active Network Channels</span>
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] block leading-none mb-1.5">Satellite Uplink Active</span>
+            <span className="text-[9px] font-extrabold text-emerald-400 uppercase tracking-widest bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">{MOCK_ONLINE_USERS.filter(u => u.online).length} Peer Connections Established</span>
           </div>
         </div>
         <button 
@@ -243,28 +244,28 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
           className={`px-8 py-3.5 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all flex items-center gap-3 ${isVideoCallActive ? 'bg-rose-600 text-white animate-pulse shadow-rose-600/30 shadow-2xl' : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-indigo-600/30 shadow-2xl active:scale-95'}`}
         >
           <div className={`w-2.5 h-2.5 rounded-full ${isVideoCallActive ? 'bg-white' : 'bg-indigo-400'} animate-ping`}></div>
-          {isVideoCallActive ? 'Disconnect Channel' : 'Join Network Node'}
+          {isVideoCallActive ? 'Terminate Bridge' : 'Deploy Video Bridge'}
         </button>
       </div>
 
-      {/* Enhanced Network Call UI */}
+      {/* Enhanced Video Call UI - Satellite Flavor */}
       {isVideoCallActive && (
         <div className="space-y-6 mb-12 animate-in zoom-in-95 duration-500">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {/* Local Participant Card */}
             <div className={`bg-slate-900 rounded-[3.5rem] overflow-hidden border-2 relative aspect-video shadow-2xl transition-all duration-700 ${activeSpeaker === currentUser ? 'border-indigo-500 ring-8 ring-indigo-500/10 scale-[1.03]' : 'border-slate-800'}`}>
               
-              {/* Network Handshake Dashboard */}
+              {/* Uplink Dashboard - Fixed stuck state */}
               {isConnecting && (
                 <div className="absolute inset-0 z-30 bg-slate-950 flex flex-col items-center justify-center space-y-6">
                   <div className="relative">
                     <div className="w-20 h-20 border-4 border-indigo-500/30 rounded-full"></div>
                     <div className="absolute inset-0 w-20 h-20 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-                    <i className="fas fa-network-wired absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-indigo-400"></i>
+                    <i className="fas fa-satellite absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-indigo-400"></i>
                   </div>
-                  <div className="text-center">
-                    <p className="text-[12px] font-black text-white uppercase tracking-[0.4em] mb-2">Synchronizing Network Protocol</p>
-                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Handshaking with Data Cluster...</p>
+                  <div className="text-center px-6">
+                    <p className="text-[12px] font-black text-white uppercase tracking-[0.4em] mb-2">Establishing Secure Bridge</p>
+                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Handshaking with Signal Cluster...</p>
                   </div>
                 </div>
               )}
@@ -277,42 +278,42 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
                     {currentUser[0].toUpperCase()}
                   </div>
                   <div className="text-center space-y-1">
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Channel: Standby</p>
-                    <p className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest">{isSimulated ? 'Strategy Node Active' : 'Camera Suspended'}</p>
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Signal: Inactive</p>
+                    <p className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest">{isSimulated ? 'Strategy Fallback Active' : 'Camera Suspended'}</p>
                   </div>
                 </div>
               )}
               
-              {/* Overlay HUD - High Contrast Icons */}
+              {/* Overlay HUD - High Contrast Bright Icons */}
               <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-black/90 via-transparent to-black/40"></div>
               <div className="absolute top-6 left-6 flex items-center gap-4 pointer-events-none">
-                <div className="bg-indigo-600 px-4 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest text-white border border-white/20 shadow-2xl">Local Node</div>
-                <div className="bg-black/70 backdrop-blur-md px-3 py-1.5 rounded-xl text-[9px] font-black text-indigo-400 border border-indigo-500/30 uppercase tracking-widest">{simulatedBitrate.toFixed(0)} KBPS</div>
+                <div className="bg-indigo-600 px-4 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest text-white border border-white/20 shadow-2xl">Primary Node</div>
+                <div className="bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-xl text-[9px] font-black text-indigo-400 border border-indigo-500/30 uppercase tracking-widest">{simulatedBitrate.toFixed(0)} KBPS</div>
                 {isMuted && <div className="bg-rose-600 px-2.5 py-1.5 rounded-xl text-[11px] shadow-2xl border border-rose-400/50"><i className="fas fa-microphone-slash text-white"></i></div>}
               </div>
               
               <div className="absolute bottom-6 left-6 right-6 flex items-center justify-between">
-                <div className="bg-black/70 backdrop-blur-xl px-5 py-2.5 rounded-2xl border border-white/10 flex items-center gap-4">
+                <div className="bg-black/60 backdrop-blur-xl px-5 py-2.5 rounded-2xl border border-white/10 flex items-center gap-4">
                   <div className={`w-2.5 h-2.5 rounded-full shadow-[0_0_15px_rgba(16,185,129,0.5)] ${activeSpeaker === currentUser ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`}></div>
-                  <span className="text-[11px] font-black text-white uppercase tracking-[0.2em]">{currentUser} (Root)</span>
+                  <span className="text-[11px] font-black text-white uppercase tracking-[0.2em]">{currentUser} (Command)</span>
                 </div>
                 
-                {/* High Contrast Controls - Explicit text-white to ensure visibility */}
+                {/* High Contrast Controls - Explicit text-white brightness fixes */}
                 <div className="flex gap-3 pointer-events-auto">
-                  <button onClick={() => setIsMuted(!isMuted)} className={`w-12 h-12 rounded-2xl flex items-center justify-center border-2 transition-all shadow-2xl ${isMuted ? 'bg-rose-600 border-rose-500 text-white' : 'bg-indigo-600 border-indigo-500 text-white hover:bg-indigo-500'}`} title={isMuted ? "Activate Audio" : "Suspend Audio"}>
-                    <i className={`fas ${isMuted ? 'fa-microphone-slash' : 'fa-microphone'} text-lg text-white`}></i>
+                  <button onClick={() => setIsMuted(!isMuted)} className={`w-12 h-12 rounded-2xl flex items-center justify-center border-2 transition-all shadow-2xl ${isMuted ? 'bg-rose-600 border-rose-500 text-white' : 'bg-indigo-600 border-indigo-500 text-white hover:bg-indigo-500'}`}>
+                    <i className={`fas ${isMuted ? 'fa-microphone-slash' : 'fa-microphone'} text-lg text-white brightness-125`}></i>
                   </button>
-                  <button onClick={() => setIsCameraOff(!isCameraOff)} className={`w-12 h-12 rounded-2xl flex items-center justify-center border-2 transition-all shadow-2xl ${isCameraOff ? 'bg-rose-600 border-rose-500 text-white' : 'bg-indigo-600 border-indigo-500 text-white hover:bg-indigo-500'}`} title={isCameraOff ? "Resume Visuals" : "Suspend Visuals"}>
-                    <i className={`fas ${isCameraOff ? 'fa-video-slash' : 'fa-video'} text-lg text-white`}></i>
+                  <button onClick={() => setIsCameraOff(!isCameraOff)} className={`w-12 h-12 rounded-2xl flex items-center justify-center border-2 transition-all shadow-2xl ${isCameraOff ? 'bg-rose-600 border-rose-500 text-white' : 'bg-indigo-600 border-indigo-500 text-white hover:bg-indigo-500'}`}>
+                    <i className={`fas ${isCameraOff ? 'fa-video-slash' : 'fa-video'} text-lg text-white brightness-125`}></i>
                   </button>
-                  <button onClick={() => setIsCasting(!isCasting)} className={`w-12 h-12 rounded-2xl flex items-center justify-center border-2 transition-all shadow-2xl ${isCasting ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-indigo-600 border-indigo-500 text-white hover:bg-indigo-500'}`} title="Cast Data Frame">
-                    <i className="fas fa-desktop text-lg text-white"></i>
+                  <button onClick={() => setIsCasting(!isCasting)} className={`w-12 h-12 rounded-2xl flex items-center justify-center border-2 transition-all shadow-2xl ${isCasting ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-indigo-600 border-indigo-500 text-white hover:bg-indigo-500'}`}>
+                    <i className="fas fa-desktop text-lg text-white brightness-125"></i>
                   </button>
                 </div>
               </div>
             </div>
 
-            {/* Teammate Cards - Infrastructure Theme */}
+            {/* Teammate Cards - Fixed Contrast */}
             {MOCK_ONLINE_USERS.filter(u => u.online && u.name !== currentUser).map(u => (
               <div key={u.id} className={`bg-slate-900 rounded-[3.5rem] overflow-hidden border-2 relative aspect-video flex items-center justify-center group transition-all duration-700 ${activeSpeaker === u.name ? 'border-emerald-500 ring-8 ring-emerald-500/10 scale-[1.03]' : 'border-slate-800'}`}>
                 <div className="absolute inset-0 bg-slate-950 opacity-60 group-hover:opacity-40 transition-opacity"></div>
@@ -332,37 +333,37 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
                    ))}
                 </div>
 
-                <div className="absolute bottom-6 left-6 bg-black/60 backdrop-blur-xl px-5 py-2.5 rounded-2xl border border-white/10 flex items-center gap-4">
+                <div className="absolute bottom-6 left-6 bg-black/50 backdrop-blur-xl px-5 py-2.5 rounded-2xl border border-white/10 flex items-center gap-4">
                    <div className={`w-2.5 h-2.5 rounded-full shadow-2xl ${activeSpeaker === u.name ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`}></div>
                    <span className="text-[11px] font-black text-white uppercase tracking-[0.2em]">{u.name}</span>
                 </div>
 
                 {/* Collaborative Action Marker */}
                 <div className="absolute top-6 left-6 bg-indigo-600/90 border border-white/20 backdrop-blur-md px-4 py-2 rounded-xl flex items-center gap-3 transition-transform group-hover:scale-105 shadow-2xl">
-                   <i className="fas fa-bolt-lightning text-[10px] text-white"></i>
-                   <span className="text-[9px] font-black text-white uppercase tracking-widest">{u.name === 'Sarah' ? 'Syncing Ledger' : 'Reviewing Node'}</span>
+                   <i className="fas fa-pen-nib text-[10px] text-white"></i>
+                   <span className="text-[9px] font-black text-white uppercase tracking-widest">{u.name === 'Sarah' ? 'Editing Ledger' : 'Reviewing Matrix'}</span>
                 </div>
               </div>
             ))}
           </div>
 
-          {/* Broadcast Casting Area (Simulated Screen Share) */}
+          {/* Broadcast Casting Area - Satellite Flavor */}
           {isCasting && (
             <div className="bg-slate-950 border-2 border-indigo-500/50 rounded-[4rem] p-10 shadow-3xl animate-in slide-in-from-bottom-12 duration-700 relative overflow-hidden">
                <div className="absolute top-0 right-0 p-12 opacity-5 pointer-events-none">
-                 <i className="fas fa-server text-[180px] text-indigo-400"></i>
+                 <i className="fas fa-satellite-dish text-[180px] text-indigo-400"></i>
                </div>
                <div className="flex items-center justify-between mb-10 relative z-10">
                  <div className="flex items-center gap-6">
                     <div className="w-16 h-16 bg-indigo-600 rounded-[2rem] flex items-center justify-center text-white shadow-2xl border border-indigo-400/30">
-                      <i className="fas fa-cloud-binary text-2xl text-white"></i>
+                      <i className="fas fa-broadcast-tower text-2xl text-white"></i>
                     </div>
                     <div>
-                      <h3 className="text-2xl font-black text-white tracking-tight leading-none">High-Speed Data Casting</h3>
-                      <p className="text-[11px] text-indigo-400 font-black uppercase tracking-[0.4em] mt-3">Active Bit-Stream • TLS 1.3 Tunnel Established</p>
+                      <h3 className="text-2xl font-black text-white tracking-tight leading-none">Global Strategy Casting</h3>
+                      <p className="text-[11px] text-indigo-400 font-black uppercase tracking-[0.4em] mt-3">Active Data Stream • AES-256 Tunnel Established</p>
                     </div>
                  </div>
-                 <button onClick={() => setIsCasting(false)} className="px-8 py-4 bg-rose-600 hover:bg-rose-500 text-white rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] shadow-2xl transition-all active:scale-95">Terminate Link</button>
+                 <button onClick={() => setIsCasting(false)} className="px-8 py-4 bg-rose-600 hover:bg-rose-500 text-white rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] shadow-2xl transition-all active:scale-95">Terminate Cast</button>
                </div>
                <div className="bg-slate-900/50 border border-white/5 rounded-[4rem] aspect-[21/9] flex items-center justify-center relative group overflow-hidden">
                   <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-indigo-500/10 via-transparent to-transparent"></div>
@@ -370,7 +371,7 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
                      <div className="w-24 h-24 bg-slate-800 rounded-full flex items-center justify-center mx-auto shadow-2xl border border-indigo-500/20">
                         <i className="fas fa-microchip text-4xl text-indigo-400 animate-pulse"></i>
                      </div>
-                     <p className="text-slate-400 font-black uppercase text-[14px] tracking-[0.6em]">Architecture Frame Synchronizing...</p>
+                     <p className="text-slate-400 font-black uppercase text-[14px] tracking-[0.6em]">System Architecture Syncing...</p>
                   </div>
                   <div className="absolute bottom-12 flex gap-6">
                      <div className="px-6 py-2.5 bg-black/80 rounded-2xl text-[9px] font-black text-indigo-300 border border-indigo-500/20 uppercase tracking-widest">FPS: 60.0</div>
@@ -385,7 +386,7 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
       <div className="flex justify-between items-end mb-8">
         <div>
           <h2 className={`text-4xl font-black tracking-tighter ${isAdmin ? 'text-slate-800' : 'text-white'}`}>Project Matrix</h2>
-          <p className="text-[11px] text-slate-400 font-bold uppercase tracking-[0.3em] mt-1">Infrastructure Strategy Command</p>
+          <p className="text-[11px] text-slate-400 font-bold uppercase tracking-[0.3em] mt-1">Cross-Functional Strategy Command</p>
         </div>
         {isAdmin && !selectedEventId && (
           <button onClick={() => setShowAddForm(!showAddForm)} className="flex items-center gap-3 px-8 py-4 bg-indigo-600 text-white rounded-2xl text-[11px] font-black uppercase tracking-widest shadow-2xl hover:bg-indigo-500 transition-all active:scale-95">
@@ -398,11 +399,11 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
         <div className="p-12 bg-slate-900 border border-slate-800 rounded-[3.5rem] shadow-2xl animate-in zoom-in-95 mb-8">
           <div className="grid grid-cols-1 gap-8">
             <div>
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-2 block">Project Alias (Node Identity)</label>
-              <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. MISSION_SAVINGS_CLUSTER" className="w-full p-6 bg-slate-800 border border-slate-700 text-white rounded-3xl outline-none font-black text-xl focus:ring-4 focus:ring-indigo-500/20" />
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-2 block">Project Alias (Matrix Identity)</label>
+              <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. MISSION_RETIREMENT_2030" className="w-full p-6 bg-slate-800 border border-slate-700 text-white rounded-3xl outline-none font-black text-xl focus:ring-4 focus:ring-indigo-500/20" />
             </div>
           </div>
-          <button onClick={() => { if (!newName) return; onAddEvent({ name: newName, date: newDate, status: 'active' }); setShowAddForm(false); setNewName(''); }} className="w-full mt-8 py-6 bg-indigo-600 text-white font-black rounded-[2rem] shadow-2xl uppercase tracking-[0.2em] text-[12px] hover:bg-indigo-500 transition-all">Provision Network Frame</button>
+          <button onClick={() => { if (!newName) return; onAddEvent({ name: newName, date: newDate, status: 'active' }); setShowAddForm(false); setNewName(''); }} className="w-full mt-8 py-6 bg-indigo-600 text-white font-black rounded-[2rem] shadow-2xl uppercase tracking-[0.2em] text-[12px] hover:bg-indigo-500 transition-all">Deploy Operational Frame</button>
         </div>
       )}
 
@@ -430,14 +431,14 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
                 <div className="lg:col-span-2 space-y-6">
                   <div className="bg-slate-900/50 p-10 rounded-[3.5rem] border border-slate-800 shadow-xl backdrop-blur-md">
                     <div className="flex justify-between items-center mb-10">
-                      <h3 className="font-black text-white uppercase text-[10px] tracking-[0.4em]">Resource Flow Stream</h3>
+                      <h3 className="font-black text-white uppercase text-[10px] tracking-[0.4em]">Resource Allocation Stream</h3>
                       <div className="flex gap-6">
                         <div className="text-right">
-                          <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Inbound</p>
+                          <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Gross Inflow</p>
                           <p className="text-lg font-black text-emerald-400">${selectedEvent.items.filter(i => i.type === 'income').reduce((a,b) => a + b.amount, 0).toLocaleString()}</p>
                         </div>
                         <div className="text-right">
-                          <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Outbound</p>
+                          <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Gross Outflow</p>
                           <p className="text-lg font-black text-rose-400">${selectedEvent.items.filter(i => i.type === 'expense').reduce((a,b) => a + b.amount, 0).toLocaleString()}</p>
                         </div>
                       </div>
@@ -460,22 +461,22 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
                         </div>
                       )) : (
                         <div className="py-20 text-center border-2 border-dashed border-slate-800 rounded-[2.5rem]">
-                          <p className="text-slate-500 font-black uppercase text-[10px] tracking-widest">No stream data recorded</p>
+                          <p className="text-slate-500 font-black uppercase text-[10px] tracking-widest">No allocations recorded</p>
                         </div>
                       )}
                     </div>
                   </div>
                 </div>
                 <div className="bg-slate-900 p-8 rounded-[3.5rem] border border-slate-800 shadow-2xl h-fit">
-                   <h3 className="font-black text-white uppercase text-[10px] tracking-[0.3em] mb-8">Execute Bit-Entry</h3>
+                   <h3 className="font-black text-white uppercase text-[10px] tracking-[0.3em] mb-8">Execute Entry</h3>
                    <form onSubmit={handleAddItem} className="space-y-6">
                     <div><label className="text-[9px] font-black text-slate-500 uppercase ml-2 mb-2 block tracking-widest">Description</label><input name="description" className="w-full p-4 bg-slate-800 border border-slate-700 text-white rounded-2xl font-black text-xs outline-none focus:ring-2 focus:ring-indigo-500" required /></div>
                     <div><label className="text-[9px] font-black text-slate-500 uppercase ml-2 mb-2 block tracking-widest">Amount ($)</label><input name="amount" type="number" step="0.01" className="w-full p-4 bg-slate-800 border border-slate-700 text-white rounded-2xl font-black text-sm outline-none focus:ring-2 focus:ring-indigo-500" required /></div>
                     <div className="grid grid-cols-2 gap-4">
-                      <button type="button" className="py-3 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-[8px] tracking-widest">Type: Expense</button>
-                      <button type="button" className="py-3 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-[8px] tracking-widest">Cat: Other</button>
+                      <button type="button" onClick={() => {}} className="py-3 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-[8px] tracking-widest">Type: Expense</button>
+                      <button type="button" onClick={() => {}} className="py-3 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-[8px] tracking-widest">Cat: Other</button>
                     </div>
-                    <button type="submit" className="w-full py-5 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-[0.2em] text-[10px] hover:bg-indigo-500 transition-all">Broadcast Data</button>
+                    <button type="submit" className="w-full py-5 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-[0.2em] text-[10px] hover:bg-indigo-500 transition-all">Broadcast Log</button>
                    </form>
                 </div>
               </div>
@@ -485,9 +486,9 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 animate-in fade-in duration-300">
                 <div className="lg:col-span-2 bg-slate-900/50 p-10 rounded-[3.5rem] border border-slate-800 shadow-2xl backdrop-blur-md">
                   <div className="flex justify-between items-center mb-10">
-                    <h3 className="font-black text-white uppercase text-[10px] tracking-[0.4em]">Node Access Matrix</h3>
+                    <h3 className="font-black text-white uppercase text-[10px] tracking-[0.4em]">Project Access Matrix</h3>
                     <div className="px-4 py-2 bg-indigo-500/10 rounded-xl border border-indigo-500/20 text-[9px] font-black text-indigo-400 uppercase tracking-widest">
-                      {selectedEvent.memberUsernames?.length || 1} Valid Identities
+                      {selectedEvent.memberUsernames?.length || 1} Stakeholders
                     </div>
                   </div>
                   <div className="space-y-4">
@@ -499,14 +500,14 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
                           </div>
                           <div>
                             <p className="font-black text-md text-white">{username}</p>
-                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-1">{username === ADMIN_USER ? 'Node Origin (Admin)' : 'Channel Peer'}</p>
+                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-1">{username === ADMIN_USER ? 'Project Originator (Admin)' : 'Matrix Collaborator'}</p>
                           </div>
                         </div>
                         <div className="flex items-center gap-4">
                           <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
                           {isAdmin && username !== ADMIN_USER && (
                             <button onClick={() => handleRemoveMember(username)} className="w-12 h-12 rounded-xl bg-rose-500/10 text-rose-500 hover:bg-rose-600 hover:text-white transition-all shadow-lg flex items-center justify-center">
-                              <i className="fas fa-user-minus"></i>
+                              <i className="fas fa-user-minus text-white"></i>
                             </button>
                           )}
                         </div>
@@ -516,21 +517,21 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
                 </div>
                 {isAdmin && (
                   <div className="bg-slate-900 p-8 rounded-[3.5rem] border border-slate-800 shadow-2xl h-fit">
-                    <h3 className="font-black text-white uppercase text-[10px] tracking-[0.3em] mb-8">Grant Permission</h3>
+                    <h3 className="font-black text-white uppercase text-[10px] tracking-[0.3em] mb-8">Grant Access</h3>
                     <div className="p-5 bg-indigo-500/5 border border-indigo-500/10 rounded-2xl mb-8">
-                      <p className="text-[9px] text-slate-400 font-bold leading-relaxed uppercase tracking-widest">Map a peer's identity to this node for collaborative strategy development.</p>
+                      <p className="text-[9px] text-slate-400 font-bold leading-relaxed uppercase tracking-widest">Input the collaborator's login username to grant full project access within the Matrix.</p>
                     </div>
                     <div className="space-y-6">
                       <div>
-                        <label className="text-[9px] font-black text-slate-500 uppercase ml-2 mb-2 block tracking-widest">Peer Identity ID</label>
+                        <label className="text-[9px] font-black text-slate-500 uppercase ml-2 mb-2 block tracking-widest">Collaborator ID</label>
                         <input 
                           value={inviteUsername} 
                           onChange={e => setInviteUsername(e.target.value)} 
                           className="w-full p-4 bg-slate-800 border border-slate-700 text-white rounded-2xl font-black text-xs outline-none focus:ring-2 focus:ring-indigo-500" 
-                          placeholder="e.g. USER_ALPHA" 
+                          placeholder="e.g. Sarah2024" 
                         />
                       </div>
-                      <button onClick={handleAddMember} className="w-full py-5 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-[0.2em] text-[10px] hover:bg-indigo-500 transition-all">Authorize Node Access</button>
+                      <button onClick={handleAddMember} className="w-full py-5 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-[0.2em] text-[10px] hover:bg-indigo-500 transition-all">Authorize User</button>
                     </div>
                   </div>
                 )}
@@ -542,20 +543,20 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
                 <div className="lg:col-span-2 space-y-6">
                   <div className="bg-slate-900/50 p-10 rounded-[4rem] border border-slate-800 shadow-2xl min-h-[450px] backdrop-blur-md">
                     <div className="flex justify-between items-center mb-10">
-                      <h3 className="font-black text-white uppercase text-[10px] tracking-[0.4em]">Strategic Data Hub</h3>
+                      <h3 className="font-black text-white uppercase text-[10px] tracking-[0.4em]">Strategic Data Vault</h3>
                       <div className="text-right">
-                        <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Asset Status</p>
-                        <p className="text-[10px] font-black text-indigo-400 uppercase">{selectedEvent.files.length} Encrypted Blocks</p>
+                        <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Storage Status</p>
+                        <p className="text-[10px] font-black text-indigo-400 uppercase">{selectedEvent.files.length} Optimized Assets</p>
                       </div>
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-8">
                       {selectedEvent.files.map(file => (
                         <div key={file.id} className="p-8 bg-slate-800/40 border border-slate-700/50 rounded-[3rem] flex flex-col items-center text-center group relative cursor-pointer hover:bg-slate-800 hover:border-indigo-500/50 transition-all shadow-lg" onClick={() => setEditingFileId(file.id)}>
                           <div className="w-16 h-16 bg-slate-800 rounded-2xl flex items-center justify-center text-indigo-400 shadow-2xl mb-5 group-hover:scale-110 transition-transform border border-slate-700">
-                            <i className="fas fa-file-shield text-2xl text-white"></i>
+                            <i className="fas fa-file-invoice text-2xl text-white"></i>
                           </div>
                           <p className="font-black text-[11px] text-white truncate w-full mb-1">{file.name}</p>
-                          <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Rev {file.version} • {file.lastModifiedBy}</p>
+                          <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">v{file.version} • {file.lastModifiedBy}</p>
                           <div className="absolute top-4 right-4 w-2 h-2 bg-emerald-500 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"></div>
                         </div>
                       ))}
@@ -563,25 +564,25 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
                         <div className="w-12 h-12 bg-slate-800/30 rounded-2xl flex items-center justify-center mb-3 group-hover:bg-indigo-500/10">
                           <i className="fas fa-plus text-xl text-white"></i>
                         </div>
-                        <span className="text-[9px] font-black uppercase tracking-widest">Inject Block</span>
+                        <span className="text-[9px] font-black uppercase tracking-widest">Inject Asset</span>
                         <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
                       </div>
                     </div>
                   </div>
                 </div>
                 <div className="bg-slate-900 p-8 rounded-[3.5rem] border border-slate-800 shadow-2xl">
-                  <h3 className="font-black text-white uppercase text-[10px] tracking-[0.3em] mb-8">Revision Timeline</h3>
+                  <h3 className="font-black text-white uppercase text-[10px] tracking-[0.3em] mb-8">Version Feed</h3>
                   <div className="space-y-6">
                     {selectedEvent.files.length > 0 ? selectedEvent.files.slice(-4).reverse().map(f => (
                       <div key={f.id} className="text-[10px] font-medium text-slate-400 flex items-start gap-4 border-l-2 border-slate-800 pl-4 py-1">
                         <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full mt-1.5 -ml-[21px]"></div>
                         <div>
-                          <p className="font-black text-slate-300">Revision Rev{f.version}</p>
-                          <p className="mt-0.5">{f.lastModifiedBy} pushed <b className="text-white">{f.name}</b></p>
+                          <p className="font-black text-slate-300">Revision v{f.version}</p>
+                          <p className="mt-0.5">{f.lastModifiedBy} updated <b className="text-white">{f.name}</b></p>
                         </div>
                       </div>
                     )) : (
-                      <p className="text-[9px] font-black text-slate-600 uppercase tracking-widest text-center py-10">Timeline Empty</p>
+                      <p className="text-[9px] font-black text-slate-600 uppercase tracking-widest text-center py-10">No revisions found</p>
                     )}
                   </div>
                 </div>
@@ -591,7 +592,7 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
             {activeTab === 'tasks' && (
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 animate-in fade-in duration-300">
                 <div className="lg:col-span-2 bg-slate-900/50 p-10 rounded-[4rem] border border-slate-800 shadow-2xl backdrop-blur-md">
-                  <h3 className="font-black text-white uppercase text-[10px] tracking-[0.4em] mb-10">Network Objectives</h3>
+                  <h3 className="font-black text-white uppercase text-[10px] tracking-[0.4em] mb-10">Operational Roadmaps</h3>
                   <div className="space-y-4">
                     {selectedEvent.tasks.length > 0 ? selectedEvent.tasks.map(task => (
                       <div key={task.id} className={`p-6 bg-slate-800/40 border rounded-[2.5rem] flex items-center gap-6 group transition-all ${task.completed ? 'border-emerald-500/20 opacity-50' : 'border-slate-700/50 hover:border-indigo-500/30'}`}>
@@ -599,24 +600,24 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
                           onClick={() => handleUpdateEventWithVersion({...selectedEvent, tasks: selectedEvent.tasks.map(t => t.id === task.id ? {...t, completed: !t.completed} : t)})}
                           className={`w-12 h-12 rounded-2xl flex items-center justify-center border-2 transition-all shadow-lg ${task.completed ? 'bg-emerald-500 border-emerald-500 text-white shadow-emerald-500/20' : 'bg-slate-800 border-slate-700 hover:border-emerald-500/50 text-transparent'}`}
                         >
-                          <i className="fas fa-check text-sm"></i>
+                          <i className="fas fa-check text-sm text-white"></i>
                         </button>
                         <div>
                           <p className={`font-black text-md ${task.completed ? 'text-slate-500 line-through' : 'text-white'}`}>{task.text}</p>
-                          <p className="text-[9px] font-black text-slate-500 uppercase mt-1.5 tracking-widest">Assignee: {task.assignedToId}</p>
+                          <p className="text-[9px] font-black text-slate-500 uppercase mt-1.5 tracking-widest">Owner: {task.assignedToId}</p>
                         </div>
                       </div>
                     )) : (
                       <div className="py-20 text-center border-2 border-dashed border-slate-800 rounded-[3rem]">
-                        <p className="text-slate-500 font-black uppercase text-[10px] tracking-widest">No objectives active</p>
+                        <p className="text-slate-500 font-black uppercase text-[10px] tracking-widest">No objectives deployed</p>
                       </div>
                     )}
                   </div>
                 </div>
                 <div className="bg-slate-900 p-8 rounded-[3.5rem] border border-slate-800 shadow-2xl h-fit">
                    <h3 className="font-black text-white uppercase text-[10px] tracking-[0.3em] mb-8">Deploy Milestone</h3>
-                   <textarea value={taskText} onChange={e => setTaskText(e.target.value)} className="w-full p-6 bg-slate-800 border border-slate-700 text-white rounded-3xl font-black text-xs h-40 no-scrollbar outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Describe the milestone..."></textarea>
-                   <button onClick={handleAddTask} className="w-full mt-6 py-5 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-[0.2em] text-[10px] hover:bg-indigo-500 transition-all">Commit Milestone</button>
+                   <textarea value={taskText} onChange={e => setTaskText(e.target.value)} className="w-full p-6 bg-slate-800 border border-slate-700 text-white rounded-3xl font-black text-xs h-40 no-scrollbar outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Describe the objective..."></textarea>
+                   <button onClick={handleAddTask} className="w-full mt-6 py-5 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-[0.2em] text-[10px] hover:bg-indigo-500 transition-all">Publish Milestone</button>
                 </div>
               </div>
             )}
@@ -629,32 +630,32 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
                 <div className="absolute top-0 left-0 w-2 h-full bg-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity"></div>
                 <div className="flex justify-between items-start mb-12">
                   <div className="w-16 h-16 bg-slate-800 rounded-2xl flex items-center justify-center text-slate-600 group-hover:text-indigo-400 group-hover:bg-indigo-500/10 transition-all border border-slate-700">
-                    <i className="fas fa-network-wired text-2xl"></i>
+                    <i className="fas fa-layer-group text-2xl text-white"></i>
                   </div>
                   <div className="flex -space-x-3">
                     {(event.memberUsernames || [ADMIN_USER]).slice(0, 3).map(u => (
                       <div key={u} className="w-10 h-10 rounded-full bg-slate-800 border-2 border-slate-900 flex items-center justify-center text-[10px] font-black uppercase ring-2 ring-indigo-500/10" title={u}>{u[0]}</div>
                     ))}
                     {(event.memberUsernames?.length || 1) > 3 && (
-                      <div className="w-10 h-10 rounded-full bg-indigo-600 border-2 border-slate-900 flex items-center justify-center text-[9px] font-black">+{event.memberUsernames.length - 3}</div>
+                      <div className="w-10 h-10 rounded-full bg-indigo-600 border-2 border-slate-900 flex items-center justify-center text-[9px] font-black text-white">+{event.memberUsernames.length - 3}</div>
                     )}
                   </div>
                 </div>
                 <h3 className="font-black text-white text-2xl leading-none mb-4 group-hover:text-indigo-400 transition-colors tracking-tight">{event.name}</h3>
-                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.2em] mb-12">Node Modification: {new Date(event.lastUpdated).toLocaleDateString()}</p>
+                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.2em] mb-12">Modified: {new Date(event.lastUpdated).toLocaleDateString()}</p>
                 <div className="flex flex-wrap gap-3">
-                  <div className="bg-slate-800/60 px-4 py-2 rounded-xl text-[9px] font-black uppercase text-indigo-400 tracking-widest border border-slate-700/50">{event.files.length} Data Blocks</div>
-                  <div className="bg-slate-800/60 px-4 py-2 rounded-xl text-[9px] font-black uppercase text-emerald-400 tracking-widest border border-slate-700/50">{event.tasks.filter(t => t.completed).length}/{event.tasks.length} Sync'd</div>
+                  <div className="bg-slate-800/60 px-4 py-2 rounded-xl text-[9px] font-black uppercase text-indigo-400 tracking-widest border border-slate-700/50">{event.files.length} Assets</div>
+                  <div className="bg-slate-800/60 px-4 py-2 rounded-xl text-[9px] font-black uppercase text-emerald-400 tracking-widest border border-slate-700/50">{event.tasks.filter(t => t.completed).length}/{event.tasks.length} Resolved</div>
                 </div>
               </div>
            ))}
            {events.length === 0 && !isAdmin && (
              <div className="md:col-span-2 lg:col-span-3 py-24 text-center bg-slate-900/40 border-2 border-dashed border-slate-800 rounded-[4rem] backdrop-blur-md">
                <div className="w-20 h-20 bg-slate-800 rounded-[2rem] flex items-center justify-center text-slate-600 mx-auto mb-8 text-3xl shadow-2xl border border-slate-700">
-                 <i className="fas fa-lock"></i>
+                 <i className="fas fa-user-secret text-white"></i>
                </div>
-               <p className="text-slate-400 font-black uppercase text-sm tracking-[0.3em] mb-2">Network Isolation</p>
-               <p className="text-slate-600 text-[11px] font-bold uppercase tracking-widest">Contact Node Admin ("nsv") for Channel Map.</p>
+               <p className="text-slate-400 font-black uppercase text-sm tracking-[0.3em] mb-2">Access Denied</p>
+               <p className="text-slate-600 text-[11px] font-bold uppercase tracking-widest">Contact System Admin ("nsv") for Project Authorization.</p>
              </div>
            )}
         </div>
@@ -665,13 +666,13 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
         <div className="fixed inset-0 z-[300] bg-black/90 backdrop-blur-3xl flex items-center justify-center p-6">
           <div className="bg-slate-900 max-w-md w-full p-12 rounded-[4rem] border-2 border-rose-500 shadow-2xl animate-in zoom-in-95 duration-300">
              <div className="w-24 h-24 bg-rose-500/20 text-rose-500 rounded-[2rem] flex items-center justify-center text-4xl mx-auto mb-10 border border-rose-500/20 shadow-xl">
-               <i className="fas fa-rotate animate-spin-slow"></i>
+               <i className="fas fa-sync-alt animate-spin-slow"></i>
              </div>
-             <h3 className="text-2xl font-black text-white text-center mb-4 tracking-tight">Sync Conflict</h3>
-             <p className="text-slate-400 text-sm text-center mb-10 leading-relaxed font-medium">A peer identity updated <b>{conflictModal.fileName}</b> to <b>Rev{conflictModal.currentVersion + 1}</b> while your node was editing. To prevent data corruption, merge changes.</p>
+             <h3 className="text-2xl font-black text-white text-center mb-4 tracking-tight">Revision Conflict</h3>
+             <p className="text-slate-400 text-sm text-center mb-10 leading-relaxed font-medium">A collaborator has updated <b>{conflictModal.fileName}</b> to <b>v{conflictModal.currentVersion + 1}</b> while you were editing. To prevent data loss, you must merge the latest changes.</p>
              <div className="space-y-4">
-               <button onClick={() => setConflictModal(null)} className="w-full py-6 bg-indigo-600 text-white font-black rounded-[1.5rem] shadow-2xl uppercase tracking-[0.2em] text-[11px] hover:bg-indigo-500 transition-all">Merge Remote Changes</button>
-               <button onClick={() => setConflictModal(null)} className="w-full py-4 text-slate-500 font-black uppercase tracking-[0.2em] text-[9px] hover:text-rose-400 transition-all">Discard Node Cache</button>
+               <button onClick={() => setConflictModal(null)} className="w-full py-6 bg-indigo-600 text-white font-black rounded-[1.5rem] shadow-2xl uppercase tracking-[0.2em] text-[11px] hover:bg-indigo-500 transition-all">Pull Latest Revision</button>
+               <button onClick={() => setConflictModal(null)} className="w-full py-4 text-slate-500 font-black uppercase tracking-[0.2em] text-[9px] hover:text-rose-400 transition-all">Discard Local Studio State</button>
              </div>
           </div>
         </div>
@@ -683,31 +684,31 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
           <div className="flex items-center justify-between mb-10">
             <div className="flex items-center gap-8">
                <div className="w-16 h-16 bg-indigo-600 rounded-[2rem] flex items-center justify-center text-white text-3xl shadow-2xl shadow-indigo-500/20">
-                 <i className="fas fa-file-code text-white"></i>
+                 <i className="fas fa-file-invoice text-white"></i>
                </div>
                <div>
                  <h2 className="text-3xl font-black text-white tracking-tight">{selectedEvent?.files.find(f => f.id === editingFileId)?.name}</h2>
-                 <p className="text-[11px] text-indigo-400 font-black uppercase tracking-[0.4em] mt-2">Channel Studio: {currentUser} • Revision Rev{selectedEvent?.files.find(f => f.id === editingFileId)?.version}</p>
+                 <p className="text-[11px] text-indigo-400 font-black uppercase tracking-[0.4em] mt-2">Active Studio: {currentUser} • Revision v{selectedEvent?.files.find(f => f.id === editingFileId)?.version}</p>
                </div>
             </div>
             <div className="flex gap-4">
-              <button onClick={() => handleSaveFileDraft(editingFileId)} className="px-10 py-5 bg-emerald-600 text-white rounded-[1.5rem] font-black uppercase tracking-[0.2em] text-[12px] shadow-2xl shadow-emerald-500/20 hover:bg-emerald-500 transition-all active:scale-95">Commit Block</button>
-              <button onClick={() => setEditingFileId(null)} className="px-10 py-5 bg-slate-800 text-slate-400 rounded-[1.5rem] font-black uppercase tracking-[0.2em] text-[12px] hover:bg-slate-700 hover:text-white transition-all">Close Studio</button>
+              <button onClick={() => handleSaveFileDraft(editingFileId)} className="px-10 py-5 bg-emerald-600 text-white rounded-[1.5rem] font-black uppercase tracking-[0.2em] text-[12px] shadow-2xl shadow-emerald-500/20 hover:bg-emerald-500 transition-all active:scale-95">Commit Revision</button>
+              <button onClick={() => setEditingFileId(null)} className="px-10 py-5 bg-slate-800 text-slate-400 rounded-[1.5rem] font-black uppercase tracking-[0.2em] text-[12px] hover:bg-slate-700 hover:text-white transition-all">Exit Studio</button>
             </div>
           </div>
           <div className="flex-1 bg-slate-900/40 border border-slate-800 rounded-[4rem] p-16 shadow-inner overflow-y-auto no-scrollbar relative backdrop-blur-md">
              <div className="absolute top-10 right-10 flex items-center gap-4 bg-slate-800/60 px-5 py-2.5 rounded-2xl border border-white/5">
                <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse"></div>
-               <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Sarah is co-authoring</span>
+               <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Sarah is co-editing</span>
              </div>
              <textarea 
                className="w-full h-full bg-transparent border-none outline-none text-slate-200 font-medium leading-[2.2] resize-none text-xl placeholder:text-slate-700"
-               placeholder="Initialize strategic block drafting..."
-               defaultValue="NODE_STUDIO_LOG: Bitstream Active. Peer keystrokes are synchronized via TLS cluster. Committing will increment the global revision ID."
+               placeholder="Initiate strategic drafting session..."
+               defaultValue="PROJECT_MATRIX_LOG: Revision Active. All keystrokes are being buffered for peer synchronization. Committing updates will increment the global version ID."
              ></textarea>
           </div>
           <div className="mt-8 flex justify-center">
-            <p className="text-[10px] font-black text-slate-600 uppercase tracking-[0.5em]">Secure Infrastructure Environment • Network Tunnel Encrypted</p>
+            <p className="text-[10px] font-black text-slate-600 uppercase tracking-[0.5em]">Secure Operational Environment • Encrypted Stream Active</p>
           </div>
         </div>
       )}

@@ -72,15 +72,15 @@ const Settings: React.FC<Props> = ({
   const isFileSystemSupported = typeof window !== 'undefined' && !!(window as any).showDirectoryPicker;
   const isIframe = window.self !== window.top;
 
-  // Breakdown for formula: Assets (Banks + Cash) - (Budgets + Recurring) = Surplus
-  // UPDATED: Filter out credit unions from assets breakdown as requested.
-  const { totalAssets, totalBudgets, totalRecurring } = useMemo(() => {
-    const assets = bankConnections
+  // Breakdown for formula: Banks & Cash (Only) - (Budgets + Recurring) = Surplus
+  const { totalBanksAndCash, totalBudgets, totalRecurring } = useMemo(() => {
+    const bankSum = bankConnections
       .filter(c => c.institutionType === 'bank')
-      .reduce((acc: number, c) => acc + (c.openingBalance || 0), 0) + cashOpeningBalance;
+      .reduce((acc: number, c) => acc + (c.openingBalance || 0), 0);
+    const totalAssets = bankSum + cashOpeningBalance;
     const budgets = Object.values(categoryBudgets).reduce((acc: number, b) => acc + ((b as number) || 0), 0);
     const recurring = recurringExpenses.reduce((acc: number, e) => acc + (e.amount || 0), 0);
-    return { totalAssets: assets, totalBudgets: budgets, totalRecurring: recurring };
+    return { totalBanksAndCash: totalAssets, totalBudgets: budgets, totalRecurring: recurring };
   }, [bankConnections, cashOpeningBalance, categoryBudgets, recurringExpenses]);
 
   useEffect(() => {
@@ -321,7 +321,7 @@ const Settings: React.FC<Props> = ({
              <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-indigo-600 shadow-sm"><i className="fas fa-folder-open"></i></div>
-                <div><h3 className="text-sm font-black text-slate-800">Local Hard Drive Vault</h3><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Sync files to {vaultStatus === 'unlinked' ? 'a local folder' : 'linked vault'}</p></div>
+                <div><h3 className="text-sm font-black text-slate-800">Local Hard Drive Vault</h3><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Sync files to a local folder</p></div>
               </div>
               <button 
                 onClick={handleSetLocalVault}
@@ -332,7 +332,6 @@ const Settings: React.FC<Props> = ({
             </div>
             {isIframe && <p className="text-[8px] text-amber-500 font-black uppercase tracking-widest bg-amber-50 p-2 rounded-lg text-center"><i className="fas fa-exclamation-triangle mr-1"></i> Restricted in Preview (Iframe). IndexedDB vault active.</p>}
             {!isFileSystemSupported && !isIframe && <p className="text-[8px] text-rose-500 font-black uppercase tracking-widest bg-rose-50 p-2 rounded-lg text-center"><i className="fas fa-exclamation-triangle mr-1"></i> File System Access restricted in this browser session.</p>}
-            {vaultStatus === 'locked' && !isIframe && <p className="text-[8px] text-amber-600 font-black uppercase tracking-widest bg-amber-50 p-2 rounded-lg text-center"><i className="fas fa-lock mr-1"></i> Folder linked but permission required this session.</p>}
             {vaultStatus === 'active' && <p className="text-[9px] text-emerald-600 font-black uppercase tracking-widest bg-emerald-50 p-2 rounded-lg text-center"><i className="fas fa-shield-check mr-1"></i> Native File System Sync Enabled</p>}
           </section>
 
@@ -365,7 +364,7 @@ const Settings: React.FC<Props> = ({
             <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6">Financial Strategy Hub</label>
             <div className="space-y-8">
                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                 {/* UPDATED: Monthly Target Surplus derivation excludes credit unions from assets */}
+                 {/* UPDATED: Monthly Target Surplus derivation using 'Banks & Cash (Only)' as requested */}
                  <div className="p-6 bg-white/5 border border-white/10 rounded-2xl relative overflow-hidden group">
                    <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/10 rounded-full blur-2xl -mr-12 -mt-12 group-hover:bg-indigo-500/20 transition-all"></div>
                    <h3 className="text-lg font-black mb-1 relative z-10">Monthly Target Surplus</h3>
@@ -376,7 +375,7 @@ const Settings: React.FC<Props> = ({
                    <div className="mt-4 pt-4 border-t border-white/10 space-y-1 relative z-10">
                       <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest flex justify-between">
                         <span>Banks & Cash (Only)</span>
-                        <span className="text-emerald-400">+${totalAssets.toLocaleString()}</span>
+                        <span className="text-emerald-400">+${totalBanksAndCash.toLocaleString()}</span>
                       </p>
                       <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest flex justify-between">
                         <span>Monthly Commitments</span>
@@ -393,7 +392,7 @@ const Settings: React.FC<Props> = ({
                    <p className="text-[8px] text-slate-500 font-bold uppercase tracking-widest mt-1">Starting funds in wallet/physical safe</p>
                  </div>
                </div>
-               <div className="pt-4 border-t border-white/10"><h3 className="text-lg font-black mb-1">Monthly Category Limits</h3><div className="grid grid-cols-1 md:grid-cols-2 gap-4">{CATEGORIES.filter(c => !['Income', 'Savings', 'Investments', 'Other'].includes(c)).map(cat => (<div key={cat} className="bg-white/5 border border-white/5 rounded-2xl p-4 flex items-center justify-between group hover:bg-white/10 transition-colors"><div><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{cat}</p><div className="relative"><span className="absolute left-0 top-1/2 -translate-y-1/2 font-black text-indigo-400 text-xs">$</span><input type="number" value={categoryBudgets[cat] || ''} onChange={(e) => handleBudgetChange(cat, e.target.value)} className="bg-transparent border-none p-0 pl-3 outline-none font-black text-sm text-white w-24" /></div></div><div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-slate-500 group-hover:text-indigo-400 transition-colors"><i className="fas fa-bullseye text-[10px]"></i></div></div>))}</div></div>
+               <div className="pt-4 border-t border-white/10"><h3 className="text-lg font-black mb-1">Monthly Category Limits</h3><div className="grid grid-cols-1 md:grid-cols-2 gap-4">{CATEGORIES.filter(c => !['Income', 'Savings', 'Investments', 'Other', 'Transfer'].includes(c)).map(cat => (<div key={cat} className="bg-white/5 border border-white/5 rounded-2xl p-4 flex items-center justify-between group hover:bg-white/10 transition-colors"><div><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{cat}</p><div className="relative"><span className="absolute left-0 top-1/2 -translate-y-1/2 font-black text-indigo-400 text-xs">$</span><input type="number" value={categoryBudgets[cat] || ''} onChange={(e) => handleBudgetChange(cat, e.target.value)} className="bg-transparent border-none p-0 pl-3 outline-none font-black text-sm text-white w-24" /></div></div><div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-slate-500 group-hover:text-indigo-400 transition-colors"><i className="fas fa-bullseye text-[10px]"></i></div></div>))}</div></div>
             </div>
           </section>
 

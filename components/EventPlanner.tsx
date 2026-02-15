@@ -1,8 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { BudgetEvent, EventItem, EVENT_ITEM_CATEGORIES, ProjectTask, ProjectFile, ProjectNote, Contact, IOU, User } from '../types';
+import { BudgetEvent, EventItem, EVENT_ITEM_CATEGORIES, ProjectTask, ProjectFile, EventLog, Contact, User } from '../types';
 import { saveFileToHardDrive } from '../services/fileStorageService';
 
-// Define global admin identifier for project access control
 const ADMIN_USER = "nsv";
 
 interface Props {
@@ -11,7 +10,7 @@ interface Props {
   directoryHandle: FileSystemDirectoryHandle | null;
   currentUser: string;
   isAdmin: boolean;
-  onAddEvent: (event: Omit<BudgetEvent, 'id' | 'items' | 'notes' | 'tasks' | 'files' | 'contactIds' | 'memberUsernames' | 'ious' | 'lastUpdated'>) => void;
+  onAddEvent: (event: Omit<BudgetEvent, 'id' | 'items' | 'notes' | 'tasks' | 'files' | 'contactIds' | 'memberUsernames' | 'ious' | 'lastUpdated' | 'logs'>) => void;
   onDeleteEvent: (id: string) => void;
   onUpdateEvent: (event: BudgetEvent) => void;
   onUpdateContacts: (contacts: Contact[]) => void;
@@ -19,9 +18,8 @@ interface Props {
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
-type ProjectTab = 'ledger' | 'tasks' | 'vault' | 'team' | 'log';
+type ProjectTab = 'ledger' | 'tasks' | 'vault' | 'team' | 'directory' | 'log';
 
-// Collaborative Presence Mock Data for UI/UX demonstration
 const MOCK_ONLINE_USERS: User[] = [
   { id: 'u1', name: 'nsv', role: 'admin', online: true },
   { id: 'u2', name: 'Sarah', role: 'collaborator', online: true },
@@ -34,59 +32,52 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ProjectTab>('ledger');
   const [newName, setNewName] = useState('');
-  const [newDate, setNewDate] = useState(new Date().toISOString().split('T')[0]);
   
   const [taskText, setTaskText] = useState('');
   const [inviteUsername, setInviteUsername] = useState('');
+  const [subTaskInput, setSubTaskInput] = useState<{ taskId: string, text: string } | null>(null);
 
-  // Collaboration Specific State
+  const [isAddingContact, setIsAddingContact] = useState(false);
+  const [contactForm, setContactForm] = useState({ name: '', email: '', address: '', number: '' });
+
   const [isVideoCallActive, setIsVideoCallActive] = useState(false);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isCameraOff, setIsCameraOff] = useState(false);
-  const [isCasting, setIsCasting] = useState(false);
   const [activeSpeaker, setActiveSpeaker] = useState<string>('nsv');
-  const [isSimulated, setIsSimulated] = useState(false);
-  const [simulatedBitrate, setSimulatedBitrate] = useState(2400);
   
   const [editingFileId, setEditingFileId] = useState<string | null>(null);
-  const [conflictModal, setConflictModal] = useState<{ open: boolean, fileName: string, currentVersion: number } | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-
   const fileInputRef = useRef<HTMLInputElement>(null);
+
   const selectedEvent = useMemo(() => (events || []).find(e => e.id === selectedEventId), [events, selectedEventId]);
 
-  // Simulate active speaker switching and network jitter
-  useEffect(() => {
-    if (!isVideoCallActive) return;
-    const speakers = ['nsv', 'Sarah', 'John'];
-    const interval = setInterval(() => {
-      const randomSpeaker = speakers[Math.floor(Math.random() * speakers.length)];
-      setActiveSpeaker(randomSpeaker);
-      setSimulatedBitrate(prev => Math.max(1800, Math.min(3200, prev + (Math.random() * 200 - 100))));
-    }, 4500);
-    return () => clearInterval(interval);
-  }, [isVideoCallActive]);
+  const addActionLog = (event: BudgetEvent, action: string, type: EventLog['type']) => {
+    const newLog: EventLog = {
+      id: generateId(),
+      action,
+      timestamp: new Date().toISOString(),
+      username: currentUser,
+      type
+    };
+    onUpdateEvent({
+      ...event,
+      logs: [newLog, ...(event.logs || [])],
+      lastUpdated: new Date().toISOString()
+    });
+  };
 
-  // Initialize Media Bridge with robust Fallback Path to prevent "Stuck" state
   useEffect(() => {
     if (isVideoCallActive && !localStream) {
       const initMedia = async () => {
         setIsConnecting(true);
         try {
-          const stream = await navigator.mediaDevices.getUserMedia({ 
-            video: { width: 1280, height: 720 }, 
-            audio: true 
-          });
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
           setLocalStream(stream);
-          setIsSimulated(false);
         } catch (err) {
-          console.warn("Hardware Access Denied - Switching to Strategy Mode (Simulator)");
-          setIsSimulated(true);
           setIsCameraOff(true);
         } finally {
-          // Use a small delay to ensure the UI transitions smoothly
           setTimeout(() => setIsConnecting(false), 800);
         }
       };
@@ -97,16 +88,11 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
     }
   }, [isVideoCallActive]);
 
-  // Secure attachment of stream to video element
   useEffect(() => {
     if (videoRef.current && localStream && !isCameraOff) {
       videoRef.current.srcObject = localStream;
     }
   }, [localStream, isCameraOff]);
-
-  const handleUpdateEventWithVersion = (updated: BudgetEvent) => {
-    onUpdateEvent({ ...updated, lastUpdated: new Date().toISOString() });
-  };
 
   const handleAddItem = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -115,6 +101,7 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
     const amount = parseFloat(formData.get('amount') as string) || 0;
     const description = (formData.get('description') as string || '').trim();
     if (!description || isNaN(amount)) return;
+    
     const newItem: EventItem = {
       id: generateId(),
       description,
@@ -123,7 +110,9 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
       category: formData.get('category') as string,
       date: new Date().toISOString().split('T')[0]
     };
-    handleUpdateEventWithVersion({ ...selectedEvent, items: [...(selectedEvent.items || []), newItem] });
+
+    const updatedEvent = { ...selectedEvent, items: [...(selectedEvent.items || []), newItem] };
+    addActionLog(updatedEvent, `Added ${newItem.type}: "${description}" ($${amount})`, 'transaction');
     e.currentTarget.reset();
   };
 
@@ -133,54 +122,84 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
       id: generateId(),
       text: taskText.trim(),
       completed: false,
-      assignedToId: currentUser
+      assignedToId: currentUser,
+      subTasks: []
     };
-    handleUpdateEventWithVersion({ ...selectedEvent, tasks: [...(selectedEvent.tasks || []), newTask] });
+    const updatedEvent = { ...selectedEvent, tasks: [...(selectedEvent.tasks || []), newTask] };
+    addActionLog(updatedEvent, `Deployed milestone: "${newTask.text}"`, 'task');
     setTaskText('');
+  };
+
+  const handleAddSubTask = (parentTaskId: string) => {
+    if (!selectedEvent || !subTaskInput || !subTaskInput.text.trim()) return;
+    const newSubTask: ProjectTask = {
+      id: generateId(),
+      text: subTaskInput.text.trim(),
+      completed: false,
+      assignedToId: currentUser,
+      subTasks: []
+    };
+
+    const parentTask = selectedEvent.tasks.find(t => t.id === parentTaskId);
+    const updatedTasks = selectedEvent.tasks.map(t => {
+      if (t.id === parentTaskId) {
+        return { ...t, subTasks: [...(t.subTasks || []), newSubTask] };
+      }
+      return t;
+    });
+
+    const updatedEvent = { ...selectedEvent, tasks: updatedTasks };
+    addActionLog(updatedEvent, `Added sub-task "${newSubTask.text}" to "${parentTask?.text}"`, 'task');
+    setSubTaskInput(null);
+  };
+
+  const toggleTaskCompletion = (taskId: string, parentTaskId?: string) => {
+    if (!selectedEvent) return;
+    
+    let taskName = "";
+    let updatedTasks: ProjectTask[];
+    if (parentTaskId) {
+      updatedTasks = selectedEvent.tasks.map(t => {
+        if (t.id === parentTaskId) {
+          const sub = (t.subTasks || []).find(st => st.id === taskId);
+          taskName = sub?.text || "";
+          return {
+            ...t,
+            subTasks: (t.subTasks || []).map(st => st.id === taskId ? { ...st, completed: !st.completed } : st)
+          };
+        }
+        return t;
+      });
+    } else {
+      updatedTasks = selectedEvent.tasks.map(t => {
+        if (t.id === taskId) {
+          taskName = t.text;
+          return { ...t, completed: !t.completed };
+        }
+        return t;
+      });
+    }
+    
+    const updatedEvent = { ...selectedEvent, tasks: updatedTasks };
+    addActionLog(updatedEvent, `Marked task "${taskName}" as ${updatedTasks.find(t => t.id === (parentTaskId || taskId))?.completed ? 'resolved' : 'pending'}`, 'task');
   };
 
   const handleAddMember = () => {
     if (!selectedEvent || !inviteUsername.trim()) return;
     const currentMembers = selectedEvent.memberUsernames || [];
-    const normalizedUsername = inviteUsername.trim().toLowerCase();
+    if (currentMembers.includes(inviteUsername.trim())) return;
     
-    if (currentMembers.some(m => m.toLowerCase() === normalizedUsername)) {
-      alert("User is already a project member.");
-      return;
-    }
-    
-    handleUpdateEventWithVersion({ 
+    const updatedEvent = { 
       ...selectedEvent, 
       memberUsernames: [...currentMembers, inviteUsername.trim()] 
-    });
+    };
+    addActionLog(updatedEvent, `Authorized user "${inviteUsername.trim()}" for project access`, 'team');
     setInviteUsername('');
-  };
-
-  const handleRemoveMember = (username: string) => {
-    if (!selectedEvent || username === ADMIN_USER) return;
-    if (confirm(`Are you sure you want to revoke project access for "${username}"?`)) {
-      handleUpdateEventWithVersion({
-        ...selectedEvent,
-        memberUsernames: selectedEvent.memberUsernames.filter(u => u !== username)
-      });
-    }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!selectedEvent || !file) return;
-
-    let storageRef = generateId();
-    let storageType: 'indexeddb' | 'filesystem' = 'indexeddb';
-
-    if (directoryHandle) {
-      try {
-        storageRef = await saveFileToHardDrive(directoryHandle, selectedEvent.name, file.name, file);
-        storageType = 'filesystem';
-      } catch (err) { 
-        console.warn("Hard drive storage failed, falling back to IndexedDB:", err); 
-      }
-    }
 
     const newFile: ProjectFile = {
       id: generateId(),
@@ -188,41 +207,53 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
       type: file.type,
       size: file.size,
       timestamp: new Date().toISOString(),
-      storageRef,
-      storageType,
+      storageRef: generateId(),
+      storageType: 'indexeddb',
       version: 1,
       lastModifiedBy: currentUser
     };
     
-    handleUpdateEventWithVersion({ ...selectedEvent, files: [...(selectedEvent.files || []), newFile] });
+    const updatedEvent = { ...selectedEvent, files: [...(selectedEvent.files || []), newFile] };
+    addActionLog(updatedEvent, `Injected asset: "${file.name}"`, 'file');
   };
 
-  const handleSaveFileDraft = (fileId: string) => {
-    if (!selectedEvent) return;
-    const file = selectedEvent.files.find(f => f.id === fileId);
-    if (!file) return;
+  const handleAddContactToProject = () => {
+    if (!selectedEvent || !contactForm.name.trim()) return;
+    const newContact: Contact = {
+      id: generateId(),
+      name: contactForm.name.trim(),
+      email: contactForm.email.trim(),
+      address: contactForm.address.trim(),
+      number: contactForm.number.trim(),
+    };
 
-    const isConflictDetected = Math.random() > 0.85; 
-    if (isConflictDetected) {
-      setConflictModal({ open: true, fileName: file.name, currentVersion: file.version });
-      return;
-    }
+    onUpdateContacts([...contacts, newContact]);
+    const updatedEvent = {
+      ...selectedEvent,
+      contactIds: [...(selectedEvent.contactIds || []), newContact.id]
+    };
+    addActionLog(updatedEvent, `Integrated stakeholder: "${newContact.name}"`, 'contact');
 
-    const updatedFiles = selectedEvent.files.map(f => 
-      f.id === fileId ? { 
-        ...f, 
-        version: f.version + 1, 
-        lastModifiedBy: currentUser, 
-        timestamp: new Date().toISOString() 
-      } : f
-    );
-    handleUpdateEventWithVersion({ ...selectedEvent, files: updatedFiles });
-    setEditingFileId(null);
+    setIsAddingContact(false);
+    setContactForm({ name: '', email: '', address: '', number: '' });
+  };
+
+  const projectContacts = useMemo(() => {
+    if (!selectedEvent) return [];
+    return contacts.filter(c => selectedEvent.contactIds?.includes(c.id));
+  }, [contacts, selectedEvent]);
+
+  const getTimeAgo = (timestamp: string) => {
+    const seconds = Math.floor((new Date().getTime() - new Date(timestamp).getTime()) / 1000);
+    if (seconds < 60) return 'just now';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+    return new Date(timestamp).toLocaleDateString();
   };
 
   return (
     <div className={`space-y-6 pb-20 max-w-6xl mx-auto px-2 ${!isAdmin ? 'text-slate-200' : ''}`}>
-      {/* Presence Header - Reverted to Satellite theme */}
+      {/* Presence Header */}
       <div className="flex items-center justify-between bg-slate-900/60 p-4 rounded-[3rem] border border-slate-800 backdrop-blur-2xl mb-8 shadow-2xl relative overflow-hidden group">
         <div className="absolute inset-0 bg-indigo-600/10 opacity-0 group-hover:opacity-100 transition-opacity"></div>
         <div className="flex items-center gap-5 relative z-10">
@@ -248,141 +279,6 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
         </button>
       </div>
 
-      {/* Enhanced Video Call UI - Satellite Flavor */}
-      {isVideoCallActive && (
-        <div className="space-y-6 mb-12 animate-in zoom-in-95 duration-500">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {/* Local Participant Card */}
-            <div className={`bg-slate-900 rounded-[3.5rem] overflow-hidden border-2 relative aspect-video shadow-2xl transition-all duration-700 ${activeSpeaker === currentUser ? 'border-indigo-500 ring-8 ring-indigo-500/10 scale-[1.03]' : 'border-slate-800'}`}>
-              
-              {/* Uplink Dashboard - Fixed stuck state */}
-              {isConnecting && (
-                <div className="absolute inset-0 z-30 bg-slate-950 flex flex-col items-center justify-center space-y-6">
-                  <div className="relative">
-                    <div className="w-20 h-20 border-4 border-indigo-500/30 rounded-full"></div>
-                    <div className="absolute inset-0 w-20 h-20 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-                    <i className="fas fa-satellite absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-indigo-400"></i>
-                  </div>
-                  <div className="text-center px-6">
-                    <p className="text-[12px] font-black text-white uppercase tracking-[0.4em] mb-2">Establishing Secure Bridge</p>
-                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Handshaking with Signal Cluster...</p>
-                  </div>
-                </div>
-              )}
-
-              {!isCameraOff ? (
-                <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover grayscale-[0.2] brightness-90 contrast-110" />
-              ) : (
-                <div className="w-full h-full bg-slate-950 flex flex-col items-center justify-center space-y-6">
-                  <div className="w-28 h-28 rounded-full bg-slate-800 border-4 border-slate-700 flex items-center justify-center text-4xl font-black text-white shadow-2xl">
-                    {currentUser[0].toUpperCase()}
-                  </div>
-                  <div className="text-center space-y-1">
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Signal: Inactive</p>
-                    <p className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest">{isSimulated ? 'Strategy Fallback Active' : 'Camera Suspended'}</p>
-                  </div>
-                </div>
-              )}
-              
-              {/* Overlay HUD - High Contrast Bright Icons */}
-              <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-black/90 via-transparent to-black/40"></div>
-              <div className="absolute top-6 left-6 flex items-center gap-4 pointer-events-none">
-                <div className="bg-indigo-600 px-4 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest text-white border border-white/20 shadow-2xl">Primary Node</div>
-                <div className="bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-xl text-[9px] font-black text-indigo-400 border border-indigo-500/30 uppercase tracking-widest">{simulatedBitrate.toFixed(0)} KBPS</div>
-                {isMuted && <div className="bg-rose-600 px-2.5 py-1.5 rounded-xl text-[11px] shadow-2xl border border-rose-400/50"><i className="fas fa-microphone-slash text-white"></i></div>}
-              </div>
-              
-              <div className="absolute bottom-6 left-6 right-6 flex items-center justify-between">
-                <div className="bg-black/60 backdrop-blur-xl px-5 py-2.5 rounded-2xl border border-white/10 flex items-center gap-4">
-                  <div className={`w-2.5 h-2.5 rounded-full shadow-[0_0_15px_rgba(16,185,129,0.5)] ${activeSpeaker === currentUser ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`}></div>
-                  <span className="text-[11px] font-black text-white uppercase tracking-[0.2em]">{currentUser} (Command)</span>
-                </div>
-                
-                {/* High Contrast Controls - Explicit text-white brightness fixes */}
-                <div className="flex gap-3 pointer-events-auto">
-                  <button onClick={() => setIsMuted(!isMuted)} className={`w-12 h-12 rounded-2xl flex items-center justify-center border-2 transition-all shadow-2xl ${isMuted ? 'bg-rose-600 border-rose-500 text-white' : 'bg-indigo-600 border-indigo-500 text-white hover:bg-indigo-500'}`}>
-                    <i className={`fas ${isMuted ? 'fa-microphone-slash' : 'fa-microphone'} text-lg text-white brightness-125`}></i>
-                  </button>
-                  <button onClick={() => setIsCameraOff(!isCameraOff)} className={`w-12 h-12 rounded-2xl flex items-center justify-center border-2 transition-all shadow-2xl ${isCameraOff ? 'bg-rose-600 border-rose-500 text-white' : 'bg-indigo-600 border-indigo-500 text-white hover:bg-indigo-500'}`}>
-                    <i className={`fas ${isCameraOff ? 'fa-video-slash' : 'fa-video'} text-lg text-white brightness-125`}></i>
-                  </button>
-                  <button onClick={() => setIsCasting(!isCasting)} className={`w-12 h-12 rounded-2xl flex items-center justify-center border-2 transition-all shadow-2xl ${isCasting ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-indigo-600 border-indigo-500 text-white hover:bg-indigo-500'}`}>
-                    <i className="fas fa-desktop text-lg text-white brightness-125"></i>
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Teammate Cards - Fixed Contrast */}
-            {MOCK_ONLINE_USERS.filter(u => u.online && u.name !== currentUser).map(u => (
-              <div key={u.id} className={`bg-slate-900 rounded-[3.5rem] overflow-hidden border-2 relative aspect-video flex items-center justify-center group transition-all duration-700 ${activeSpeaker === u.name ? 'border-emerald-500 ring-8 ring-emerald-500/10 scale-[1.03]' : 'border-slate-800'}`}>
-                <div className="absolute inset-0 bg-slate-950 opacity-60 group-hover:opacity-40 transition-opacity"></div>
-                
-                <div className={`w-28 h-28 rounded-full flex items-center justify-center text-4xl font-black text-slate-400 uppercase border-4 transition-all duration-500 ${activeSpeaker === u.name ? 'bg-slate-800 border-emerald-500 scale-110 shadow-[0_0_40px_rgba(16,185,129,0.25)] text-white' : 'bg-slate-800 border-slate-700'}`}>
-                  {u.name[0]}
-                  {activeSpeaker === u.name && (
-                    <div className="absolute -bottom-2 -right-2 w-8 h-8 bg-emerald-500 rounded-full border-4 border-slate-900 flex items-center justify-center text-[10px] text-white shadow-2xl">
-                      <i className="fas fa-volume-up"></i>
-                    </div>
-                  )}
-                </div>
-
-                <div className="absolute top-6 right-6 flex items-center gap-2 opacity-80">
-                   {[1,2,3,4,5].map(bar => (
-                     <div key={bar} className={`w-1.5 rounded-full transition-all duration-300 ${activeSpeaker === u.name ? 'bg-emerald-400' : 'bg-slate-700'} ${bar === 5 ? 'h-4' : bar === 4 ? 'h-3.5' : bar === 3 ? 'h-3' : bar === 2 ? 'h-2.5' : 'h-2'}`} style={{ height: activeSpeaker === u.name ? `${Math.random() * 14 + 6}px` : undefined }}></div>
-                   ))}
-                </div>
-
-                <div className="absolute bottom-6 left-6 bg-black/50 backdrop-blur-xl px-5 py-2.5 rounded-2xl border border-white/10 flex items-center gap-4">
-                   <div className={`w-2.5 h-2.5 rounded-full shadow-2xl ${activeSpeaker === u.name ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`}></div>
-                   <span className="text-[11px] font-black text-white uppercase tracking-[0.2em]">{u.name}</span>
-                </div>
-
-                {/* Collaborative Action Marker */}
-                <div className="absolute top-6 left-6 bg-indigo-600/90 border border-white/20 backdrop-blur-md px-4 py-2 rounded-xl flex items-center gap-3 transition-transform group-hover:scale-105 shadow-2xl">
-                   <i className="fas fa-pen-nib text-[10px] text-white"></i>
-                   <span className="text-[9px] font-black text-white uppercase tracking-widest">{u.name === 'Sarah' ? 'Editing Ledger' : 'Reviewing Matrix'}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Broadcast Casting Area - Satellite Flavor */}
-          {isCasting && (
-            <div className="bg-slate-950 border-2 border-indigo-500/50 rounded-[4rem] p-10 shadow-3xl animate-in slide-in-from-bottom-12 duration-700 relative overflow-hidden">
-               <div className="absolute top-0 right-0 p-12 opacity-5 pointer-events-none">
-                 <i className="fas fa-satellite-dish text-[180px] text-indigo-400"></i>
-               </div>
-               <div className="flex items-center justify-between mb-10 relative z-10">
-                 <div className="flex items-center gap-6">
-                    <div className="w-16 h-16 bg-indigo-600 rounded-[2rem] flex items-center justify-center text-white shadow-2xl border border-indigo-400/30">
-                      <i className="fas fa-broadcast-tower text-2xl text-white"></i>
-                    </div>
-                    <div>
-                      <h3 className="text-2xl font-black text-white tracking-tight leading-none">Global Strategy Casting</h3>
-                      <p className="text-[11px] text-indigo-400 font-black uppercase tracking-[0.4em] mt-3">Active Data Stream • AES-256 Tunnel Established</p>
-                    </div>
-                 </div>
-                 <button onClick={() => setIsCasting(false)} className="px-8 py-4 bg-rose-600 hover:bg-rose-500 text-white rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] shadow-2xl transition-all active:scale-95">Terminate Cast</button>
-               </div>
-               <div className="bg-slate-900/50 border border-white/5 rounded-[4rem] aspect-[21/9] flex items-center justify-center relative group overflow-hidden">
-                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-indigo-500/10 via-transparent to-transparent"></div>
-                  <div className="text-center space-y-6 relative z-10">
-                     <div className="w-24 h-24 bg-slate-800 rounded-full flex items-center justify-center mx-auto shadow-2xl border border-indigo-500/20">
-                        <i className="fas fa-microchip text-4xl text-indigo-400 animate-pulse"></i>
-                     </div>
-                     <p className="text-slate-400 font-black uppercase text-[14px] tracking-[0.6em]">System Architecture Syncing...</p>
-                  </div>
-                  <div className="absolute bottom-12 flex gap-6">
-                     <div className="px-6 py-2.5 bg-black/80 rounded-2xl text-[9px] font-black text-indigo-300 border border-indigo-500/20 uppercase tracking-widest">FPS: 60.0</div>
-                     <div className="px-6 py-2.5 bg-black/80 rounded-2xl text-[9px] font-black text-emerald-400 border border-emerald-500/20 uppercase tracking-widest">STATUS: OPTIMAL</div>
-                  </div>
-               </div>
-            </div>
-          )}
-        </div>
-      )}
-
       <div className="flex justify-between items-end mb-8">
         <div>
           <h2 className={`text-4xl font-black tracking-tighter ${isAdmin ? 'text-slate-800' : 'text-white'}`}>Project Matrix</h2>
@@ -396,30 +292,27 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
       </div>
 
       {showAddForm && !selectedEventId && (
-        <div className="p-12 bg-slate-900 border border-slate-800 rounded-[3.5rem] shadow-2xl animate-in zoom-in-95 mb-8">
-          <div className="grid grid-cols-1 gap-8">
-            <div>
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-2 block">Project Alias (Matrix Identity)</label>
-              <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. MISSION_RETIREMENT_2030" className="w-full p-6 bg-slate-800 border border-slate-700 text-white rounded-3xl outline-none font-black text-xl focus:ring-4 focus:ring-indigo-500/20" />
-            </div>
+        <div className="p-12 bg-white border border-slate-100 rounded-[3.5rem] shadow-2xl animate-in zoom-in-95 mb-8">
+          <div>
+            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-2 block">Project Alias (Matrix Identity)</label>
+            <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. MISSION_RETIREMENT_2030" className="w-full p-6 bg-slate-50 border border-slate-200 text-slate-800 rounded-3xl outline-none font-black text-xl focus:ring-4 focus:ring-indigo-500/20" />
           </div>
-          <button onClick={() => { if (!newName) return; onAddEvent({ name: newName, date: newDate, status: 'active' }); setShowAddForm(false); setNewName(''); }} className="w-full mt-8 py-6 bg-indigo-600 text-white font-black rounded-[2rem] shadow-2xl uppercase tracking-[0.2em] text-[12px] hover:bg-indigo-500 transition-all">Deploy Operational Frame</button>
+          <button onClick={() => { if (!newName) return; onAddEvent({ name: newName, date: new Date().toISOString().split('T')[0], status: 'active' }); setShowAddForm(false); setNewName(''); }} className="w-full mt-8 py-6 bg-indigo-600 text-white font-black rounded-[2rem] shadow-2xl uppercase tracking-[0.2em] text-[12px] hover:bg-indigo-500 transition-all">Deploy Operational Frame</button>
         </div>
       )}
 
       {selectedEventId && selectedEvent ? (
         <div className="animate-in fade-in slide-in-from-bottom-6 duration-500">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-8 mb-10 bg-indigo-600 p-8 rounded-[3.5rem] shadow-2xl relative overflow-hidden">
-             <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 blur-[80px] rounded-full -translate-y-1/2 translate-x-1/2"></div>
              <div className="flex items-center gap-6 relative z-10">
                <button onClick={() => setSelectedEventId(null)} className="w-14 h-14 flex items-center justify-center bg-white/15 text-white rounded-2xl hover:bg-white/25 transition-all active:scale-90"><i className="fas fa-chevron-left"></i></button>
                <div>
                  <h2 className="text-3xl font-black text-white tracking-tight leading-none">{selectedEvent.name}</h2>
-                 <p className="text-[10px] text-white/70 font-black uppercase tracking-[0.3em] mt-2">Last Revision: {selectedEvent.lastUpdated ? new Date(selectedEvent.lastUpdated).toLocaleTimeString() : 'Origin'}</p>
+                 <p className="text-[10px] text-white/70 font-black uppercase tracking-[0.3em] mt-2">Active Framework</p>
                </div>
              </div>
              <div className="flex bg-black/30 p-2 rounded-3xl border border-white/10 overflow-x-auto no-scrollbar max-w-full relative z-10 backdrop-blur-md">
-               {(['ledger', 'tasks', 'vault', 'team', 'log'] as ProjectTab[]).map(tab => (
+               {(['ledger', 'tasks', 'vault', 'team', 'directory', 'log'] as ProjectTab[]).map(tab => (
                  <button key={tab} onClick={() => setActiveTab(tab)} className={`px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all min-w-max ${activeTab === tab ? 'bg-white text-slate-900 shadow-2xl' : 'text-white/60 hover:text-white hover:bg-white/5'}`}>{tab}</button>
                ))}
              </div>
@@ -429,52 +322,38 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
             {activeTab === 'ledger' && (
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 animate-in fade-in duration-300">
                 <div className="lg:col-span-2 space-y-6">
-                  <div className="bg-slate-900/50 p-10 rounded-[3.5rem] border border-slate-800 shadow-xl backdrop-blur-md">
-                    <div className="flex justify-between items-center mb-10">
-                      <h3 className="font-black text-white uppercase text-[10px] tracking-[0.4em]">Resource Allocation Stream</h3>
-                      <div className="flex gap-6">
-                        <div className="text-right">
-                          <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Gross Inflow</p>
-                          <p className="text-lg font-black text-emerald-400">${selectedEvent.items.filter(i => i.type === 'income').reduce((a,b) => a + b.amount, 0).toLocaleString()}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Gross Outflow</p>
-                          <p className="text-lg font-black text-rose-400">${selectedEvent.items.filter(i => i.type === 'expense').reduce((a,b) => a + b.amount, 0).toLocaleString()}</p>
-                        </div>
-                      </div>
-                    </div>
+                  <div className="bg-white p-10 rounded-[3.5rem] border border-slate-100 shadow-xl">
+                    <h3 className="font-black text-slate-800 uppercase text-[10px] tracking-[0.4em] mb-10">Resource Allocation Stream</h3>
                     <div className="space-y-4">
                       {selectedEvent.items.length > 0 ? selectedEvent.items.map(item => (
-                        <div key={item.id} className="p-6 bg-slate-800/40 border border-slate-700/50 rounded-[2rem] flex items-center justify-between group hover:bg-slate-800 hover:border-indigo-500/30 transition-all">
+                        <div key={item.id} className="p-6 bg-slate-50 border border-slate-100 rounded-[2rem] flex items-center justify-between group hover:bg-white hover:border-indigo-500/30 transition-all">
                           <div className="flex items-center gap-6">
-                            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-lg ${item.type === 'income' ? 'bg-emerald-500/15 text-emerald-400 shadow-emerald-500/5' : 'bg-rose-500/15 text-rose-400 shadow-rose-500/5'}`}>
+                            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-lg ${item.type === 'income' ? 'bg-emerald-500/15 text-emerald-600' : 'bg-rose-500/15 text-rose-600'}`}>
                               <i className={`fas ${item.type === 'income' ? 'fa-plus-circle' : 'fa-minus-circle'}`}></i>
                             </div>
                             <div>
-                              <p className="font-black text-sm text-white">{item.description}</p>
-                              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-1">{item.category} • {item.date}</p>
+                              <p className="font-black text-sm text-slate-800">{item.description}</p>
+                              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-1">{item.category} • {item.date}</p>
                             </div>
                           </div>
-                          <p className={`font-black text-xl ${item.type === 'income' ? 'text-emerald-400' : 'text-white'}`}>
-                            {item.type === 'income' ? '+' : '-'}${item.amount.toLocaleString()}
-                          </p>
+                          <p className={`font-black text-xl ${item.type === 'income' ? 'text-emerald-600' : 'text-slate-900'}`}>${item.amount.toLocaleString()}</p>
                         </div>
-                      )) : (
-                        <div className="py-20 text-center border-2 border-dashed border-slate-800 rounded-[2.5rem]">
-                          <p className="text-slate-500 font-black uppercase text-[10px] tracking-widest">No allocations recorded</p>
-                        </div>
-                      )}
+                      )) : <div className="py-20 text-center text-slate-300 uppercase text-[10px] font-black">No entries logged</div>}
                     </div>
                   </div>
                 </div>
-                <div className="bg-slate-900 p-8 rounded-[3.5rem] border border-slate-800 shadow-2xl h-fit">
-                   <h3 className="font-black text-white uppercase text-[10px] tracking-[0.3em] mb-8">Execute Entry</h3>
+                <div className="bg-white p-8 rounded-[3.5rem] border border-slate-100 shadow-2xl h-fit">
+                   <h3 className="font-black text-slate-800 uppercase text-[10px] tracking-[0.3em] mb-8 text-center">Execute Entry</h3>
                    <form onSubmit={handleAddItem} className="space-y-6">
-                    <div><label className="text-[9px] font-black text-slate-500 uppercase ml-2 mb-2 block tracking-widest">Description</label><input name="description" className="w-full p-4 bg-slate-800 border border-slate-700 text-white rounded-2xl font-black text-xs outline-none focus:ring-2 focus:ring-indigo-500" required /></div>
-                    <div><label className="text-[9px] font-black text-slate-500 uppercase ml-2 mb-2 block tracking-widest">Amount ($)</label><input name="amount" type="number" step="0.01" className="w-full p-4 bg-slate-800 border border-slate-700 text-white rounded-2xl font-black text-sm outline-none focus:ring-2 focus:ring-indigo-500" required /></div>
+                    <div><label className="text-[9px] font-black text-slate-400 uppercase ml-2 mb-2 block tracking-widest">Description</label><input name="description" className="w-full p-4 bg-slate-50 border border-slate-200 text-slate-800 rounded-2xl font-black text-xs outline-none focus:ring-2 focus:ring-indigo-500" required /></div>
+                    <div><label className="text-[9px] font-black text-slate-400 uppercase ml-2 mb-2 block tracking-widest">Amount ($)</label><input name="amount" type="number" step="0.01" className="w-full p-4 bg-slate-50 border border-slate-200 text-slate-800 rounded-2xl font-black text-sm outline-none focus:ring-2 focus:ring-indigo-500" required /></div>
                     <div className="grid grid-cols-2 gap-4">
-                      <button type="button" onClick={() => {}} className="py-3 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-[8px] tracking-widest">Type: Expense</button>
-                      <button type="button" onClick={() => {}} className="py-3 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-[8px] tracking-widest">Cat: Other</button>
+                      <select name="type" className="p-3 bg-slate-50 border border-slate-200 text-slate-600 rounded-xl font-black uppercase text-[8px] tracking-widest outline-none">
+                        <option value="expense">Expense</option><option value="income">Income</option>
+                      </select>
+                      <select name="category" className="p-3 bg-slate-50 border border-slate-200 text-slate-600 rounded-xl font-black uppercase text-[8px] tracking-widest outline-none">
+                        {EVENT_ITEM_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
                     </div>
                     <button type="submit" className="w-full py-5 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-[0.2em] text-[10px] hover:bg-indigo-500 transition-all">Broadcast Log</button>
                    </form>
@@ -482,55 +361,151 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
               </div>
             )}
 
+            {activeTab === 'tasks' && (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 animate-in fade-in duration-300">
+                <div className="lg:col-span-2 bg-white p-10 rounded-[4rem] border border-slate-100 shadow-2xl">
+                  <h3 className="font-black text-slate-800 uppercase text-[10px] tracking-[0.4em] mb-10">Operational Roadmaps</h3>
+                  <div className="space-y-6">
+                    {selectedEvent.tasks.length > 0 ? selectedEvent.tasks.map(task => (
+                      <div key={task.id} className="space-y-3">
+                        <div className={`p-6 bg-slate-50 border rounded-[2.5rem] flex items-center gap-6 group transition-all ${task.completed ? 'border-emerald-200 opacity-60' : 'border-slate-100 hover:border-indigo-200'}`}>
+                          <button onClick={() => toggleTaskCompletion(task.id)} className={`w-12 h-12 rounded-2xl flex items-center justify-center border-2 transition-all ${task.completed ? 'bg-emerald-500 border-emerald-500 text-white shadow-emerald-500/20' : 'bg-white border-slate-200 text-transparent'}`}><i className="fas fa-check text-sm"></i></button>
+                          <div className="flex-1">
+                            <p className={`font-black text-md ${task.completed ? 'text-slate-400 line-through' : 'text-slate-800'}`}>{task.text}</p>
+                            <button onClick={() => setSubTaskInput(subTaskInput?.taskId === task.id ? null : { taskId: task.id, text: '' })} className="text-[8px] font-black text-indigo-600 uppercase tracking-widest mt-1 hover:underline">+ Add Sub-Task</button>
+                          </div>
+                        </div>
+                        {(task.subTasks || []).length > 0 && (
+                          <div className="ml-16 space-y-2 border-l-2 border-slate-100 pl-6">
+                            {task.subTasks?.map(sub => (
+                              <div key={sub.id} className={`p-4 bg-slate-50/50 border rounded-[1.5rem] flex items-center gap-4 transition-all ${sub.completed ? 'border-emerald-100 opacity-60' : 'border-slate-100'}`}>
+                                <button onClick={() => toggleTaskCompletion(sub.id, task.id)} className={`w-8 h-8 rounded-xl flex items-center justify-center border transition-all ${sub.completed ? 'bg-emerald-400 border-emerald-400 text-white' : 'bg-white border-slate-200 text-transparent'}`}><i className="fas fa-check text-[10px]"></i></button>
+                                <p className={`text-xs font-bold ${sub.completed ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{sub.text}</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {subTaskInput?.taskId === task.id && (
+                          <div className="ml-16 animate-in slide-in-from-left-4 duration-300">
+                            <div className="flex gap-2">
+                              <input value={subTaskInput.text} onChange={e => setSubTaskInput({ ...subTaskInput, text: e.target.value })} onKeyDown={e => e.key === 'Enter' && handleAddSubTask(task.id)} placeholder="Sub-task description..." className="flex-1 p-3 bg-slate-50 border border-indigo-200 rounded-xl text-xs font-bold outline-none" autoFocus />
+                              <button onClick={() => handleAddSubTask(task.id)} className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest">Add</button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )) : <div className="py-20 text-center text-slate-300 uppercase text-[10px] font-black">No objectives deployed</div>}
+                  </div>
+                </div>
+                <div className="bg-white p-8 rounded-[3.5rem] border border-slate-100 shadow-2xl h-fit">
+                   <h3 className="font-black text-slate-800 uppercase text-[10px] tracking-[0.3em] mb-8 text-center">Deploy Objective</h3>
+                   <textarea value={taskText} onChange={e => setTaskText(e.target.value)} className="w-full p-6 bg-slate-50 border border-slate-200 text-slate-800 rounded-3xl font-black text-xs h-40 no-scrollbar outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Describe the objective..."></textarea>
+                   <button onClick={handleAddTask} className="w-full mt-6 py-5 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-[0.2em] text-[10px] hover:bg-indigo-500 transition-all">Publish Milestone</button>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'directory' && (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 animate-in fade-in duration-300">
+                <div className="lg:col-span-2 bg-white p-10 rounded-[4rem] border border-slate-100 shadow-2xl min-h-[450px]">
+                  <div className="flex justify-between items-center mb-10">
+                    <div><h3 className="font-black text-slate-800 uppercase text-[10px] tracking-[0.4em]">Project Directory</h3><p className="text-[9px] text-slate-400 font-bold uppercase mt-1 tracking-widest">Stakeholder Register</p></div>
+                    <button onClick={() => setIsAddingContact(true)} className="px-6 py-3 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl hover:bg-indigo-500 transition-all">+ New Contact</button>
+                  </div>
+                  <div className="space-y-4">
+                    {projectContacts.length > 0 ? projectContacts.map(contact => (
+                      <div key={contact.id} className="p-8 bg-slate-50 border border-slate-100 rounded-[2.5rem] flex flex-col md:flex-row md:items-center justify-between gap-6 group hover:bg-white hover:border-indigo-500/30 transition-all shadow-sm">
+                        <div className="flex items-center gap-6">
+                          <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center text-indigo-600 shadow-lg font-black text-xl uppercase border border-slate-100">{contact.name[0]}</div>
+                          <div>
+                            <p className="font-black text-lg text-slate-800 tracking-tight leading-none">{contact.name}</p>
+                            <p className="text-[10px] text-indigo-600 font-black uppercase tracking-widest">{contact.email}</p>
+                            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">{contact.number}</p>
+                          </div>
+                        </div>
+                        {contact.address && <div className="md:text-right max-w-[200px]"><p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Address</p><p className="text-[11px] font-bold text-slate-600 leading-relaxed">{contact.address}</p></div>}
+                      </div>
+                    )) : <div className="py-24 text-center text-slate-300 uppercase text-[10px] font-black border-2 border-dashed border-slate-100 rounded-[3.5rem]">Directory Empty</div>}
+                  </div>
+                </div>
+                <div className="bg-white p-8 rounded-[3.5rem] border border-slate-100 shadow-2xl h-fit">
+                   <h3 className="font-black text-slate-800 uppercase text-[10px] tracking-[0.3em] mb-4 text-center">Global Contacts</h3>
+                   <p className="text-[9px] text-slate-400 font-bold uppercase text-center mb-8">Integrated Platform Access</p>
+                   <div className="space-y-3">
+                     {contacts.length === 0 && <p className="text-center text-[9px] text-slate-300 font-black uppercase">No global entries</p>}
+                     {contacts.filter(c => !selectedEvent.contactIds?.includes(c.id)).map(c => (
+                       <button key={c.id} onClick={() => onUpdateEvent({...selectedEvent, contactIds: [...(selectedEvent.contactIds || []), c.id]})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-center gap-4 hover:border-indigo-500/30 transition-all group">
+                         <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center text-xs font-black text-indigo-600 shadow-sm border border-slate-100">{c.name[0]}</div>
+                         <div className="flex-1 text-left"><p className="text-[10px] font-black text-slate-800">{c.name}</p></div>
+                         <i className="fas fa-plus text-[8px] text-slate-300 group-hover:text-indigo-600"></i>
+                       </button>
+                     ))}
+                   </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'log' && (
+              <div className="animate-in fade-in duration-300">
+                <div className="bg-white p-10 rounded-[4rem] border border-slate-100 shadow-2xl min-h-[500px]">
+                  <div className="flex justify-between items-center mb-10">
+                    <div><h3 className="font-black text-slate-800 uppercase text-[10px] tracking-[0.4em]">Audit Timeline</h3><p className="text-[9px] text-slate-400 font-bold uppercase mt-1 tracking-widest">Operational Log • {currentUser}</p></div>
+                    <div className="px-4 py-2 bg-slate-100 rounded-xl text-[9px] font-black text-slate-500 uppercase tracking-widest">Secure AES-256 Storage</div>
+                  </div>
+                  <div className="space-y-8 relative before:absolute before:left-5 before:top-4 before:bottom-4 before:w-0.5 before:bg-slate-100">
+                    {selectedEvent.logs && selectedEvent.logs.length > 0 ? selectedEvent.logs.map(log => (
+                      <div key={log.id} className="relative pl-12 group">
+                        <div className={`absolute left-0 w-10 h-10 rounded-full border-4 border-white flex items-center justify-center text-[10px] shadow-sm z-10 transition-transform group-hover:scale-110 ${
+                          log.type === 'transaction' ? 'bg-emerald-500 text-white' : 
+                          log.type === 'task' ? 'bg-indigo-500 text-white' : 
+                          log.type === 'file' ? 'bg-amber-500 text-white' : 
+                          'bg-slate-200 text-slate-500'
+                        }`}>
+                          <i className={`fas ${
+                            log.type === 'transaction' ? 'fa-wallet' : 
+                            log.type === 'task' ? 'fa-check-circle' : 
+                            log.type === 'file' ? 'fa-file-alt' : 
+                            'fa-info-circle'
+                          }`}></i>
+                        </div>
+                        <div className="bg-slate-50 border border-slate-100 p-6 rounded-[2rem] group-hover:bg-white group-hover:border-indigo-100 transition-all">
+                          <div className="flex justify-between items-center mb-2">
+                             <p className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">{log.username}</p>
+                             <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{getTimeAgo(log.timestamp)}</p>
+                          </div>
+                          <p className="text-sm font-bold text-slate-700 leading-relaxed">{log.action}</p>
+                        </div>
+                      </div>
+                    )) : <div className="py-20 text-center text-slate-300 uppercase text-[10px] font-black">Timeline Origin Point • No activity logged</div>}
+                  </div>
+                </div>
+              </div>
+            )}
+            
             {activeTab === 'team' && (
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 animate-in fade-in duration-300">
-                <div className="lg:col-span-2 bg-slate-900/50 p-10 rounded-[3.5rem] border border-slate-800 shadow-2xl backdrop-blur-md">
+                <div className="lg:col-span-2 bg-white p-10 rounded-[3.5rem] border border-slate-100 shadow-2xl">
                   <div className="flex justify-between items-center mb-10">
-                    <h3 className="font-black text-white uppercase text-[10px] tracking-[0.4em]">Project Access Matrix</h3>
-                    <div className="px-4 py-2 bg-indigo-500/10 rounded-xl border border-indigo-500/20 text-[9px] font-black text-indigo-400 uppercase tracking-widest">
-                      {selectedEvent.memberUsernames?.length || 1} Stakeholders
-                    </div>
+                    <h3 className="font-black text-slate-800 uppercase text-[10px] tracking-[0.4em]">Access Matrix</h3>
+                    <div className="px-4 py-2 bg-indigo-50 rounded-xl border border-indigo-100 text-[9px] font-black text-indigo-600 uppercase tracking-widest">{selectedEvent.memberUsernames?.length || 1} Stakeholders</div>
                   </div>
                   <div className="space-y-4">
                     {(selectedEvent.memberUsernames || [ADMIN_USER]).map(username => (
-                      <div key={username} className="p-6 bg-slate-800/40 border border-slate-700/50 rounded-[2rem] flex items-center justify-between group hover:border-indigo-500/30 transition-all">
+                      <div key={username} className="p-6 bg-slate-50 border border-slate-100 rounded-[2rem] flex items-center justify-between group hover:border-indigo-500/30 transition-all">
                         <div className="flex items-center gap-6">
-                          <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 font-black uppercase text-xl">
-                            {username[0]}
-                          </div>
-                          <div>
-                            <p className="font-black text-md text-white">{username}</p>
-                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-1">{username === ADMIN_USER ? 'Project Originator (Admin)' : 'Matrix Collaborator'}</p>
-                          </div>
+                          <div className="w-14 h-14 rounded-2xl bg-indigo-100 border border-indigo-200 flex items-center justify-center text-indigo-600 font-black uppercase text-xl">{username[0]}</div>
+                          <div><p className="font-black text-md text-slate-800">{username}</p><p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-1">{username === ADMIN_USER ? 'Project Originator' : 'Matrix Collaborator'}</p></div>
                         </div>
-                        <div className="flex items-center gap-4">
-                          <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-                          {isAdmin && username !== ADMIN_USER && (
-                            <button onClick={() => handleRemoveMember(username)} className="w-12 h-12 rounded-xl bg-rose-500/10 text-rose-500 hover:bg-rose-600 hover:text-white transition-all shadow-lg flex items-center justify-center">
-                              <i className="fas fa-user-minus text-white"></i>
-                            </button>
-                          )}
-                        </div>
+                        <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
                       </div>
                     ))}
                   </div>
                 </div>
                 {isAdmin && (
-                  <div className="bg-slate-900 p-8 rounded-[3.5rem] border border-slate-800 shadow-2xl h-fit">
-                    <h3 className="font-black text-white uppercase text-[10px] tracking-[0.3em] mb-8">Grant Access</h3>
-                    <div className="p-5 bg-indigo-500/5 border border-indigo-500/10 rounded-2xl mb-8">
-                      <p className="text-[9px] text-slate-400 font-bold leading-relaxed uppercase tracking-widest">Input the collaborator's login username to grant full project access within the Matrix.</p>
-                    </div>
+                  <div className="bg-white p-8 rounded-[3.5rem] border border-slate-100 shadow-2xl h-fit">
+                    <h3 className="font-black text-slate-800 uppercase text-[10px] tracking-[0.3em] mb-8 text-center">Grant Access</h3>
                     <div className="space-y-6">
-                      <div>
-                        <label className="text-[9px] font-black text-slate-500 uppercase ml-2 mb-2 block tracking-widest">Collaborator ID</label>
-                        <input 
-                          value={inviteUsername} 
-                          onChange={e => setInviteUsername(e.target.value)} 
-                          className="w-full p-4 bg-slate-800 border border-slate-700 text-white rounded-2xl font-black text-xs outline-none focus:ring-2 focus:ring-indigo-500" 
-                          placeholder="e.g. Sarah2024" 
-                        />
-                      </div>
+                      <input value={inviteUsername} onChange={e => setInviteUsername(e.target.value)} className="w-full p-4 bg-slate-50 border border-slate-200 text-slate-800 rounded-2xl font-black text-xs outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Username..." />
                       <button onClick={handleAddMember} className="w-full py-5 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-[0.2em] text-[10px] hover:bg-indigo-500 transition-all">Authorize User</button>
                     </div>
                   </div>
@@ -540,84 +515,22 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
 
             {activeTab === 'vault' && (
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 animate-in fade-in duration-300">
-                <div className="lg:col-span-2 space-y-6">
-                  <div className="bg-slate-900/50 p-10 rounded-[4rem] border border-slate-800 shadow-2xl min-h-[450px] backdrop-blur-md">
-                    <div className="flex justify-between items-center mb-10">
-                      <h3 className="font-black text-white uppercase text-[10px] tracking-[0.4em]">Strategic Data Vault</h3>
-                      <div className="text-right">
-                        <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Storage Status</p>
-                        <p className="text-[10px] font-black text-indigo-400 uppercase">{selectedEvent.files.length} Optimized Assets</p>
+                <div className="lg:col-span-2 bg-white p-10 rounded-[4rem] border border-slate-100 shadow-2xl min-h-[450px]">
+                  <h3 className="font-black text-slate-800 uppercase text-[10px] tracking-[0.4em] mb-10">Strategic Data Vault</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-8">
+                    {selectedEvent.files.map(file => (
+                      <div key={file.id} className="p-8 bg-slate-50 border border-slate-100 rounded-[3rem] flex flex-col items-center text-center group cursor-pointer hover:bg-white hover:border-indigo-500/50 transition-all shadow-sm">
+                        <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center text-indigo-600 shadow-xl mb-5 border border-slate-100"><i className="fas fa-file-invoice text-2xl"></i></div>
+                        <p className="font-black text-[11px] text-slate-800 truncate w-full mb-1">{file.name}</p>
+                        <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">v{file.version} • {file.lastModifiedBy}</p>
                       </div>
-                    </div>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-8">
-                      {selectedEvent.files.map(file => (
-                        <div key={file.id} className="p-8 bg-slate-800/40 border border-slate-700/50 rounded-[3rem] flex flex-col items-center text-center group relative cursor-pointer hover:bg-slate-800 hover:border-indigo-500/50 transition-all shadow-lg" onClick={() => setEditingFileId(file.id)}>
-                          <div className="w-16 h-16 bg-slate-800 rounded-2xl flex items-center justify-center text-indigo-400 shadow-2xl mb-5 group-hover:scale-110 transition-transform border border-slate-700">
-                            <i className="fas fa-file-invoice text-2xl text-white"></i>
-                          </div>
-                          <p className="font-black text-[11px] text-white truncate w-full mb-1">{file.name}</p>
-                          <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">v{file.version} • {file.lastModifiedBy}</p>
-                          <div className="absolute top-4 right-4 w-2 h-2 bg-emerald-500 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                        </div>
-                      ))}
-                      <div className="p-8 border-4 border-dashed border-slate-800 rounded-[3rem] flex flex-col items-center justify-center text-slate-600 hover:border-indigo-500/30 hover:text-indigo-400 cursor-pointer transition-all group" onClick={() => fileInputRef.current?.click()}>
-                        <div className="w-12 h-12 bg-slate-800/30 rounded-2xl flex items-center justify-center mb-3 group-hover:bg-indigo-500/10">
-                          <i className="fas fa-plus text-xl text-white"></i>
-                        </div>
-                        <span className="text-[9px] font-black uppercase tracking-widest">Inject Asset</span>
-                        <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
-                      </div>
+                    ))}
+                    <div className="p-8 border-4 border-dashed border-slate-200 rounded-[3rem] flex flex-col items-center justify-center text-slate-400 hover:border-indigo-500/30 hover:text-indigo-400 cursor-pointer transition-all group" onClick={() => fileInputRef.current?.click()}>
+                      <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center mb-3 text-slate-300"><i className="fas fa-plus text-xl"></i></div>
+                      <span className="text-[9px] font-black uppercase tracking-widest">Inject Asset</span>
+                      <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
                     </div>
                   </div>
-                </div>
-                <div className="bg-slate-900 p-8 rounded-[3.5rem] border border-slate-800 shadow-2xl">
-                  <h3 className="font-black text-white uppercase text-[10px] tracking-[0.3em] mb-8">Version Feed</h3>
-                  <div className="space-y-6">
-                    {selectedEvent.files.length > 0 ? selectedEvent.files.slice(-4).reverse().map(f => (
-                      <div key={f.id} className="text-[10px] font-medium text-slate-400 flex items-start gap-4 border-l-2 border-slate-800 pl-4 py-1">
-                        <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full mt-1.5 -ml-[21px]"></div>
-                        <div>
-                          <p className="font-black text-slate-300">Revision v{f.version}</p>
-                          <p className="mt-0.5">{f.lastModifiedBy} updated <b className="text-white">{f.name}</b></p>
-                        </div>
-                      </div>
-                    )) : (
-                      <p className="text-[9px] font-black text-slate-600 uppercase tracking-widest text-center py-10">No revisions found</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeTab === 'tasks' && (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 animate-in fade-in duration-300">
-                <div className="lg:col-span-2 bg-slate-900/50 p-10 rounded-[4rem] border border-slate-800 shadow-2xl backdrop-blur-md">
-                  <h3 className="font-black text-white uppercase text-[10px] tracking-[0.4em] mb-10">Operational Roadmaps</h3>
-                  <div className="space-y-4">
-                    {selectedEvent.tasks.length > 0 ? selectedEvent.tasks.map(task => (
-                      <div key={task.id} className={`p-6 bg-slate-800/40 border rounded-[2.5rem] flex items-center gap-6 group transition-all ${task.completed ? 'border-emerald-500/20 opacity-50' : 'border-slate-700/50 hover:border-indigo-500/30'}`}>
-                        <button 
-                          onClick={() => handleUpdateEventWithVersion({...selectedEvent, tasks: selectedEvent.tasks.map(t => t.id === task.id ? {...t, completed: !t.completed} : t)})}
-                          className={`w-12 h-12 rounded-2xl flex items-center justify-center border-2 transition-all shadow-lg ${task.completed ? 'bg-emerald-500 border-emerald-500 text-white shadow-emerald-500/20' : 'bg-slate-800 border-slate-700 hover:border-emerald-500/50 text-transparent'}`}
-                        >
-                          <i className="fas fa-check text-sm text-white"></i>
-                        </button>
-                        <div>
-                          <p className={`font-black text-md ${task.completed ? 'text-slate-500 line-through' : 'text-white'}`}>{task.text}</p>
-                          <p className="text-[9px] font-black text-slate-500 uppercase mt-1.5 tracking-widest">Owner: {task.assignedToId}</p>
-                        </div>
-                      </div>
-                    )) : (
-                      <div className="py-20 text-center border-2 border-dashed border-slate-800 rounded-[3rem]">
-                        <p className="text-slate-500 font-black uppercase text-[10px] tracking-widest">No objectives deployed</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div className="bg-slate-900 p-8 rounded-[3.5rem] border border-slate-800 shadow-2xl h-fit">
-                   <h3 className="font-black text-white uppercase text-[10px] tracking-[0.3em] mb-8">Deploy Milestone</h3>
-                   <textarea value={taskText} onChange={e => setTaskText(e.target.value)} className="w-full p-6 bg-slate-800 border border-slate-700 text-white rounded-3xl font-black text-xs h-40 no-scrollbar outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Describe the objective..."></textarea>
-                   <button onClick={handleAddTask} className="w-full mt-6 py-5 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-[0.2em] text-[10px] hover:bg-indigo-500 transition-all">Publish Milestone</button>
                 </div>
               </div>
             )}
@@ -626,90 +539,43 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 animate-in fade-in duration-500">
            {events.map(event => (
-              <div key={event.id} onClick={() => setSelectedEventId(event.id)} className="bg-slate-900 p-10 rounded-[4rem] border border-slate-800 shadow-2xl cursor-pointer hover:border-indigo-600/50 hover:-translate-y-2 transition-all group relative overflow-hidden">
+              <div key={event.id} onClick={() => setSelectedEventId(event.id)} className={`${isAdmin ? 'bg-white' : 'bg-slate-900'} p-10 rounded-[4rem] border ${isAdmin ? 'border-slate-100' : 'border-slate-800'} shadow-2xl cursor-pointer hover:border-indigo-600/50 hover:-translate-y-2 transition-all group relative overflow-hidden`}>
                 <div className="absolute top-0 left-0 w-2 h-full bg-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity"></div>
                 <div className="flex justify-between items-start mb-12">
-                  <div className="w-16 h-16 bg-slate-800 rounded-2xl flex items-center justify-center text-slate-600 group-hover:text-indigo-400 group-hover:bg-indigo-500/10 transition-all border border-slate-700">
-                    <i className="fas fa-layer-group text-2xl text-white"></i>
-                  </div>
+                  <div className={`w-16 h-16 ${isAdmin ? 'bg-slate-50 border-slate-100' : 'bg-slate-800 border-slate-700'} rounded-2xl flex items-center justify-center text-slate-600 group-hover:text-indigo-600 transition-all border`}><i className="fas fa-layer-group text-2xl"></i></div>
                   <div className="flex -space-x-3">
                     {(event.memberUsernames || [ADMIN_USER]).slice(0, 3).map(u => (
-                      <div key={u} className="w-10 h-10 rounded-full bg-slate-800 border-2 border-slate-900 flex items-center justify-center text-[10px] font-black uppercase ring-2 ring-indigo-500/10" title={u}>{u[0]}</div>
+                      <div key={u} className={`${isAdmin ? 'bg-white border-slate-100' : 'bg-slate-800 border-slate-900'} w-10 h-10 rounded-full border-2 flex items-center justify-center text-[10px] font-black uppercase ring-2 ring-indigo-500/10`} title={u}>{u[0]}</div>
                     ))}
-                    {(event.memberUsernames?.length || 1) > 3 && (
-                      <div className="w-10 h-10 rounded-full bg-indigo-600 border-2 border-slate-900 flex items-center justify-center text-[9px] font-black text-white">+{event.memberUsernames.length - 3}</div>
-                    )}
                   </div>
                 </div>
-                <h3 className="font-black text-white text-2xl leading-none mb-4 group-hover:text-indigo-400 transition-colors tracking-tight">{event.name}</h3>
-                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.2em] mb-12">Modified: {new Date(event.lastUpdated).toLocaleDateString()}</p>
+                <h3 className={`font-black ${isAdmin ? 'text-slate-800' : 'text-white'} text-2xl leading-none mb-4 group-hover:text-indigo-600 transition-colors tracking-tight`}>{event.name}</h3>
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em] mb-12">Modified: {new Date(event.lastUpdated).toLocaleDateString()}</p>
                 <div className="flex flex-wrap gap-3">
-                  <div className="bg-slate-800/60 px-4 py-2 rounded-xl text-[9px] font-black uppercase text-indigo-400 tracking-widest border border-slate-700/50">{event.files.length} Assets</div>
-                  <div className="bg-slate-800/60 px-4 py-2 rounded-xl text-[9px] font-black uppercase text-emerald-400 tracking-widest border border-slate-700/50">{event.tasks.filter(t => t.completed).length}/{event.tasks.length} Resolved</div>
+                  <div className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest border ${isAdmin ? 'bg-indigo-50 border-indigo-100 text-indigo-600' : 'bg-slate-800/60 border-slate-700/50 text-indigo-400'}`}>{event.files.length} Assets</div>
+                  <div className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest border ${isAdmin ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-slate-800/60 border-slate-700/50 text-emerald-400'}`}>{event.tasks.filter(t => t.completed).length}/{event.tasks.length} Resolved</div>
                 </div>
               </div>
            ))}
-           {events.length === 0 && !isAdmin && (
-             <div className="md:col-span-2 lg:col-span-3 py-24 text-center bg-slate-900/40 border-2 border-dashed border-slate-800 rounded-[4rem] backdrop-blur-md">
-               <div className="w-20 h-20 bg-slate-800 rounded-[2rem] flex items-center justify-center text-slate-600 mx-auto mb-8 text-3xl shadow-2xl border border-slate-700">
-                 <i className="fas fa-user-secret text-white"></i>
-               </div>
-               <p className="text-slate-400 font-black uppercase text-sm tracking-[0.3em] mb-2">Access Denied</p>
-               <p className="text-slate-600 text-[11px] font-bold uppercase tracking-widest">Contact System Admin ("nsv") for Project Authorization.</p>
-             </div>
-           )}
         </div>
       )}
 
-      {/* VERSION CONFLICT MODAL */}
-      {conflictModal?.open && (
-        <div className="fixed inset-0 z-[300] bg-black/90 backdrop-blur-3xl flex items-center justify-center p-6">
-          <div className="bg-slate-900 max-w-md w-full p-12 rounded-[4rem] border-2 border-rose-500 shadow-2xl animate-in zoom-in-95 duration-300">
-             <div className="w-24 h-24 bg-rose-500/20 text-rose-500 rounded-[2rem] flex items-center justify-center text-4xl mx-auto mb-10 border border-rose-500/20 shadow-xl">
-               <i className="fas fa-sync-alt animate-spin-slow"></i>
-             </div>
-             <h3 className="text-2xl font-black text-white text-center mb-4 tracking-tight">Revision Conflict</h3>
-             <p className="text-slate-400 text-sm text-center mb-10 leading-relaxed font-medium">A collaborator has updated <b>{conflictModal.fileName}</b> to <b>v{conflictModal.currentVersion + 1}</b> while you were editing. To prevent data loss, you must merge the latest changes.</p>
-             <div className="space-y-4">
-               <button onClick={() => setConflictModal(null)} className="w-full py-6 bg-indigo-600 text-white font-black rounded-[1.5rem] shadow-2xl uppercase tracking-[0.2em] text-[11px] hover:bg-indigo-500 transition-all">Pull Latest Revision</button>
-               <button onClick={() => setConflictModal(null)} className="w-full py-4 text-slate-500 font-black uppercase tracking-[0.2em] text-[9px] hover:text-rose-400 transition-all">Discard Local Studio State</button>
-             </div>
-          </div>
-        </div>
-      )}
-
-      {/* COLLABORATIVE STUDIO (DOCUMENT EDITOR) */}
-      {editingFileId && (
-        <div className="fixed inset-0 z-[250] bg-slate-950/98 backdrop-blur-[50px] p-6 md:p-12 flex flex-col">
-          <div className="flex items-center justify-between mb-10">
-            <div className="flex items-center gap-8">
-               <div className="w-16 h-16 bg-indigo-600 rounded-[2rem] flex items-center justify-center text-white text-3xl shadow-2xl shadow-indigo-500/20">
-                 <i className="fas fa-file-invoice text-white"></i>
-               </div>
-               <div>
-                 <h2 className="text-3xl font-black text-white tracking-tight">{selectedEvent?.files.find(f => f.id === editingFileId)?.name}</h2>
-                 <p className="text-[11px] text-indigo-400 font-black uppercase tracking-[0.4em] mt-2">Active Studio: {currentUser} • Revision v{selectedEvent?.files.find(f => f.id === editingFileId)?.version}</p>
-               </div>
-            </div>
-            <div className="flex gap-4">
-              <button onClick={() => handleSaveFileDraft(editingFileId)} className="px-10 py-5 bg-emerald-600 text-white rounded-[1.5rem] font-black uppercase tracking-[0.2em] text-[12px] shadow-2xl shadow-emerald-500/20 hover:bg-emerald-500 transition-all active:scale-95">Commit Revision</button>
-              <button onClick={() => setEditingFileId(null)} className="px-10 py-5 bg-slate-800 text-slate-400 rounded-[1.5rem] font-black uppercase tracking-[0.2em] text-[12px] hover:bg-slate-700 hover:text-white transition-all">Exit Studio</button>
-            </div>
-          </div>
-          <div className="flex-1 bg-slate-900/40 border border-slate-800 rounded-[4rem] p-16 shadow-inner overflow-y-auto no-scrollbar relative backdrop-blur-md">
-             <div className="absolute top-10 right-10 flex items-center gap-4 bg-slate-800/60 px-5 py-2.5 rounded-2xl border border-white/5">
-               <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse"></div>
-               <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Sarah is co-editing</span>
-             </div>
-             <textarea 
-               className="w-full h-full bg-transparent border-none outline-none text-slate-200 font-medium leading-[2.2] resize-none text-xl placeholder:text-slate-700"
-               placeholder="Initiate strategic drafting session..."
-               defaultValue="PROJECT_MATRIX_LOG: Revision Active. All keystrokes are being buffered for peer synchronization. Committing updates will increment the global version ID."
-             ></textarea>
-          </div>
-          <div className="mt-8 flex justify-center">
-            <p className="text-[10px] font-black text-slate-600 uppercase tracking-[0.5em]">Secure Operational Environment • Encrypted Stream Active</p>
-          </div>
+      {/* ADD CONTACT MODAL */}
+      {isAddingContact && (
+        <div className="fixed inset-0 z-[300] bg-black/80 backdrop-blur-xl flex items-center justify-center p-6">
+           <div className="bg-white max-w-md w-full p-12 rounded-[4rem] shadow-3xl animate-in zoom-in-95 duration-300 border border-slate-100">
+              <h3 className="text-2xl font-black text-slate-800 text-center mb-2 tracking-tight">Provision Identity</h3>
+              <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.3em] text-center mb-10">Add Stakeholder to Matrix</p>
+              <div className="space-y-6">
+                <div><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2 mb-2 block">Name</label><input value={contactForm.name} onChange={e => setContactForm({...contactForm, name: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-xs outline-none focus:ring-4 focus:ring-indigo-500/10" /></div>
+                <div><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2 mb-2 block">Email</label><input value={contactForm.email} onChange={e => setContactForm({...contactForm, email: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-xs outline-none focus:ring-4 focus:ring-indigo-500/10" /></div>
+                <div><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2 mb-2 block">Address</label><textarea value={contactForm.address} onChange={e => setContactForm({...contactForm, address: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-xs h-24 no-scrollbar outline-none focus:ring-4 focus:ring-indigo-500/10" /></div>
+                <div className="flex gap-4 pt-4">
+                  <button onClick={handleAddContactToProject} className="flex-1 py-5 bg-indigo-600 text-white font-black rounded-[1.5rem] shadow-2xl uppercase tracking-[0.2em] text-[11px] hover:bg-indigo-500 transition-all">Authorize Contact</button>
+                  <button onClick={() => setIsAddingContact(false)} className="px-6 py-5 bg-slate-100 text-slate-500 font-black rounded-[1.5rem] uppercase tracking-[0.2em] text-[11px]">Abort</button>
+                </div>
+              </div>
+           </div>
         </div>
       )}
     </div>

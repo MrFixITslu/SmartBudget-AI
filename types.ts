@@ -135,6 +135,7 @@ export interface Contact {
   name: string;
   number: string;
   email: string;
+  address?: string;
 }
 
 export interface ProjectNote {
@@ -176,6 +177,14 @@ export interface IOU {
   settled: boolean;
 }
 
+export interface EventLog {
+  id: string;
+  action: string;
+  timestamp: string;
+  username: string;
+  type: 'system' | 'transaction' | 'task' | 'file' | 'team' | 'contact';
+}
+
 export interface BudgetEvent {
   id: string;
   name: string;
@@ -185,8 +194,9 @@ export interface BudgetEvent {
   tasks: ProjectTask[];
   files: ProjectFile[];
   contactIds: string[];
-  memberUsernames: string[]; // List of usernames who can access this project
+  memberUsernames: string[]; 
   ious: IOU[];
+  logs?: EventLog[];
   status: 'planned' | 'active' | 'completed';
   outcome?: 'success' | 'failed';
   lessonsLearnt?: string;

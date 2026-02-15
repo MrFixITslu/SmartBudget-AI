@@ -339,7 +339,27 @@ const App: React.FC = () => {
         {activeTab === 'dashboard' && isAdmin ? (
           <>
             <VerificationQueue pendingItems={pendingApprovals} onApprove={(idx) => { const item = pendingApprovals[idx]; if (item.updateType === 'transaction' && item.transaction) addTransaction(item.transaction as Transaction); else if (item.updateType === 'portfolio' && item.portfolio) handleApprovePortfolio(item.portfolio); setPendingApprovals(p => p.filter((_, i) => i !== idx)); }} onDiscard={(idx) => setPendingApprovals(p => p.filter((_, i) => i !== idx))} onEdit={() => {}} onDiscardAll={() => setPendingApprovals([])} />
-            <Dashboard transactions={transactions} recurringExpenses={recurringExpenses} recurringIncomes={recurringIncomes} savingGoals={savingGoals} investmentGoals={investmentGoals} investments={investments} marketPrices={marketPrices} bankConnections={bankConnections} targetMargin={targetMargin} cashOpeningBalance={cashOpeningBalance} categoryBudgets={categoryBudgets} onEdit={(t) => setTransactions(prev => prev.map(x => x.id === t.id ? t : x))} onDelete={(id) => setTransactions(prev => prev.filter(t => t.id !== id))} onPayRecurring={(rec, amt) => addTransaction({ amount: amt, description: rec.description, category: rec.category, type: 'expense', date: new Date().toISOString().split('T')[0], recurringId: rec.id })} onReceiveRecurringIncome={(inc, amt) => addTransaction({ amount: amt, description: inc.description, category: inc.category, type: 'income', date: new Date().toISOString().split('T')[0], recurringId: inc.id })} onContributeSaving={() => {}} onWithdrawSaving={() => {}} onWithdrawal={() => {}} onAddIncome={() => {}} />
+            <Dashboard 
+              transactions={transactions} 
+              recurringExpenses={recurringExpenses} 
+              recurringIncomes={recurringIncomes} 
+              savingGoals={savingGoals} 
+              investmentGoals={investmentGoals} 
+              investments={investments} 
+              marketPrices={marketPrices} 
+              bankConnections={bankConnections} 
+              targetMargin={targetMargin} 
+              cashOpeningBalance={cashOpeningBalance} 
+              categoryBudgets={categoryBudgets} 
+              onEdit={(t) => setTransactions(prev => prev.map(x => x.id === t.id ? t : x))} 
+              onDelete={(id) => setTransactions(prev => prev.filter(t => t.id !== id))} 
+              onPayRecurring={(rec, amt) => addTransaction({ amount: amt, description: rec.description, category: rec.category, type: 'expense', date: new Date().toISOString().split('T')[0], recurringId: rec.id })} 
+              onReceiveRecurringIncome={(inc, amt, dest) => addTransaction({ amount: amt, description: inc.description, category: inc.category, type: 'income', date: new Date().toISOString().split('T')[0], recurringId: inc.id, institution: dest })} 
+              onContributeSaving={() => {}} 
+              onWithdrawSaving={() => {}} 
+              onWithdrawal={() => {}} 
+              onAddIncome={() => {}} 
+            />
           </>
         ) : activeTab === 'projections' && isAdmin ? (
           <Projections transactions={transactions} recurringIncomes={recurringIncomes} recurringExpenses={recurringExpenses} investments={investments} marketPrices={marketPrices} categoryBudgets={categoryBudgets} currentNetWorth={currentNetWorth} />

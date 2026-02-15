@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, Legend } from 'recharts';
+import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, Legend, BarChart, Bar, Cell } from 'recharts';
 import { Transaction, RecurringExpense, RecurringIncome, InvestmentAccount, MarketPrice, BankConnection, InvestmentGoal } from '../types';
 import { GoogleGenAI } from "@google/genai";
 
@@ -26,7 +26,7 @@ interface Props {
   onEdit: (t: Transaction) => void;
   onDelete: (id: string) => void;
   onPayRecurring: (rec: RecurringExpense, amount: number) => void;
-  onReceiveRecurringIncome: (inc: RecurringIncome, amount: number) => void;
+  onReceiveRecurringIncome: (inc: RecurringIncome, amount: number, destination: string) => void;
   onContributeSaving: (goalId: string, amount: number) => void;
   onWithdrawSaving: (goalId: string, amount: number) => void;
   onWithdrawal: (institution: string, amount: number) => void;
@@ -44,6 +44,7 @@ const Dashboard: React.FC<Props> = ({
   const [searchTerm, setSearchTerm] = useState("");
   const [activePaymentId, setActivePaymentId] = useState<string | null>(null);
   const [partialAmount, setPartialAmount] = useState<string>("");
+  const [selectedDestination, setSelectedDestination] = useState<string | null>(null);
 
   const cycleStartDate = useMemo(() => {
     const now = new Date();
@@ -53,6 +54,12 @@ const Dashboard: React.FC<Props> = ({
     }
     return start;
   }, []);
+
+  const daysPassedInCycle = useMemo(() => {
+    const now = new Date();
+    const diff = now.getTime() - cycleStartDate.getTime();
+    return Math.max(1, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+  }, [cycleStartDate]);
 
   const daysUntilNextCycle = useMemo(() => {
     const now = new Date();
@@ -67,14 +74,13 @@ const Dashboard: React.FC<Props> = ({
   const { totalActualIncome, totalActualExpenses } = useMemo(() => {
     const current = transactions.filter(t => new Date(t.date) >= cycleStartDate);
     return {
-      totalActualIncome: current.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0),
-      totalActualExpenses: current.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0),
+      // Add explicit : number type to reduce accumulators to fix arithmetic operation inference
+      totalActualIncome: current.filter(t => t.type === 'income').reduce((acc: number, t) => acc + t.amount, 0),
+      totalActualExpenses: current.filter(t => t.type === 'expense').reduce((acc: number, t) => acc + t.amount, 0),
     };
   }, [transactions, cycleStartDate]);
 
-  const expectedMonthlyIncome = useMemo(() => 
-    recurringIncomes.reduce((acc: number, inc) => acc + inc.amount, 0), 
-  [recurringIncomes]);
+  const netMargin = totalActualIncome - totalActualExpenses;
 
   const institutionalBalances = useMemo<Record<string, InstitutionalBalance>>(() => {
     const balances: Record<string, InstitutionalBalance> = {};
@@ -114,20 +120,17 @@ const Dashboard: React.FC<Props> = ({
   }, [bankConnections, investments, transactions, marketPrices, cashOpeningBalance]);
 
   const liquidFunds = useMemo(() => {
-    const primary = institutionalBalances['1st National Bank St. Lucia']?.balance || 0;
-    const cash = institutionalBalances['Cash in Hand']?.balance || 0;
+    const primary = Number(institutionalBalances['1st National Bank St. Lucia']?.balance || 0);
+    const cash = Number(institutionalBalances['Cash in Hand']?.balance || 0);
     return primary + cash;
   }, [institutionalBalances]);
 
   const netWorth: number = (Object.values(institutionalBalances) as InstitutionalBalance[]).reduce((acc: number, b) => acc + b.balance, 0);
 
   const cycleRollover = useMemo(() => {
-    // Corrected Date comparison using getTime() to avoid implicit coercion issues.
     const pastTransactions = transactions.filter(t => new Date(t.date).getTime() < cycleStartDate.getTime());
-    // Fixed arithmetic operation error by adding explicit type ': number' to the reduce accumulator 'acc'.
     const openingBalancesTotal = bankConnections.reduce((acc: number, conn) => acc + conn.openingBalance, 0) + cashOpeningBalance;
     
-    // Fixed arithmetic operation error by adding explicit type ': number' to the reduce accumulator 'acc'.
     const historicalCashflow = pastTransactions.reduce((acc: number, t) => {
       if (t.institution === '1st National Bank St. Lucia' || t.institution === 'Cash in Hand') {
         if (t.type === 'income') return acc + t.amount;
@@ -141,6 +144,22 @@ const Dashboard: React.FC<Props> = ({
 
     return openingBalancesTotal + historicalCashflow;
   }, [transactions, cycleStartDate, bankConnections, cashOpeningBalance]);
+
+  const categorySpendData = useMemo(() => {
+    const spent: Record<string, number> = {};
+    transactions
+      .filter(t => t.type === 'expense' && new Date(t.date) >= cycleStartDate)
+      .forEach(t => {
+        spent[t.category] = (spent[t.category] || 0) + t.amount;
+      });
+
+    return Object.entries(spent).map(([name, amount]) => {
+      const budget = categoryBudgets[name] || 0;
+      const progress = budget > 0 ? (amount / budget) * 100 : 0;
+      const dailyAvg = amount / daysPassedInCycle;
+      return { name, amount, budget, progress, dailyAvg };
+    }).sort((a, b) => b.amount - a.amount);
+  }, [transactions, cycleStartDate, categoryBudgets, daysPassedInCycle]);
 
   const cashflowTrends = useMemo(() => {
     const grouped: Record<string, { income: number; expense: number }> = {};
@@ -185,45 +204,38 @@ const Dashboard: React.FC<Props> = ({
     });
   }, [transactions, searchTerm]);
 
-  // REFINED COMMITMENT LOGIC FOR PARTIALS
   const unpaidBills = useMemo(() => {
     return recurringExpenses.map(bill => {
+      // Add explicit : number type to reduce accumulator to fix potential inference issues
       const totalPaid = transactions
         .filter(t => t.recurringId === bill.id && new Date(t.date) >= cycleStartDate)
-        .reduce((sum, t) => sum + t.amount, 0);
+        .reduce((sum: number, t) => sum + t.amount, 0);
       return { ...bill, remainingAmount: Math.max(0, bill.amount - totalPaid), paidAmount: totalPaid };
     }).filter(bill => bill.remainingAmount > 0.01);
   }, [recurringExpenses, transactions, cycleStartDate]);
 
   const unconfirmedIncomes = useMemo(() => {
     return recurringIncomes.map(inc => {
+      // Add explicit : number type to reduce accumulator to fix potential inference issues
       const totalReceived = transactions
         .filter(t => t.recurringId === inc.id && t.type === 'income' && new Date(t.date) >= cycleStartDate)
-        .reduce((sum, t) => sum + t.amount, 0);
+        .reduce((sum: number, t) => sum + t.amount, 0);
       return { ...inc, remainingAmount: Math.max(0, inc.amount - totalReceived), receivedAmount: totalReceived };
     }).filter(inc => inc.remainingAmount > 0.01);
   }, [recurringIncomes, transactions, cycleStartDate]);
 
-  const categorySpentThisCycle = useMemo(() => {
-    const spent: Record<string, number> = {};
-    transactions
-      .filter(t => t.type === 'expense' && new Date(t.date) >= cycleStartDate)
-      .forEach(t => {
-        spent[t.category] = (spent[t.category] || 0) + t.amount;
-      });
-    return spent;
-  }, [transactions, cycleStartDate]);
-
   const remainingBudgetCommitted = useMemo(() => {
     return Object.entries(categoryBudgets).reduce((acc: number, [cat, budget]) => {
-      const spent = categorySpentThisCycle[cat] || 0;
+      const item = categorySpendData.find(d => d.name === cat);
+      const spent = item?.amount || 0;
       const remaining = Math.max(0, budget - spent);
       return acc + remaining;
     }, 0);
-  }, [categoryBudgets, categorySpentThisCycle]);
+  }, [categoryBudgets, categorySpendData]);
 
   const remainingBillsCommitted = useMemo(() => {
-    return unpaidBills.reduce((acc, bill) => acc + bill.remainingAmount, 0);
+    // Add explicit : number type to reduce accumulator to fix arithmetic operation error
+    return unpaidBills.reduce((acc: number, bill) => acc + bill.remainingAmount, 0);
   }, [unpaidBills]);
 
   const dailySafeSpend = useMemo(() => {
@@ -238,7 +250,7 @@ const Dashboard: React.FC<Props> = ({
       setIsGeneratingInsight(true);
       try {
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const context = `Actual Income: $${totalActualIncome.toFixed(2)}, Actual Spending: $${totalActualExpenses.toFixed(2)}, Net Worth: $${netWorth.toFixed(2)}, Rollover: $${cycleRollover.toFixed(2)}. Daily Safe Spend: $${dailySafeSpend.toFixed(2)}.`;
+        const context = `Actual Income: $${totalActualIncome.toFixed(2)}, Actual Spending: $${totalActualExpenses.toFixed(2)}, Net Worth: $${netWorth.toFixed(2)}, Rollover: $${cycleRollover.toFixed(2)}. Daily Safe Spend: $${dailySafeSpend.toFixed(2)}. Net Margin: $${netMargin.toFixed(2)}.`;
         const response = await ai.models.generateContent({ 
           model: 'gemini-3-flash-preview', 
           contents: { parts: [{ text: `Context: ${context}\nAction: One ultra-concise finance tip.` }] }
@@ -251,17 +263,33 @@ const Dashboard: React.FC<Props> = ({
       }
     };
     generateSummary();
-  }, [totalActualIncome, totalActualExpenses, netWorth, transactions.length, cycleRollover, dailySafeSpend]);
+  }, [totalActualIncome, totalActualExpenses, netWorth, transactions.length, cycleRollover, dailySafeSpend, netMargin]);
 
   const handleQuickPaymentAction = (item: any, isIncome: boolean) => {
     const amt = parseFloat(partialAmount) || item.remainingAmount;
     if (isIncome) {
-      onReceiveRecurringIncome(item, amt);
+      const destination = selectedDestination || 'Cash in Hand';
+      onReceiveRecurringIncome(item, amt, destination);
     } else {
       onPayRecurring(item, amt);
     }
     setActivePaymentId(null);
     setPartialAmount("");
+    setSelectedDestination(null);
+  };
+
+  const startRecordCommitment = (item: any, isIncome: boolean) => {
+    setActivePaymentId(item.id);
+    setPartialAmount(item.remainingAmount.toFixed(2));
+    
+    if (isIncome) {
+      const isSalary = item.description.toLowerCase().includes('salary');
+      if (isSalary) {
+        setSelectedDestination(bankConnections[0]?.institution || 'Cash in Hand');
+      } else {
+        setSelectedDestination('Cash in Hand');
+      }
+    }
   };
 
   return (
@@ -285,7 +313,7 @@ const Dashboard: React.FC<Props> = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
         <div className="bg-white p-4 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center">
            <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1 text-center">Rollover</p>
            <h3 className="text-xs font-black text-slate-500 text-center">${cycleRollover.toLocaleString()}</h3>
@@ -297,6 +325,12 @@ const Dashboard: React.FC<Props> = ({
         <div className="bg-white p-4 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center">
            <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1 text-center">Outflow</p>
            <h3 className="text-xs font-black text-rose-600 text-center">-${totalActualExpenses.toLocaleString()}</h3>
+        </div>
+        <div className={`p-4 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center ${netMargin >= 0 ? 'bg-emerald-50' : 'bg-rose-50'}`}>
+           <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1 text-center">Net Margin</p>
+           <h3 className={`text-xs font-black text-center ${netMargin >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+             {netMargin >= 0 ? '+' : ''}${netMargin.toLocaleString()}
+           </h3>
         </div>
         <div className="bg-white p-4 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center">
            <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1 text-center">Cash On Hand</p>
@@ -348,25 +382,41 @@ const Dashboard: React.FC<Props> = ({
           </div>
         </section>
 
+        {/* Category Spend Matrix Report */}
         <section className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm h-[450px] flex flex-col">
-          <h3 className="font-black text-slate-800 uppercase text-[10px] tracking-[0.2em] mb-6">Recent Log</h3>
-          <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-2">
-            {filteredTransactions.slice(0, 15).map(t => (
-              <div key={t.id} className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between group">
-                <div className="flex items-center gap-4">
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white text-xs ${t.type === 'income' ? 'bg-emerald-500' : 'bg-rose-500'}`}>
-                    <i className={`fas ${t.type === 'income' ? 'fa-arrow-up' : 'fa-arrow-down'}`}></i>
-                  </div>
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="font-black text-slate-800 uppercase text-[10px] tracking-[0.2em]">Category Spend Matrix</h3>
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Active Cycle</span>
+          </div>
+          <div className="flex-1 overflow-y-auto custom-scrollbar space-y-5 pr-2">
+            {categorySpendData.map((cat, idx) => (
+              <div key={idx} className="space-y-1.5">
+                <div className="flex justify-between items-end px-1">
                   <div>
-                    <p className="text-[11px] font-black text-slate-800 truncate w-32">{t.description}</p>
-                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">{t.category}</p>
+                    <p className="text-[11px] font-black text-slate-800">{cat.name}</p>
+                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Avg: ${cat.dailyAvg.toFixed(2)}/day</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[11px] font-black text-slate-900">${cat.amount.toLocaleString()}</p>
+                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">
+                      {cat.budget > 0 ? `${cat.progress.toFixed(0)}% of $${cat.budget}` : 'Uncapped'}
+                    </p>
                   </div>
                 </div>
-                <p className={`text-xs font-black ${t.type === 'income' ? 'text-emerald-600' : 'text-slate-900'}`}>
-                  {t.type === 'income' ? '+' : '-'}${t.amount.toLocaleString()}
-                </p>
+                <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full transition-all duration-1000 ${cat.progress > 90 ? 'bg-rose-500' : cat.progress > 70 ? 'bg-amber-500' : 'bg-indigo-500'}`} 
+                    style={{ width: `${Math.min(100, cat.budget > 0 ? cat.progress : 100)}%` }}
+                  ></div>
+                </div>
               </div>
             ))}
+            {categorySpendData.length === 0 && (
+              <div className="h-full flex flex-col items-center justify-center text-center py-10">
+                <i className="fas fa-chart-simple text-slate-200 text-3xl mb-4"></i>
+                <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest">No cycle spend detected</p>
+              </div>
+            )}
           </div>
         </section>
       </div>
@@ -380,6 +430,7 @@ const Dashboard: React.FC<Props> = ({
               const isActive = activePaymentId === bill.id;
               const progress = (bill.paidAmount || bill.receivedAmount || 0) / bill.amount * 100;
               const hasPaidSomething = progress > 0;
+              const isSalary = isIncome && bill.description.toLowerCase().includes('salary');
 
               return (
                 <div key={bill.id} className="p-4 bg-slate-50 border border-slate-100 rounded-2xl transition-all">
@@ -397,6 +448,9 @@ const Dashboard: React.FC<Props> = ({
                           {hasPaidSomething && (
                             <span className="px-1.5 py-0.5 bg-indigo-100 text-indigo-600 text-[7px] font-black uppercase rounded">Partial</span>
                           )}
+                          {isSalary && (
+                            <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-600 text-[7px] font-black uppercase rounded">Auto-Bank</span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -406,10 +460,37 @@ const Dashboard: React.FC<Props> = ({
                     </div>
                   </div>
 
-                  {/* Progress Bar for Partial Payments */}
                   {hasPaidSomething && (
                     <div className="w-full h-1 bg-slate-200 rounded-full mb-4 overflow-hidden">
                        <div className="h-full bg-indigo-500 transition-all duration-500" style={{ width: `${progress}%` }}></div>
+                    </div>
+                  )}
+
+                  {isActive && isIncome && (
+                    <div className="mt-4 p-4 bg-white rounded-2xl border border-indigo-100 space-y-3 animate-in fade-in slide-in-from-top-2">
+                      <p className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Select Destination</p>
+                      <div className="flex flex-wrap gap-2">
+                        {!isSalary && (
+                          <button 
+                            onClick={() => setSelectedDestination('Cash in Hand')}
+                            className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${selectedDestination === 'Cash in Hand' ? 'bg-slate-900 text-white shadow-lg' : 'bg-slate-50 text-slate-400 border border-slate-100 hover:bg-slate-100'}`}
+                          >
+                            <i className="fas fa-wallet mr-2"></i> Cash In Hand
+                          </button>
+                        )}
+                        {bankConnections.map(conn => (
+                          <button 
+                            key={conn.institution}
+                            onClick={() => setSelectedDestination(conn.institution)}
+                            className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${selectedDestination === conn.institution ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-50 text-slate-400 border border-slate-100 hover:bg-slate-100'}`}
+                          >
+                            <i className="fas fa-landmark mr-2"></i> {conn.institution}
+                          </button>
+                        ))}
+                      </div>
+                      {isSalary && bankConnections.length === 0 && (
+                        <p className="text-[8px] text-rose-500 font-black italic">Link a bank account to route salary automatically.</p>
+                      )}
                     </div>
                   )}
 
@@ -427,11 +508,17 @@ const Dashboard: React.FC<Props> = ({
                           onChange={(e) => setPartialAmount(e.target.value)}
                           className="w-24 px-3 py-2 bg-white border-2 border-indigo-500 rounded-xl text-[10px] font-black outline-none shadow-sm"
                         />
-                        <button onClick={() => handleQuickPaymentAction(bill, isIncome)} className="w-9 h-9 bg-indigo-600 text-white rounded-xl flex items-center justify-center text-[10px]"><i className="fas fa-check"></i></button>
-                        <button onClick={() => { setActivePaymentId(null); setPartialAmount(""); }} className="w-9 h-9 bg-slate-100 text-slate-400 rounded-xl flex items-center justify-center text-[10px]"><i className="fas fa-times"></i></button>
+                        <button 
+                          onClick={() => handleQuickPaymentAction(bill, isIncome)} 
+                          disabled={isIncome && !selectedDestination}
+                          className={`w-9 h-9 bg-indigo-600 text-white rounded-xl flex items-center justify-center text-[10px] disabled:opacity-30 disabled:grayscale`}
+                        >
+                          <i className="fas fa-check"></i>
+                        </button>
+                        <button onClick={() => { setActivePaymentId(null); setPartialAmount(""); setSelectedDestination(null); }} className="w-9 h-9 bg-slate-100 text-slate-400 rounded-xl flex items-center justify-center text-[10px]"><i className="fas fa-times"></i></button>
                       </div>
                     ) : (
-                      <button onClick={() => { setActivePaymentId(bill.id); setPartialAmount(bill.remainingAmount.toFixed(2)); }} className="px-5 py-2.5 bg-slate-900 text-white text-[9px] font-black uppercase tracking-widest rounded-xl hover:bg-indigo-600 transition-all shadow-md">Record</button>
+                      <button onClick={() => startRecordCommitment(bill, isIncome)} className="px-5 py-2.5 bg-slate-900 text-white text-[9px] font-black uppercase tracking-widest rounded-xl hover:bg-indigo-600 transition-all shadow-md">Record</button>
                     )}
                   </div>
                 </div>

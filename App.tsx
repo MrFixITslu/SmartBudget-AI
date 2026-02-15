@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { GoogleGenAI, Type } from "@google/genai";
 import Login from './components/Login';
@@ -25,6 +24,7 @@ const STORAGE_KEYS = {
   INVESTMENT_GOALS: 'budget_investment_goals',
   SALARY: 'budget_salary',
   TARGET_MARGIN: 'budget_target_margin',
+  CASH_OPENING: 'budget_cash_opening',
   CATEGORY_LIMITS: 'budget_category_limits',
   BANK_CONNECTIONS: 'budget_bank_conns',
   INVESTMENTS: 'budget_investments',
@@ -101,6 +101,7 @@ const App: React.FC = () => {
   const [investmentGoals, setInvestmentGoals] = useState<InvestmentGoal[]>(() => safeParse(STORAGE_KEYS.INVESTMENT_GOALS, []));
   const [salary, setSalary] = useState<number>(() => parseFloat(localStorage.getItem(STORAGE_KEYS.SALARY) || '0'));
   const [targetMargin, setTargetMargin] = useState<number>(() => parseFloat(localStorage.getItem(STORAGE_KEYS.TARGET_MARGIN) || '0'));
+  const [cashOpeningBalance, setCashOpeningBalance] = useState<number>(() => parseFloat(localStorage.getItem(STORAGE_KEYS.CASH_OPENING) || '0'));
   const [categoryBudgets, setCategoryBudgets] = useState<Record<string, number>>(() => safeParse(STORAGE_KEYS.CATEGORY_LIMITS, {}));
   const [bankConnections, setBankConnections] = useState<BankConnection[]>(() => safeParse(STORAGE_KEYS.BANK_CONNECTIONS, []));
   const [investments, setInvestments] = useState<InvestmentAccount[]>(() => safeParse(STORAGE_KEYS.INVESTMENTS, []));
@@ -139,6 +140,7 @@ const App: React.FC = () => {
   useEffect(() => { saveToStore(STORAGE_KEYS.NETWORTH_HISTORY, netWorthHistory); }, [netWorthHistory]);
   useEffect(() => { saveToStore(STORAGE_KEYS.USERS_LIST, users); }, [users]);
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.REMINDERS, remindersEnabled.toString()); }, [remindersEnabled]);
+  useEffect(() => { localStorage.setItem(STORAGE_KEYS.CASH_OPENING, cashOpeningBalance.toString()); }, [cashOpeningBalance]);
 
   // Restrict Non-Admins to Project Matrix Tab
   useEffect(() => {
@@ -216,7 +218,7 @@ const App: React.FC = () => {
   };
 
   const readilyAvailableFunds = useMemo(() => {
-    const openingBalancesTotal = bankConnections.reduce((acc, c) => acc + (c.openingBalance || 0), 0);
+    const openingBalancesTotal = bankConnections.reduce((acc, c) => acc + (c.openingBalance || 0), 0) + cashOpeningBalance;
     const flow = transactions.reduce((acc, t) => {
       if (t.institution === 'Cash in Hand' || bankConnections.some(c => c.institution === t.institution)) {
         if (t.type === 'income') return acc + t.amount;
@@ -228,7 +230,7 @@ const App: React.FC = () => {
       return acc;
     }, 0);
     return openingBalancesTotal + flow;
-  }, [transactions, bankConnections]);
+  }, [transactions, bankConnections, cashOpeningBalance]);
 
   const currentNetWorth = useMemo(() => {
     let total = readilyAvailableFunds;
@@ -337,7 +339,7 @@ const App: React.FC = () => {
         {activeTab === 'dashboard' && isAdmin ? (
           <>
             <VerificationQueue pendingItems={pendingApprovals} onApprove={(idx) => { const item = pendingApprovals[idx]; if (item.updateType === 'transaction' && item.transaction) addTransaction(item.transaction as Transaction); else if (item.updateType === 'portfolio' && item.portfolio) handleApprovePortfolio(item.portfolio); setPendingApprovals(p => p.filter((_, i) => i !== idx)); }} onDiscard={(idx) => setPendingApprovals(p => p.filter((_, i) => i !== idx))} onEdit={() => {}} onDiscardAll={() => setPendingApprovals([])} />
-            <Dashboard transactions={transactions} recurringExpenses={recurringExpenses} recurringIncomes={recurringIncomes} savingGoals={savingGoals} investmentGoals={investmentGoals} investments={investments} marketPrices={marketPrices} bankConnections={bankConnections} targetMargin={targetMargin} categoryBudgets={categoryBudgets} onEdit={(t) => setTransactions(prev => prev.map(x => x.id === t.id ? t : x))} onDelete={(id) => setTransactions(prev => prev.filter(t => t.id !== id))} onPayRecurring={(rec, amt) => addTransaction({ amount: amt, description: rec.description, category: rec.category, type: 'expense', date: new Date().toISOString().split('T')[0], recurringId: rec.id })} onReceiveRecurringIncome={(inc, amt) => addTransaction({ amount: amt, description: inc.description, category: inc.category, type: 'income', date: new Date().toISOString().split('T')[0] })} onContributeSaving={() => {}} onWithdrawSaving={() => {}} onWithdrawal={() => {}} onAddIncome={() => {}} />
+            <Dashboard transactions={transactions} recurringExpenses={recurringExpenses} recurringIncomes={recurringIncomes} savingGoals={savingGoals} investmentGoals={investmentGoals} investments={investments} marketPrices={marketPrices} bankConnections={bankConnections} targetMargin={targetMargin} cashOpeningBalance={cashOpeningBalance} categoryBudgets={categoryBudgets} onEdit={(t) => setTransactions(prev => prev.map(x => x.id === t.id ? t : x))} onDelete={(id) => setTransactions(prev => prev.filter(t => t.id !== id))} onPayRecurring={(rec, amt) => addTransaction({ amount: amt, description: rec.description, category: rec.category, type: 'expense', date: new Date().toISOString().split('T')[0], recurringId: rec.id })} onReceiveRecurringIncome={(inc, amt) => addTransaction({ amount: amt, description: inc.description, category: inc.category, type: 'income', date: new Date().toISOString().split('T')[0] })} onContributeSaving={() => {}} onWithdrawSaving={() => {}} onWithdrawal={() => {}} onAddIncome={() => {}} />
           </>
         ) : activeTab === 'projections' && isAdmin ? (
           <Projections transactions={transactions} recurringIncomes={recurringIncomes} recurringExpenses={recurringExpenses} investments={investments} marketPrices={marketPrices} categoryBudgets={categoryBudgets} currentNetWorth={currentNetWorth} />
@@ -376,6 +378,8 @@ const App: React.FC = () => {
           onUpdateSalary={setSalary} 
           targetMargin={targetMargin} 
           onUpdateTargetMargin={setTargetMargin} 
+          cashOpeningBalance={cashOpeningBalance}
+          onUpdateCashOpeningBalance={setCashOpeningBalance}
           categoryBudgets={categoryBudgets} 
           onUpdateCategoryBudgets={setCategoryBudgets} 
           recurringExpenses={recurringExpenses} 

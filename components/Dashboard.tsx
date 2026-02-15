@@ -23,6 +23,7 @@ interface Props {
   marketPrices: MarketPrice[];
   bankConnections: BankConnection[];
   targetMargin: number;
+  cashOpeningBalance: number;
   categoryBudgets: Record<string, number>;
   onEdit: (t: Transaction) => void;
   onDelete: (id: string) => void;
@@ -37,7 +38,7 @@ interface Props {
 type Timeframe = 'daily' | 'monthly' | 'yearly';
 
 const Dashboard: React.FC<Props> = ({ 
-  transactions, investments, marketPrices, bankConnections, recurringExpenses, recurringIncomes, savingGoals, categoryBudgets, onDelete, onPayRecurring, onReceiveRecurringIncome, onEdit
+  transactions, investments, marketPrices, bankConnections, recurringExpenses, recurringIncomes, savingGoals, categoryBudgets, cashOpeningBalance, onDelete, onPayRecurring, onReceiveRecurringIncome, onEdit
 }) => {
   const [trendTimeframe, setTrendTimeframe] = useState<Timeframe>('monthly');
   const [aiInsight, setAiInsight] = useState<string>("");
@@ -55,6 +56,16 @@ const Dashboard: React.FC<Props> = ({
     return start;
   }, []);
 
+  const daysUntilNextCycle = useMemo(() => {
+    const now = new Date();
+    let nextCycle = new Date(now.getFullYear(), now.getMonth(), 25);
+    if (now.getDate() >= 25) {
+      nextCycle.setMonth(nextCycle.getMonth() + 1);
+    }
+    const diff = nextCycle.getTime() - now.getTime();
+    return Math.max(1, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+  }, []);
+
   const { totalActualIncome, totalActualExpenses } = useMemo(() => {
     const current = transactions.filter(t => new Date(t.date) >= cycleStartDate);
     return {
@@ -62,6 +73,10 @@ const Dashboard: React.FC<Props> = ({
       totalActualExpenses: current.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0),
     };
   }, [transactions, cycleStartDate]);
+
+  const expectedMonthlyIncome = useMemo(() => 
+    recurringIncomes.reduce((acc: number, inc) => acc + inc.amount, 0), 
+  [recurringIncomes]);
 
   const institutionalBalances = useMemo<Record<string, InstitutionalBalance>>(() => {
     const balances: Record<string, InstitutionalBalance> = {};
@@ -85,7 +100,7 @@ const Dashboard: React.FC<Props> = ({
         if (t.type === 'expense' || t.type === 'transfer' || t.type === 'withdrawal' || t.type === 'savings') return acc - t.amount;
       }
       return acc;
-    }, 0);
+    }, cashOpeningBalance);
     balances['Cash in Hand'] = { balance: cashFlow, type: 'cash', available: true, isCash: true };
 
     investments.forEach(inv => {
@@ -98,7 +113,7 @@ const Dashboard: React.FC<Props> = ({
       balances[inv.provider] = { balance: liveVal - withdrawFlow + depositFlow, type: 'investment', available: false, holdings: inv.holdings };
     });
     return balances;
-  }, [bankConnections, investments, transactions, marketPrices]);
+  }, [bankConnections, investments, transactions, marketPrices, cashOpeningBalance]);
 
   const liquidFunds = useMemo(() => {
     const primary = institutionalBalances['1st National Bank St. Lucia']?.balance || 0;
@@ -106,27 +121,26 @@ const Dashboard: React.FC<Props> = ({
     return primary + cash;
   }, [institutionalBalances]);
 
+  // Fix: Explicitly type acc as number to ensure type safety in arithmetic operation
   const netWorth: number = (Object.values(institutionalBalances) as InstitutionalBalance[]).reduce((acc: number, b) => acc + b.balance, 0);
 
-  // Rollover Calculation: Total of all transactions before the current cycle start
   const cycleRollover = useMemo(() => {
     const pastTransactions = transactions.filter(t => new Date(t.date) < cycleStartDate);
-    const openingBalancesTotal = bankConnections.reduce((acc, conn) => acc + conn.openingBalance, 0);
+    const openingBalancesTotal = bankConnections.reduce((acc, conn) => acc + conn.openingBalance, 0) + cashOpeningBalance;
     
     const historicalCashflow = pastTransactions.reduce((acc, t) => {
-      // Focus on liquid accounts for rollover context
       if (t.institution === '1st National Bank St. Lucia' || t.institution === 'Cash in Hand') {
         if (t.type === 'income') return acc + t.amount;
         if (t.type === 'expense' || t.type === 'savings' || t.type === 'withdrawal') return acc - t.amount;
       }
       if (t.destinationInstitution === '1st National Bank St. Lucia' || t.destinationInstitution === 'Cash in Hand') {
-        if (t.type === 'transfer' || t.type === 'withdrawal') return acc + t.amount;
+        if (t.type === 'transfer' || t.withdrawal === 'withdrawal') return acc + t.amount;
       }
       return acc;
     }, 0);
 
     return openingBalancesTotal + historicalCashflow;
-  }, [transactions, cycleStartDate, bankConnections]);
+  }, [transactions, cycleStartDate, bankConnections, cashOpeningBalance]);
 
   const cashflowTrends = useMemo(() => {
     const grouped: Record<string, { income: number; expense: number }> = {};
@@ -171,9 +185,6 @@ const Dashboard: React.FC<Props> = ({
     });
   }, [transactions, searchTerm]);
 
-  const totalTargetExpenses = useMemo(() => recurringExpenses.reduce((acc: number, e) => acc + e.amount, 0) + (Object.values(categoryBudgets).reduce((a: number, b) => a + (Number(b) || 0), 0)), [recurringExpenses, categoryBudgets]);
-  const survivalMonths = useMemo(() => totalTargetExpenses > 0 ? netWorth / totalTargetExpenses : 0, [netWorth, totalTargetExpenses]);
-
   const unpaidBills = useMemo(() => {
     return recurringExpenses.filter(bill => {
       const alreadyPaid = transactions.some(t => 
@@ -185,27 +196,45 @@ const Dashboard: React.FC<Props> = ({
   }, [recurringExpenses, transactions, cycleStartDate]);
 
   const unconfirmedIncomes = useMemo(() => {
-    const now = new Date();
     return recurringIncomes.filter(inc => {
       const alreadyReceived = transactions.some(t => 
         t.description.includes(inc.description) && 
         t.type === 'income' &&
         new Date(t.date) >= cycleStartDate
       );
-      if (alreadyReceived) return false;
-
-      let expectedDate = new Date(now.getFullYear(), now.getMonth(), inc.dayOfMonth);
-      if (now.getDate() >= 25 && inc.dayOfMonth < 25) {
-        expectedDate.setMonth(expectedDate.getMonth() + 1);
-      } else if (now.getDate() < 25 && inc.dayOfMonth >= 25) {
-        expectedDate.setMonth(expectedDate.getMonth() - 1);
-      }
-
-      const diffTime = expectedDate.getTime() - now.getTime();
-      const diffDays = diffTime / (1000 * 60 * 60 * 24);
-      return diffDays <= 14;
+      return !alreadyReceived;
     });
   }, [recurringIncomes, transactions, cycleStartDate]);
+
+  // SAFE SPEND LOGIC
+  const categorySpentThisCycle = useMemo(() => {
+    const spent: Record<string, number> = {};
+    transactions
+      .filter(t => t.type === 'expense' && new Date(t.date) >= cycleStartDate)
+      .forEach(t => {
+        spent[t.category] = (spent[t.category] || 0) + t.amount;
+      });
+    return spent;
+  }, [transactions, cycleStartDate]);
+
+  const remainingBudgetCommitted = useMemo(() => {
+    // Fix: Explicitly type acc as number to resolve arithmetic operation error on line 221
+    return Object.entries(categoryBudgets).reduce((acc: number, [cat, budget]) => {
+      const spent = categorySpentThisCycle[cat] || 0;
+      const remaining = Math.max(0, budget - spent);
+      return acc + remaining;
+    }, 0);
+  }, [categoryBudgets, categorySpentThisCycle]);
+
+  const remainingBillsCommitted = useMemo(() => {
+    return unpaidBills.reduce((acc, bill) => acc + bill.amount, 0);
+  }, [unpaidBills]);
+
+  const dailySafeSpend = useMemo(() => {
+    const totalCommitted = remainingBudgetCommitted + remainingBillsCommitted;
+    const surplus = liquidFunds - totalCommitted;
+    return Math.max(0, surplus / daysUntilNextCycle);
+  }, [liquidFunds, remainingBudgetCommitted, remainingBillsCommitted, daysUntilNextCycle]);
 
   useEffect(() => {
     const generateSummary = async () => {
@@ -213,7 +242,7 @@ const Dashboard: React.FC<Props> = ({
       setIsGeneratingInsight(true);
       try {
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const context = `Actual Income: $${totalActualIncome.toFixed(2)}, Actual Spending: $${totalActualExpenses.toFixed(2)}, Net Worth: $${netWorth.toFixed(2)}, Rollover: $${cycleRollover.toFixed(2)}.`;
+        const context = `Actual Income: $${totalActualIncome.toFixed(2)}, Actual Spending: $${totalActualExpenses.toFixed(2)}, Net Worth: $${netWorth.toFixed(2)}, Rollover: $${cycleRollover.toFixed(2)}. Daily Safe Spend: $${dailySafeSpend.toFixed(2)}.`;
         const response = await ai.models.generateContent({ 
           model: 'gemini-3-flash-preview', 
           contents: { parts: [{ text: `Context: ${context}\nAction: One ultra-concise finance tip.` }] }
@@ -226,7 +255,7 @@ const Dashboard: React.FC<Props> = ({
       }
     };
     generateSummary();
-  }, [totalActualIncome, totalActualExpenses, netWorth, transactions.length, cycleRollover]);
+  }, [totalActualIncome, totalActualExpenses, netWorth, transactions.length, cycleRollover, dailySafeSpend]);
 
   const handlePrint = () => window.print();
 
@@ -272,31 +301,43 @@ const Dashboard: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Stats Grid - Now with Rollover Balance */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        <div className="bg-white p-5 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-center">
+      {/* Stats Grid - Enhanced with Daily Safe Spend */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3">
+        <div className="bg-white p-4 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center">
            <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1">Rollover</p>
-           <h3 className="text-sm font-black text-slate-500">${cycleRollover.toLocaleString()}</h3>
+           <h3 className="text-xs font-black text-slate-500">${cycleRollover.toLocaleString()}</h3>
         </div>
-        <div className="bg-white p-5 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-center">
-           <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1">Cycle Income</p>
-           <h3 className="text-sm font-black text-emerald-600">+${totalActualIncome.toLocaleString()}</h3>
+        <div className="bg-white p-4 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center">
+           <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1 text-center">Cycle Income</p>
+           <div className="text-center">
+              <h3 className="text-xs font-black text-emerald-600">+${totalActualIncome.toLocaleString()}</h3>
+              <p className="text-[7px] font-black text-slate-400 uppercase mt-0.5">Exp: ${expectedMonthlyIncome.toLocaleString()}</p>
+           </div>
         </div>
-        <div className="bg-white p-5 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-center">
-           <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1">Cycle Spend</p>
-           <h3 className="text-sm font-black text-rose-600">-${totalActualExpenses.toLocaleString()}</h3>
+        <div className="bg-white p-4 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center">
+           <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1 text-center">Cycle Spend</p>
+           <h3 className="text-xs font-black text-rose-600 text-center">-${totalActualExpenses.toLocaleString()}</h3>
         </div>
-        <div className="bg-indigo-600 p-5 rounded-[2.5rem] shadow-xl text-white flex flex-col justify-center print:bg-slate-100 print:text-slate-900">
-           <p className="text-white/60 text-[8px] font-black uppercase tracking-widest mb-1 print:text-slate-400">Available Cash</p>
-           <h3 className="text-sm font-black">${liquidFunds.toLocaleString()}</h3>
+        <div className="bg-white p-4 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center print:bg-slate-100 print:text-slate-900">
+           <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1 text-center">Cash Liquidity</p>
+           <h3 className="text-xs font-black text-indigo-600 text-center">${liquidFunds.toLocaleString()}</h3>
         </div>
-        <div className="bg-white p-5 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-center">
-           <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1">Runway</p>
-           <h3 className="text-sm font-black text-indigo-600">{survivalMonths.toFixed(1)} <span className="text-[8px] text-slate-400 uppercase">Mos</span></h3>
+        
+        {/* NEW DAILY SAFE SPEND CARD */}
+        <div className="bg-emerald-600 p-4 rounded-[2rem] shadow-xl text-white flex flex-col justify-center print:bg-slate-100 print:text-slate-900 ring-4 ring-emerald-500/20">
+           <p className="text-white/60 text-[8px] font-black uppercase tracking-widest mb-1 print:text-slate-400">Daily Safe Spend</p>
+           <h3 className="text-sm font-black">${dailySafeSpend.toFixed(0)}<span className="text-[8px] text-white/50 uppercase">/Day</span></h3>
+           <p className="text-[6px] text-emerald-200/60 font-bold uppercase mt-1">Post Bills & Budget</p>
         </div>
-        <div className="bg-slate-900 p-5 rounded-[2.5rem] border border-slate-800 shadow-xl text-white flex flex-col justify-center print:border-slate-200 print:bg-white print:text-slate-900">
-           <p className="text-white/40 text-[8px] font-black uppercase tracking-widest mb-1 print:text-slate-400">Net Worth</p>
-           <h3 className="text-sm font-black">${netWorth.toLocaleString()}</h3>
+
+        <div className="bg-indigo-600 p-4 rounded-[2rem] shadow-xl text-white flex flex-col justify-center print:bg-slate-100 print:text-slate-900">
+           <p className="text-white/60 text-[8px] font-black uppercase tracking-widest mb-1 print:text-slate-400">Days Remaining</p>
+           <h3 className="text-sm font-black text-center">{daysUntilNextCycle} <span className="text-[8px] text-white/50 uppercase">Days</span></h3>
+        </div>
+
+        <div className="bg-slate-900 p-4 rounded-[2rem] border border-slate-800 shadow-xl text-white flex flex-col justify-center print:border-slate-200 print:bg-white print:text-slate-900">
+           <p className="text-white/40 text-[8px] font-black uppercase tracking-widest mb-1 print:text-slate-400 text-center">Net Worth</p>
+           <h3 className="text-xs font-black text-center">${netWorth.toLocaleString()}</h3>
         </div>
       </div>
 
@@ -385,7 +426,7 @@ const Dashboard: React.FC<Props> = ({
         <section className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm">
           <h3 className="font-black text-slate-800 uppercase text-[10px] tracking-[0.2em] mb-6">Upcoming Commitments</h3>
           <div className="space-y-4">
-            {unpaidBills.concat(unconfirmedIncomes as any).length > 0 ? unpaidBills.concat(unconfirmedIncomes as any).slice(0, 5).map((bill: any) => {
+            {unpaidBills.concat(unconfirmedIncomes as any).length > 0 ? unpaidBills.concat(unconfirmedIncomes as any).slice(0, 10).map((bill: any) => {
               const isIncome = 'nextConfirmationDate' in bill;
               const isActive = activePaymentId === bill.id;
 
@@ -398,7 +439,9 @@ const Dashboard: React.FC<Props> = ({
                       </div>
                       <div>
                         <p className="font-black text-[11px] text-slate-800">{bill.description}</p>
-                        <p className="text-[8px] font-black text-slate-400 uppercase">Target: ${bill.amount} • Day {bill.dayOfMonth}</p>
+                        <p className="text-[8px] font-black text-slate-400 uppercase">
+                          {isIncome ? 'Expected' : 'Bill'}: ${bill.amount} • Day {bill.dayOfMonth}
+                        </p>
                       </div>
                     </div>
                     {isActive ? (

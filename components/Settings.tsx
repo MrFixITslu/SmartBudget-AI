@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { CATEGORIES, RecurringExpense, RecurringIncome, SavingGoal, BankConnection, InvestmentGoal, StoredUser } from '../types';
 
@@ -7,6 +6,8 @@ interface Props {
   onUpdateSalary: (val: number) => void;
   targetMargin: number;
   onUpdateTargetMargin: (val: number) => void;
+  cashOpeningBalance: number;
+  onUpdateCashOpeningBalance: (val: number) => void;
   categoryBudgets: Record<string, number>;
   onUpdateCategoryBudgets: (budgets: Record<string, number>) => void;
   recurringExpenses: RecurringExpense[];
@@ -41,6 +42,7 @@ interface Props {
 
 const Settings: React.FC<Props> = ({ 
   targetMargin, onUpdateTargetMargin, categoryBudgets, onUpdateCategoryBudgets, 
+  cashOpeningBalance, onUpdateCashOpeningBalance,
   recurringExpenses, onAddRecurring, onUpdateRecurring, onDeleteRecurring, 
   recurringIncomes, onAddRecurringIncome, onUpdateRecurringIncome, onDeleteRecurringIncome, 
   investmentGoals, onAddInvestmentGoal, onDeleteInvestmentGoal,
@@ -352,7 +354,23 @@ const Settings: React.FC<Props> = ({
           <section className="p-8 bg-slate-900 text-white rounded-[2.5rem] shadow-xl">
             <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6">Financial Strategy Hub</label>
             <div className="space-y-8">
-               <div><h3 className="text-lg font-black mb-1">Monthly Target Surplus</h3><div className="relative"><span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-indigo-400 text-lg">$</span><input type="number" value={targetMargin || ''} onChange={(e) => onUpdateTargetMargin(parseFloat(e.target.value) || 0)} className="w-full pl-10 p-4 bg-white/5 border border-white/10 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500 font-black text-xl text-white placeholder:text-white/10" /></div></div>
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                 <div>
+                   <h3 className="text-lg font-black mb-1">Monthly Target Surplus</h3>
+                   <div className="relative">
+                     <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-indigo-400 text-lg">$</span>
+                     <input type="number" value={targetMargin || ''} onChange={(e) => onUpdateTargetMargin(parseFloat(e.target.value) || 0)} className="w-full pl-10 p-4 bg-white/5 border border-white/10 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500 font-black text-xl text-white placeholder:text-white/10" />
+                   </div>
+                 </div>
+                 <div>
+                   <h3 className="text-lg font-black mb-1">Physical Cash Opening Balance</h3>
+                   <div className="relative">
+                     <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-emerald-400 text-lg">$</span>
+                     <input type="number" value={cashOpeningBalance || ''} onChange={(e) => onUpdateCashOpeningBalance(parseFloat(e.target.value) || 0)} className="w-full pl-10 p-4 bg-white/5 border border-white/10 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500 font-black text-xl text-white placeholder:text-white/10" />
+                   </div>
+                   <p className="text-[8px] text-slate-500 font-bold uppercase tracking-widest mt-1">Starting funds in wallet/physical safe</p>
+                 </div>
+               </div>
                <div className="pt-4 border-t border-white/10"><h3 className="text-lg font-black mb-1">Monthly Category Limits</h3><div className="grid grid-cols-1 md:grid-cols-2 gap-4">{CATEGORIES.filter(c => !['Income', 'Savings', 'Investments', 'Other'].includes(c)).map(cat => (<div key={cat} className="bg-white/5 border border-white/5 rounded-2xl p-4 flex items-center justify-between group hover:bg-white/10 transition-colors"><div><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{cat}</p><div className="relative"><span className="absolute left-0 top-1/2 -translate-y-1/2 font-black text-indigo-400 text-xs">$</span><input type="number" value={categoryBudgets[cat] || ''} onChange={(e) => handleBudgetChange(cat, e.target.value)} className="bg-transparent border-none p-0 pl-3 outline-none font-black text-sm text-white w-24" /></div></div><div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-slate-500 group-hover:text-indigo-400 transition-colors"><i className="fas fa-bullseye text-[10px]"></i></div></div>))}</div></div>
             </div>
           </section>

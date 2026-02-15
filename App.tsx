@@ -160,8 +160,6 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const initVault = async () => {
-      const isIframe = window.self !== window.top;
-      if (isIframe) return;
       const stored = await getStoredVaultHandle();
       if (stored) setDirectoryHandle(stored);
     };

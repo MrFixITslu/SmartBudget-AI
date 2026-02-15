@@ -68,11 +68,20 @@ const Settings: React.FC<Props> = ({
   const [userForm, setUserForm] = useState({ username: '', password: '', role: 'collaborator' as const });
 
   const [vaultStatus, setVaultStatus] = useState<'unlinked' | 'locked' | 'active'>('unlinked');
+  const [isLinking, setIsLinking] = useState(false);
+  const [isIframe, setIsIframe] = useState(false);
 
   const isFileSystemSupported = typeof window !== 'undefined' && !!(window as any).showDirectoryPicker;
-  const isIframe = window.self !== window.top;
 
-  // Breakdown for formula: Banks & Cash (Only) - (Budgets + Recurring) = Surplus
+  useEffect(() => {
+    // Robust detection for preview iframes
+    try {
+      setIsIframe(window.self !== window.top);
+    } catch (e) {
+      setIsIframe(true);
+    }
+  }, []);
+
   const { totalBanksAndCash, totalBudgets, totalRecurring } = useMemo(() => {
     const bankSum = bankConnections
       .filter(c => c.institutionType === 'bank')
@@ -143,32 +152,45 @@ const Settings: React.FC<Props> = ({
   };
 
   const handleSetLocalVault = async () => {
-    if (isIframe) {
-      alert("Browser Security Rule: Folder picking is disabled when the app is running in an iframe (sub-frame). Please use the standalone version for hard drive syncing.");
-      return;
-    }
     if (!isFileSystemSupported) {
-      alert("Browser Restriction: The File System Access API is not available. This happens in incognito mode, non-Chromium browsers, or insecure contexts.");
+      alert("Browser Restriction: The File System Access API is not available. Please use a modern desktop browser like Chrome or Edge.");
       return;
     }
 
+    if (isIframe) {
+      alert("Security Protocol: Browsers block direct file access inside Preview frames. Please use the 'Launch Full Command Center' button to open the app in a new tab first.");
+      return;
+    }
+
+    setIsLinking(true);
     try {
       if (vaultStatus === 'locked' && directoryHandle) {
         const permission = await (directoryHandle as any).requestPermission({ mode: 'readwrite' });
-        if (permission === 'granted') setVaultStatus('active');
-        return;
+        if (permission === 'granted') {
+          setVaultStatus('active');
+          return;
+        }
       }
 
+      // Fresh directory picker call in a user-gesture context
       const handle = await (window as any).showDirectoryPicker({
         mode: 'readwrite'
       });
+      
       onSetDirectory(handle);
       setVaultStatus('active');
     } catch (err: any) {
       if (err.name === 'AbortError') return;
       console.error("Directory access error:", err);
-      alert(`Could not link folder: ${err.message || 'Unknown Error'}. Ensure you are using a modern browser like Chrome or Edge and not in a restricted frame.`);
+      alert(`Vault Connection Error: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsLinking(false);
     }
+  };
+
+  const handleBreakout = () => {
+    // Open the current URL in a new tab to bypass iframe restrictions
+    window.open(window.location.href, '_blank', 'noopener,noreferrer');
   };
 
   const saveInvGoal = () => {
@@ -318,21 +340,51 @@ const Settings: React.FC<Props> = ({
           )}
 
           <section className="bg-indigo-50/50 p-6 rounded-[2rem] border border-indigo-100 space-y-4">
-             <div className="flex items-center justify-between">
+             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div className="flex items-center gap-4">
                 <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-indigo-600 shadow-sm"><i className="fas fa-folder-open"></i></div>
-                <div><h3 className="text-sm font-black text-slate-800">Local Hard Drive Vault</h3><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Sync files to a local folder</p></div>
+                <div><h3 className="text-sm font-black text-slate-800">Local Hard Drive Vault</h3><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">High-Performance SSD Linking</p></div>
               </div>
-              <button 
-                onClick={handleSetLocalVault}
-                className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${vaultStatus === 'active' ? 'bg-emerald-100 text-emerald-700' : (isFileSystemSupported && !isIframe) ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-200 text-slate-400'}`}
-              >
-                {vaultStatus === 'active' ? 'Vault Linked' : vaultStatus === 'locked' ? 'Unlock Vault' : (isFileSystemSupported && !isIframe) ? 'Connect Folder' : 'Unsupported'}
-              </button>
+              <div className="flex flex-wrap gap-2">
+                {isIframe && vaultStatus !== 'active' ? (
+                  <button 
+                    onClick={handleBreakout}
+                    className="px-6 py-3 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-2xl hover:bg-indigo-600 transition-all flex items-center gap-2"
+                  >
+                    <i className="fas fa-external-link-alt"></i> Launch Full Command Center
+                  </button>
+                ) : (
+                  <button 
+                    onClick={handleSetLocalVault}
+                    disabled={isLinking}
+                    className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-2 ${vaultStatus === 'active' ? 'bg-emerald-100 text-emerald-700' : isLinking ? 'bg-slate-100 text-slate-400 animate-pulse' : isFileSystemSupported ? 'bg-indigo-600 text-white shadow-lg active:scale-95 hover:bg-indigo-700' : 'bg-slate-200 text-slate-400'}`}
+                  >
+                    {isLinking ? (
+                      <><i className="fas fa-circle-notch fa-spin"></i> Synchronizing...</>
+                    ) : (
+                      <>{vaultStatus === 'active' ? 'Vault Linked' : vaultStatus === 'locked' ? 'Unlock Vault' : isFileSystemSupported ? 'Connect Local Folder' : 'Unsupported'}</>
+                    )}
+                  </button>
+                )}
+              </div>
             </div>
-            {isIframe && <p className="text-[8px] text-amber-500 font-black uppercase tracking-widest bg-amber-50 p-2 rounded-lg text-center"><i className="fas fa-exclamation-triangle mr-1"></i> Restricted in Preview (Iframe). IndexedDB vault active.</p>}
-            {!isFileSystemSupported && !isIframe && <p className="text-[8px] text-rose-500 font-black uppercase tracking-widest bg-rose-50 p-2 rounded-lg text-center"><i className="fas fa-exclamation-triangle mr-1"></i> File System Access restricted in this browser session.</p>}
-            {vaultStatus === 'active' && <p className="text-[9px] text-emerald-600 font-black uppercase tracking-widest bg-emerald-50 p-2 rounded-lg text-center"><i className="fas fa-shield-check mr-1"></i> Native File System Sync Enabled</p>}
+            
+            {isIframe && vaultStatus !== 'active' && (
+              <div className="p-5 bg-amber-50 border border-amber-200 rounded-[1.5rem] space-y-3 shadow-inner animate-in slide-in-from-top-2 duration-300">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center text-amber-600 shadow-sm">
+                    <i className="fas fa-shield-halved"></i>
+                  </div>
+                  <p className="text-[10px] text-amber-700 font-black uppercase tracking-widest leading-none">Restricted Browser Sandbox</p>
+                </div>
+                <p className="text-[11px] text-amber-600 font-bold leading-relaxed">
+                  To link your physical hard drive as a vault, you must be in a <b>Top-Level Tab</b>. Browser security blocks this feature within the current "Preview" window. Click the black button above to breakout.
+                </p>
+              </div>
+            )}
+            
+            {!isFileSystemSupported && <p className="text-[8px] text-rose-500 font-black uppercase tracking-widest bg-rose-50 p-2 rounded-lg text-center"><i className="fas fa-exclamation-triangle mr-1"></i> Browser Unsupported: Use Chrome/Edge on Desktop.</p>}
+            {vaultStatus === 'active' && <p className="text-[9px] text-emerald-600 font-black uppercase tracking-widest bg-emerald-50 p-2 rounded-lg text-center"><i className="fas fa-shield-check mr-1"></i> Native SSD File Access Established</p>}
           </section>
 
           <section className="bg-indigo-50/50 p-6 rounded-[2rem] border border-indigo-100">
@@ -364,7 +416,7 @@ const Settings: React.FC<Props> = ({
             <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6">Financial Strategy Hub</label>
             <div className="space-y-8">
                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                 {/* UPDATED: Monthly Target Surplus derivation using 'Banks & Cash (Only)' as requested */}
+                 {/* Monthly Target Surplus derivation */}
                  <div className="p-6 bg-white/5 border border-white/10 rounded-2xl relative overflow-hidden group">
                    <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/10 rounded-full blur-2xl -mr-12 -mt-12 group-hover:bg-indigo-500/20 transition-all"></div>
                    <h3 className="text-lg font-black mb-1 relative z-10">Monthly Target Surplus</h3>

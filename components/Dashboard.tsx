@@ -1,9 +1,7 @@
-
 import React, { useMemo, useState, useEffect } from 'react';
-import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Legend, AreaChart, Area } from 'recharts';
-import { Transaction, RecurringExpense, RecurringIncome, SavingGoal, InvestmentAccount, MarketPrice, BankConnection, InvestmentGoal } from '../types';
+import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, Legend } from 'recharts';
+import { Transaction, RecurringExpense, RecurringIncome, InvestmentAccount, MarketPrice, BankConnection, InvestmentGoal } from '../types';
 import { GoogleGenAI } from "@google/genai";
-import TransactionForm from './TransactionForm';
 
 interface InstitutionalBalance {
   balance: number;
@@ -17,7 +15,7 @@ interface Props {
   transactions: Transaction[];
   recurringExpenses: RecurringExpense[];
   recurringIncomes: RecurringIncome[];
-  savingGoals: SavingGoal[];
+  savingGoals: any[];
   investmentGoals: InvestmentGoal[];
   investments: InvestmentAccount[];
   marketPrices: MarketPrice[];
@@ -38,7 +36,7 @@ interface Props {
 type Timeframe = 'daily' | 'monthly' | 'yearly';
 
 const Dashboard: React.FC<Props> = ({ 
-  transactions, investments, marketPrices, bankConnections, recurringExpenses, recurringIncomes, savingGoals, categoryBudgets, cashOpeningBalance, onDelete, onPayRecurring, onReceiveRecurringIncome, onEdit
+  transactions, investments, marketPrices, bankConnections, recurringExpenses, recurringIncomes, categoryBudgets, cashOpeningBalance, onPayRecurring, onReceiveRecurringIncome
 }) => {
   const [trendTimeframe, setTrendTimeframe] = useState<Timeframe>('monthly');
   const [aiInsight, setAiInsight] = useState<string>("");
@@ -121,20 +119,22 @@ const Dashboard: React.FC<Props> = ({
     return primary + cash;
   }, [institutionalBalances]);
 
-  // Fix: Explicitly type acc as number to ensure type safety in arithmetic operation
   const netWorth: number = (Object.values(institutionalBalances) as InstitutionalBalance[]).reduce((acc: number, b) => acc + b.balance, 0);
 
   const cycleRollover = useMemo(() => {
-    const pastTransactions = transactions.filter(t => new Date(t.date) < cycleStartDate);
-    const openingBalancesTotal = bankConnections.reduce((acc, conn) => acc + conn.openingBalance, 0) + cashOpeningBalance;
+    // Corrected Date comparison using getTime() to avoid implicit coercion issues.
+    const pastTransactions = transactions.filter(t => new Date(t.date).getTime() < cycleStartDate.getTime());
+    // Fixed arithmetic operation error by adding explicit type ': number' to the reduce accumulator 'acc'.
+    const openingBalancesTotal = bankConnections.reduce((acc: number, conn) => acc + conn.openingBalance, 0) + cashOpeningBalance;
     
-    const historicalCashflow = pastTransactions.reduce((acc, t) => {
+    // Fixed arithmetic operation error by adding explicit type ': number' to the reduce accumulator 'acc'.
+    const historicalCashflow = pastTransactions.reduce((acc: number, t) => {
       if (t.institution === '1st National Bank St. Lucia' || t.institution === 'Cash in Hand') {
         if (t.type === 'income') return acc + t.amount;
         if (t.type === 'expense' || t.type === 'savings' || t.type === 'withdrawal') return acc - t.amount;
       }
       if (t.destinationInstitution === '1st National Bank St. Lucia' || t.destinationInstitution === 'Cash in Hand') {
-        if (t.type === 'transfer' || t.withdrawal === 'withdrawal') return acc + t.amount;
+        if (t.type === 'transfer' || t.type === 'withdrawal') return acc + t.amount;
       }
       return acc;
     }, 0);
@@ -185,28 +185,25 @@ const Dashboard: React.FC<Props> = ({
     });
   }, [transactions, searchTerm]);
 
+  // REFINED COMMITMENT LOGIC FOR PARTIALS
   const unpaidBills = useMemo(() => {
-    return recurringExpenses.filter(bill => {
-      const alreadyPaid = transactions.some(t => 
-        t.recurringId === bill.id && 
-        new Date(t.date) >= cycleStartDate
-      );
-      return !alreadyPaid;
-    });
+    return recurringExpenses.map(bill => {
+      const totalPaid = transactions
+        .filter(t => t.recurringId === bill.id && new Date(t.date) >= cycleStartDate)
+        .reduce((sum, t) => sum + t.amount, 0);
+      return { ...bill, remainingAmount: Math.max(0, bill.amount - totalPaid), paidAmount: totalPaid };
+    }).filter(bill => bill.remainingAmount > 0.01);
   }, [recurringExpenses, transactions, cycleStartDate]);
 
   const unconfirmedIncomes = useMemo(() => {
-    return recurringIncomes.filter(inc => {
-      const alreadyReceived = transactions.some(t => 
-        t.description.includes(inc.description) && 
-        t.type === 'income' &&
-        new Date(t.date) >= cycleStartDate
-      );
-      return !alreadyReceived;
-    });
+    return recurringIncomes.map(inc => {
+      const totalReceived = transactions
+        .filter(t => t.recurringId === inc.id && t.type === 'income' && new Date(t.date) >= cycleStartDate)
+        .reduce((sum, t) => sum + t.amount, 0);
+      return { ...inc, remainingAmount: Math.max(0, inc.amount - totalReceived), receivedAmount: totalReceived };
+    }).filter(inc => inc.remainingAmount > 0.01);
   }, [recurringIncomes, transactions, cycleStartDate]);
 
-  // SAFE SPEND LOGIC
   const categorySpentThisCycle = useMemo(() => {
     const spent: Record<string, number> = {};
     transactions
@@ -218,7 +215,6 @@ const Dashboard: React.FC<Props> = ({
   }, [transactions, cycleStartDate]);
 
   const remainingBudgetCommitted = useMemo(() => {
-    // Fix: Explicitly type acc as number to resolve arithmetic operation error on line 221
     return Object.entries(categoryBudgets).reduce((acc: number, [cat, budget]) => {
       const spent = categorySpentThisCycle[cat] || 0;
       const remaining = Math.max(0, budget - spent);
@@ -227,7 +223,7 @@ const Dashboard: React.FC<Props> = ({
   }, [categoryBudgets, categorySpentThisCycle]);
 
   const remainingBillsCommitted = useMemo(() => {
-    return unpaidBills.reduce((acc, bill) => acc + bill.amount, 0);
+    return unpaidBills.reduce((acc, bill) => acc + bill.remainingAmount, 0);
   }, [unpaidBills]);
 
   const dailySafeSpend = useMemo(() => {
@@ -257,14 +253,12 @@ const Dashboard: React.FC<Props> = ({
     generateSummary();
   }, [totalActualIncome, totalActualExpenses, netWorth, transactions.length, cycleRollover, dailySafeSpend]);
 
-  const handlePrint = () => window.print();
-
-  const handleQuickPaymentAction = (item: RecurringExpense | RecurringIncome, isIncome: boolean) => {
-    const amt = parseFloat(partialAmount) || item.amount;
+  const handleQuickPaymentAction = (item: any, isIncome: boolean) => {
+    const amt = parseFloat(partialAmount) || item.remainingAmount;
     if (isIncome) {
-      onReceiveRecurringIncome(item as RecurringIncome, amt);
+      onReceiveRecurringIncome(item, amt);
     } else {
-      onPayRecurring(item as RecurringExpense, amt);
+      onPayRecurring(item, amt);
     }
     setActivePaymentId(null);
     setPartialAmount("");
@@ -274,10 +268,6 @@ const Dashboard: React.FC<Props> = ({
     <div className="space-y-6 animate-in fade-in duration-500 pb-24 print:p-0">
       <div className="hidden print:block border-b-2 border-slate-900 pb-6 mb-8">
         <h1 className="text-3xl font-black text-slate-900 uppercase tracking-tighter">Financial Audit Statement</h1>
-        <div className="flex justify-between mt-2 text-[10px] font-black uppercase text-slate-400">
-          <span>Standardized Fire Finance Ledger</span>
-          <span>Period: {cycleStartDate.toLocaleDateString()} - {new Date().toLocaleDateString()}</span>
-        </div>
       </div>
 
       <div className="bg-slate-900 p-8 rounded-[3rem] shadow-2xl relative overflow-hidden group print:rounded-none">
@@ -292,93 +282,65 @@ const Dashboard: React.FC<Props> = ({
             </div>
             {isGeneratingInsight ? <div className="h-6 w-3/4 bg-white/5 animate-pulse rounded-lg"></div> : <h2 className="text-white text-lg md:text-xl font-medium italic">"{aiInsight}"</h2>}
           </div>
-          <button 
-            onClick={handlePrint}
-            className="px-6 py-3 bg-white/10 hover:bg-white/20 border border-white/20 rounded-2xl text-[10px] font-black uppercase tracking-widest text-white transition-all shadow-xl backdrop-blur-sm print:hidden"
-          >
-            <i className="fas fa-file-pdf mr-2"></i> Export Report
-          </button>
         </div>
       </div>
 
-      {/* Stats Grid - Enhanced with Daily Safe Spend */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3">
         <div className="bg-white p-4 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center">
-           <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1">Rollover</p>
-           <h3 className="text-xs font-black text-slate-500">${cycleRollover.toLocaleString()}</h3>
+           <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1 text-center">Rollover</p>
+           <h3 className="text-xs font-black text-slate-500 text-center">${cycleRollover.toLocaleString()}</h3>
         </div>
         <div className="bg-white p-4 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center">
-           <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1 text-center">Cycle Income</p>
-           <div className="text-center">
-              <h3 className="text-xs font-black text-emerald-600">+${totalActualIncome.toLocaleString()}</h3>
-              <p className="text-[7px] font-black text-slate-400 uppercase mt-0.5">Exp: ${expectedMonthlyIncome.toLocaleString()}</p>
-           </div>
+           <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1 text-center">Inflow</p>
+           <h3 className="text-xs font-black text-emerald-600 text-center">+${totalActualIncome.toLocaleString()}</h3>
         </div>
         <div className="bg-white p-4 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center">
-           <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1 text-center">Cycle Spend</p>
+           <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1 text-center">Outflow</p>
            <h3 className="text-xs font-black text-rose-600 text-center">-${totalActualExpenses.toLocaleString()}</h3>
         </div>
-        <div className="bg-white p-4 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center print:bg-slate-100 print:text-slate-900">
-           <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1 text-center">Cash Liquidity</p>
+        <div className="bg-white p-4 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center">
+           <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1 text-center">Cash On Hand</p>
            <h3 className="text-xs font-black text-indigo-600 text-center">${liquidFunds.toLocaleString()}</h3>
         </div>
-        
-        {/* NEW DAILY SAFE SPEND CARD */}
-        <div className="bg-emerald-600 p-4 rounded-[2rem] shadow-xl text-white flex flex-col justify-center print:bg-slate-100 print:text-slate-900 ring-4 ring-emerald-500/20">
-           <p className="text-white/60 text-[8px] font-black uppercase tracking-widest mb-1 print:text-slate-400">Daily Safe Spend</p>
+        <div className="bg-emerald-600 p-4 rounded-[2rem] shadow-xl text-white flex flex-col justify-center ring-4 ring-emerald-500/20">
+           <p className="text-white/60 text-[8px] font-black uppercase tracking-widest mb-1">Safe Spend</p>
            <h3 className="text-sm font-black">${dailySafeSpend.toFixed(0)}<span className="text-[8px] text-white/50 uppercase">/Day</span></h3>
-           <p className="text-[6px] text-emerald-200/60 font-bold uppercase mt-1">Post Bills & Budget</p>
         </div>
-
-        <div className="bg-indigo-600 p-4 rounded-[2rem] shadow-xl text-white flex flex-col justify-center print:bg-slate-100 print:text-slate-900">
-           <p className="text-white/60 text-[8px] font-black uppercase tracking-widest mb-1 print:text-slate-400">Days Remaining</p>
+        <div className="bg-indigo-600 p-4 rounded-[2rem] shadow-xl text-white flex flex-col justify-center">
+           <p className="text-white/60 text-[8px] font-black uppercase tracking-widest mb-1 text-center">Days left</p>
            <h3 className="text-sm font-black text-center">{daysUntilNextCycle} <span className="text-[8px] text-white/50 uppercase">Days</span></h3>
         </div>
-
-        <div className="bg-slate-900 p-4 rounded-[2rem] border border-slate-800 shadow-xl text-white flex flex-col justify-center print:border-slate-200 print:bg-white print:text-slate-900">
-           <p className="text-white/40 text-[8px] font-black uppercase tracking-widest mb-1 print:text-slate-400 text-center">Net Worth</p>
+        <div className="bg-slate-900 p-4 rounded-[2rem] border border-slate-800 shadow-xl text-white flex flex-col justify-center">
+           <p className="text-white/40 text-[8px] font-black uppercase tracking-widest mb-1 text-center">Net Worth</p>
            <h3 className="text-xs font-black text-center">${netWorth.toLocaleString()}</h3>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <section className="lg:col-span-2 bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm relative overflow-hidden flex flex-col min-h-[450px]">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-10">
-            <div>
-              <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.1em]">Cashflow Trajectory</h3>
-              <p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-widest">Inflow vs Outflow Historicals</p>
-            </div>
-            <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100 print:hidden">
+        <section className="lg:col-span-2 bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm h-[450px]">
+          <div className="flex justify-between items-center mb-10">
+            <h3 className="font-black text-slate-800 uppercase text-xs tracking-[0.1em]">Cashflow Trajectory</h3>
+            <div className="flex bg-slate-50 p-1 rounded-xl">
               {(['daily', 'monthly', 'yearly'] as Timeframe[]).map(tf => (
-                <button
-                  key={tf}
-                  onClick={() => setTrendTimeframe(tf)}
-                  className={`px-4 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${trendTimeframe === tf ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                >
-                  {tf}
-                </button>
+                <button key={tf} onClick={() => setTrendTimeframe(tf)} className={`px-4 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${trendTimeframe === tf ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400'}`}>{tf}</button>
               ))}
             </div>
           </div>
-          
-          <div className="flex-1 min-h-[300px] w-full" style={{ position: 'relative' }}>
-            <ResponsiveContainer width="100%" height="100%" minHeight={300}>
-              <AreaChart data={cashflowTrends} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+          <div className="h-[300px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={cashflowTrends}>
                 <defs>
                   <linearGradient id="colorIncome" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.1}/>
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.1}/><stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
                   </linearGradient>
                   <linearGradient id="colorExpense" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.1}/>
-                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
+                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.1}/><stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 9, fontBold: 800, fill: '#94a3b8' }} interval={trendTimeframe === 'daily' ? 6 : 0} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 9, fontBold: 800, fill: '#94a3b8' }} />
-                <Tooltip contentStyle={{ borderRadius: '20px', border: 'none', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', fontSize: '11px', fontBold: 'bold' }} />
-                <Legend verticalAlign="top" align="right" iconType="circle" wrapperStyle={{ paddingBottom: '20px', fontSize: '10px', fontBold: 'bold', textTransform: 'uppercase' }} />
+                <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 9, fontWeight: 800, fill: '#94a3b8' }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 9, fontWeight: 800, fill: '#94a3b8' }} />
+                <Tooltip contentStyle={{ borderRadius: '20px', border: 'none', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', fontSize: '11px', fontWeight: 'bold' }} />
                 <Area type="monotone" dataKey="income" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorIncome)" name="Inflow" />
                 <Area type="monotone" dataKey="expense" stroke="#ef4444" strokeWidth={3} fillOpacity={1} fill="url(#colorExpense)" name="Outflow" />
               </AreaChart>
@@ -386,36 +348,23 @@ const Dashboard: React.FC<Props> = ({
           </div>
         </section>
 
-        <section className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm flex flex-col h-full">
-          <div className="flex justify-between items-center mb-6">
-            <h3 className="font-black text-slate-800 uppercase text-[10px] tracking-[0.2em]">Transaction Ledger</h3>
-            <div className="relative print:hidden">
-              <input 
-                type="text" placeholder="Search..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-8 pr-4 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[10px] font-bold focus:ring-2 focus:ring-indigo-500 outline-none w-32"
-              />
-              <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[8px]"></i>
-            </div>
-          </div>
-          
+        <section className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm h-[450px] flex flex-col">
+          <h3 className="font-black text-slate-800 uppercase text-[10px] tracking-[0.2em] mb-6">Recent Log</h3>
           <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-2">
             {filteredTransactions.slice(0, 15).map(t => (
-              <div key={t.id} className="p-4 bg-slate-50/50 hover:bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between group transition-all">
+              <div key={t.id} className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between group">
                 <div className="flex items-center gap-4">
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white text-xs ${t.type === 'income' ? 'bg-emerald-500' : t.type === 'transfer' ? 'bg-indigo-600' : 'bg-rose-500'}`}>
-                    <i className={`fas ${t.type === 'income' ? 'fa-arrow-up' : t.type === 'transfer' ? 'fa-exchange-alt' : 'fa-arrow-down'}`}></i>
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white text-xs ${t.type === 'income' ? 'bg-emerald-500' : 'bg-rose-500'}`}>
+                    <i className={`fas ${t.type === 'income' ? 'fa-arrow-up' : 'fa-arrow-down'}`}></i>
                   </div>
                   <div>
-                    <p className="text-[11px] font-black text-slate-800 truncate w-24 md:w-32">{t.description}</p>
+                    <p className="text-[11px] font-black text-slate-800 truncate w-32">{t.description}</p>
                     <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">{t.category}</p>
                   </div>
                 </div>
-                <div className="text-right">
-                  <p className={`text-xs font-black ${t.type === 'income' ? 'text-emerald-600' : 'text-slate-900'}`}>
-                    {t.type === 'income' ? '+' : '-'}${t.amount.toLocaleString()}
-                  </p>
-                  <p className="text-[7px] font-black text-slate-400 uppercase">{new Date(t.date).toLocaleDateString()}</p>
-                </div>
+                <p className={`text-xs font-black ${t.type === 'income' ? 'text-emerald-600' : 'text-slate-900'}`}>
+                  {t.type === 'income' ? '+' : '-'}${t.amount.toLocaleString()}
+                </p>
               </div>
             ))}
           </div>
@@ -429,56 +378,78 @@ const Dashboard: React.FC<Props> = ({
             {unpaidBills.concat(unconfirmedIncomes as any).length > 0 ? unpaidBills.concat(unconfirmedIncomes as any).slice(0, 10).map((bill: any) => {
               const isIncome = 'nextConfirmationDate' in bill;
               const isActive = activePaymentId === bill.id;
+              const progress = (bill.paidAmount || bill.receivedAmount || 0) / bill.amount * 100;
+              const hasPaidSomething = progress > 0;
 
               return (
                 <div key={bill.id} className="p-4 bg-slate-50 border border-slate-100 rounded-2xl transition-all">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-4">
                       <div className={`w-10 h-10 rounded-xl flex items-center justify-center shadow-sm ${isIncome ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-500'}`}>
                         <i className={`fas ${isIncome ? 'fa-hand-holding-dollar' : 'fa-file-invoice'}`}></i>
                       </div>
                       <div>
                         <p className="font-black text-[11px] text-slate-800">{bill.description}</p>
-                        <p className="text-[8px] font-black text-slate-400 uppercase">
-                          {isIncome ? 'Expected' : 'Bill'}: ${bill.amount} • Day {bill.dayOfMonth}
-                        </p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <p className="text-[8px] font-black text-slate-400 uppercase">
+                            {isIncome ? 'Expect' : 'Bill'}: ${bill.amount}
+                          </p>
+                          {hasPaidSomething && (
+                            <span className="px-1.5 py-0.5 bg-indigo-100 text-indigo-600 text-[7px] font-black uppercase rounded">Partial</span>
+                          )}
+                        </div>
                       </div>
                     </div>
+                    <div className="text-right">
+                       <p className="text-[11px] font-black text-indigo-600">${bill.remainingAmount.toFixed(2)}</p>
+                       <p className="text-[7px] font-black text-slate-400 uppercase">Balance Due</p>
+                    </div>
+                  </div>
+
+                  {/* Progress Bar for Partial Payments */}
+                  {hasPaidSomething && (
+                    <div className="w-full h-1 bg-slate-200 rounded-full mb-4 overflow-hidden">
+                       <div className="h-full bg-indigo-500 transition-all duration-500" style={{ width: `${progress}%` }}></div>
+                    </div>
+                  )}
+
+                  <div className="flex justify-between items-center mt-4 pt-4 border-t border-slate-100/50">
+                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">
+                      Scheduled: {bill.dayOfMonth}th
+                    </p>
                     {isActive ? (
-                      <div className="flex gap-2 items-center animate-in slide-in-from-right-2 duration-300">
+                      <div className="flex gap-2 items-center animate-in slide-in-from-right-2">
                         <input 
                           type="number" 
                           autoFocus
-                          placeholder={bill.amount.toString()}
+                          placeholder={bill.remainingAmount.toFixed(2)}
                           value={partialAmount}
                           onChange={(e) => setPartialAmount(e.target.value)}
                           className="w-24 px-3 py-2 bg-white border-2 border-indigo-500 rounded-xl text-[10px] font-black outline-none shadow-sm"
                         />
-                        <button onClick={() => handleQuickPaymentAction(bill, isIncome)} className="w-9 h-9 bg-indigo-600 text-white rounded-xl flex items-center justify-center text-[10px] shadow-lg shadow-indigo-100 hover:bg-slate-900 transition-colors"><i className="fas fa-check"></i></button>
-                        <button onClick={() => { setActivePaymentId(null); setPartialAmount(""); }} className="w-9 h-9 bg-slate-100 text-slate-400 rounded-xl flex items-center justify-center text-[10px] hover:bg-rose-50 hover:text-rose-600 transition-colors"><i className="fas fa-times"></i></button>
+                        <button onClick={() => handleQuickPaymentAction(bill, isIncome)} className="w-9 h-9 bg-indigo-600 text-white rounded-xl flex items-center justify-center text-[10px]"><i className="fas fa-check"></i></button>
+                        <button onClick={() => { setActivePaymentId(null); setPartialAmount(""); }} className="w-9 h-9 bg-slate-100 text-slate-400 rounded-xl flex items-center justify-center text-[10px]"><i className="fas fa-times"></i></button>
                       </div>
                     ) : (
-                      <button onClick={() => { setActivePaymentId(bill.id); setPartialAmount(bill.amount.toString()); }} className="px-5 py-2.5 bg-slate-900 text-white text-[9px] font-black uppercase tracking-widest rounded-xl hover:bg-indigo-600 transition-all shadow-md print:hidden">Record</button>
+                      <button onClick={() => { setActivePaymentId(bill.id); setPartialAmount(bill.remainingAmount.toFixed(2)); }} className="px-5 py-2.5 bg-slate-900 text-white text-[9px] font-black uppercase tracking-widest rounded-xl hover:bg-indigo-600 transition-all shadow-md">Record</button>
                     )}
                   </div>
                 </div>
               );
-            }) : <p className="py-10 text-center text-slate-300 font-black uppercase text-[9px] tracking-widest">All commitments clear</p>}
+            }) : <p className="py-10 text-center text-slate-300 font-black uppercase text-[9px] tracking-widest">All clear</p>}
           </div>
         </section>
 
         <section className="bg-slate-900 p-8 rounded-[3rem] text-white shadow-2xl">
-          <h3 className="font-black uppercase text-[10px] tracking-[0.2em] text-indigo-400 mb-6">Asset Distribution</h3>
+          <h3 className="font-black uppercase text-[10px] tracking-[0.2em] text-indigo-400 mb-6">Market Pulse</h3>
           <div className="grid grid-cols-2 gap-4">
             {marketPrices.slice(0, 4).map(p => (
               <div key={p.symbol} className="p-4 bg-white/5 border border-white/5 rounded-[2rem] flex flex-col justify-between">
-                <div className="flex justify-between items-start">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{p.symbol}</span>
-                  <div className={`text-[8px] font-black px-1.5 py-0.5 rounded ${p.change24h >= 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
-                    {p.change24h > 0 ? '+' : ''}{p.change24h.toFixed(1)}%
-                  </div>
-                </div>
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{p.symbol}</span>
                 <h4 className="text-sm font-black mt-2">${p.price.toLocaleString()}</h4>
+                <div className={`text-[8px] font-black mt-1 ${p.change24h >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {p.change24h > 0 ? '+' : ''}{p.change24h.toFixed(1)}%
+                </div>
               </div>
             ))}
           </div>

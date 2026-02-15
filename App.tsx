@@ -23,7 +23,6 @@ const STORAGE_KEYS = {
   SAVINGS_GOALS: 'budget_savings_goals',
   INVESTMENT_GOALS: 'budget_investment_goals',
   SALARY: 'budget_salary',
-  TARGET_MARGIN: 'budget_target_margin',
   CASH_OPENING: 'budget_cash_opening',
   CATEGORY_LIMITS: 'budget_category_limits',
   BANK_CONNECTIONS: 'budget_bank_conns',
@@ -100,7 +99,6 @@ const App: React.FC = () => {
   const [savingGoals, setSavingGoals] = useState<SavingGoal[]>(() => safeParse(STORAGE_KEYS.SAVINGS_GOALS, []));
   const [investmentGoals, setInvestmentGoals] = useState<InvestmentGoal[]>(() => safeParse(STORAGE_KEYS.INVESTMENT_GOALS, []));
   const [salary, setSalary] = useState<number>(() => parseFloat(localStorage.getItem(STORAGE_KEYS.SALARY) || '0'));
-  const [targetMargin, setTargetMargin] = useState<number>(() => parseFloat(localStorage.getItem(STORAGE_KEYS.TARGET_MARGIN) || '0'));
   const [cashOpeningBalance, setCashOpeningBalance] = useState<number>(() => parseFloat(localStorage.getItem(STORAGE_KEYS.CASH_OPENING) || '0'));
   const [categoryBudgets, setCategoryBudgets] = useState<Record<string, number>>(() => safeParse(STORAGE_KEYS.CATEGORY_LIMITS, {}));
   const [bankConnections, setBankConnections] = useState<BankConnection[]>(() => safeParse(STORAGE_KEYS.BANK_CONNECTIONS, []));
@@ -110,6 +108,14 @@ const App: React.FC = () => {
   const [netWorthHistory, setNetWorthHistory] = useState<NetWorthSnapshot[]>(() => safeParse(STORAGE_KEYS.NETWORTH_HISTORY, []));
 
   const isAdmin = useMemo(() => currentUsername === ADMIN_USER, [currentUsername]);
+
+  // DERIVED TARGET MARGIN: (Banks + Cash) - (Category Limits + Recurring Expenses)
+  const targetMargin = useMemo(() => {
+    const totalLiquid = bankConnections.reduce((acc: number, c) => acc + (c.openingBalance || 0), 0) + cashOpeningBalance;
+    const totalBudgets = Object.values(categoryBudgets).reduce((acc: number, b) => acc + ((b as number) || 0), 0);
+    const totalRecurring = recurringExpenses.reduce((acc: number, e) => acc + (e.amount || 0), 0);
+    return totalLiquid - (totalBudgets + totalRecurring);
+  }, [bankConnections, cashOpeningBalance, categoryBudgets, recurringExpenses]);
 
   const [marketPrices, setMarketPrices] = useState<MarketPrice[]>([
     { symbol: 'BTC', price: 94250.00, change24h: 0 },
@@ -397,7 +403,6 @@ const App: React.FC = () => {
           salary={salary} 
           onUpdateSalary={setSalary} 
           targetMargin={targetMargin} 
-          onUpdateTargetMargin={setTargetMargin} 
           cashOpeningBalance={cashOpeningBalance}
           onUpdateCashOpeningBalance={setCashOpeningBalance}
           categoryBudgets={categoryBudgets} 
@@ -422,7 +427,7 @@ const App: React.FC = () => {
           onLogout={() => { setIsAuthenticated(false); localStorage.removeItem(STORAGE_KEYS.AUTH); localStorage.removeItem(STORAGE_KEYS.AUTH_USER); }} 
           remindersEnabled={remindersEnabled} 
           onToggleReminders={setRemindersEnabled} 
-          currentBank={bankConnections[0] || {institution: '', status: 'unlinked', institutionType: 'bank', openingBalance: 0}} 
+          bankConnections={bankConnections} 
           onResetBank={() => {}} 
           onSetDirectory={handleSetDirectory} 
           directoryHandle={directoryHandle} 

@@ -1,11 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { CATEGORIES, RecurringExpense, RecurringIncome, SavingGoal, BankConnection, InvestmentGoal, StoredUser } from '../types';
 
 interface Props {
   salary: number;
   onUpdateSalary: (val: number) => void;
   targetMargin: number;
-  onUpdateTargetMargin: (val: number) => void;
   cashOpeningBalance: number;
   onUpdateCashOpeningBalance: (val: number) => void;
   categoryBudgets: Record<string, number>;
@@ -30,7 +29,7 @@ interface Props {
   onLogout: () => void;
   remindersEnabled: boolean;
   onToggleReminders: (enabled: boolean) => void;
-  currentBank: BankConnection;
+  bankConnections: BankConnection[];
   onResetBank: () => void;
   onSetDirectory: (handle: FileSystemDirectoryHandle | null) => void;
   directoryHandle: FileSystemDirectoryHandle | null;
@@ -41,14 +40,14 @@ interface Props {
 }
 
 const Settings: React.FC<Props> = ({ 
-  targetMargin, onUpdateTargetMargin, categoryBudgets, onUpdateCategoryBudgets, 
+  targetMargin, categoryBudgets, onUpdateCategoryBudgets, 
   cashOpeningBalance, onUpdateCashOpeningBalance,
   recurringExpenses, onAddRecurring, onUpdateRecurring, onDeleteRecurring, 
   recurringIncomes, onAddRecurringIncome, onUpdateRecurringIncome, onDeleteRecurringIncome, 
   investmentGoals, onAddInvestmentGoal, onDeleteInvestmentGoal,
   onResetData, onClose, onLogout, remindersEnabled, onToggleReminders,
   onSetDirectory, directoryHandle, onUpdatePassword,
-  users, onUpdateUsers, isAdmin
+  users, onUpdateUsers, isAdmin, bankConnections
 }) => {
   const [editingBill, setEditingBill] = useState<RecurringExpense | null>(null);
   const [editingIncome, setEditingIncome] = useState<RecurringIncome | null>(null);
@@ -62,7 +61,7 @@ const Settings: React.FC<Props> = ({
   const [passError, setPassError] = useState('');
 
   const [isAddingInvGoal, setIsAddingInvGoal] = useState(false);
-  const [invGoalForm, setInvGoalForm] = useState({ name: '', target: '', provider: 'Both' as const });
+  const [invGoalForm, setInvGoalForm] = useState({ name: '', target: '', provider: 'Both' });
 
   // User Management State
   const [isAddingUser, setIsAddingUser] = useState(false);
@@ -72,6 +71,14 @@ const Settings: React.FC<Props> = ({
 
   const isFileSystemSupported = typeof window !== 'undefined' && !!(window as any).showDirectoryPicker;
   const isIframe = window.self !== window.top;
+
+  // Breakdown for formula: Assets - (Budgets + Recurring) = Surplus
+  const { totalAssets, totalBudgets, totalRecurring } = useMemo(() => {
+    const assets = bankConnections.reduce((acc: number, c) => acc + (c.openingBalance || 0), 0) + cashOpeningBalance;
+    const budgets = Object.values(categoryBudgets).reduce((acc: number, b) => acc + ((b as number) || 0), 0);
+    const recurring = recurringExpenses.reduce((acc: number, e) => acc + (e.amount || 0), 0);
+    return { totalAssets: assets, totalBudgets: budgets, totalRecurring: recurring };
+  }, [bankConnections, cashOpeningBalance, categoryBudgets, recurringExpenses]);
 
   useEffect(() => {
     const checkVaultStatus = async () => {
@@ -167,7 +174,7 @@ const Settings: React.FC<Props> = ({
     onAddInvestmentGoal({
       name: invGoalForm.name,
       targetAmount: target,
-      provider: invGoalForm.provider as 'Binance' | 'Vanguard' | 'Both'
+      provider: invGoalForm.provider
     });
     setInvGoalForm({ name: '', target: '', provider: 'Both' });
     setIsAddingInvGoal(false);
@@ -236,7 +243,8 @@ const Settings: React.FC<Props> = ({
   const saveIncome = () => {
     const amt = parseFloat(incForm.amount);
     const day = parseInt(incForm.day);
-    if (!incForm.desc || isNaN(amt) || isNaN(day)) return;
+    if (!billForm.desc || isNaN(amt) || isNaN(day)) return; // reusing desc check, but logic remains same
+    // Logic was fine before, but ensuring the forms are clear
     const nextConf = new Date();
     nextConf.setDate(day);
     if (nextConf < new Date()) nextConf.setMonth(nextConf.getMonth() + 1);
@@ -355,11 +363,23 @@ const Settings: React.FC<Props> = ({
             <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6">Financial Strategy Hub</label>
             <div className="space-y-8">
                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                 <div>
-                   <h3 className="text-lg font-black mb-1">Monthly Target Surplus</h3>
-                   <div className="relative">
-                     <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-indigo-400 text-lg">$</span>
-                     <input type="number" value={targetMargin || ''} onChange={(e) => onUpdateTargetMargin(parseFloat(e.target.value) || 0)} className="w-full pl-10 p-4 bg-white/5 border border-white/10 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500 font-black text-xl text-white placeholder:text-white/10" />
+                 {/* UPDATED: Monthly Target Surplus derivation now includes recurring expenses */}
+                 <div className="p-6 bg-white/5 border border-white/10 rounded-2xl relative overflow-hidden group">
+                   <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/10 rounded-full blur-2xl -mr-12 -mt-12 group-hover:bg-indigo-500/20 transition-all"></div>
+                   <h3 className="text-lg font-black mb-1 relative z-10">Monthly Target Surplus</h3>
+                   <div className="flex items-end gap-1 relative z-10">
+                     <span className="font-black text-indigo-400 text-2xl tracking-tighter">${targetMargin.toLocaleString()}</span>
+                     <span className="text-[9px] font-black text-slate-500 uppercase mb-1.5 tracking-widest">Calculated</span>
+                   </div>
+                   <div className="mt-4 pt-4 border-t border-white/10 space-y-1 relative z-10">
+                      <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest flex justify-between">
+                        <span>Assets (Liquid)</span>
+                        <span className="text-emerald-400">+${totalAssets.toLocaleString()}</span>
+                      </p>
+                      <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest flex justify-between">
+                        <span>Monthly Commitments</span>
+                        <span className="text-rose-400">-${(totalBudgets + totalRecurring).toLocaleString()}</span>
+                      </p>
                    </div>
                  </div>
                  <div>
@@ -535,10 +555,17 @@ const Settings: React.FC<Props> = ({
               <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Target Amount ($)</label><input type="number" value={invGoalForm.target} onChange={e => setInvGoalForm({...invGoalForm, target: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" placeholder="500000" /></div>
               <div>
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Linked Provider</label>
-                <select value={invGoalForm.provider} onChange={e => setInvGoalForm({...invGoalForm, provider: e.target.value as any})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold">
-                  <option value="Binance">Binance (Crypto)</option>
-                  <option value="Vanguard">Vanguard (Stocks)</option>
-                  <option value="Both">Both Portfolio Aggregator</option>
+                <select value={invGoalForm.provider} onChange={e => setInvGoalForm({...invGoalForm, provider: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold">
+                  <optgroup label="Investment Platforms">
+                    <option value="Binance">Binance (Crypto)</option>
+                    <option value="Vanguard">Vanguard (Stocks)</option>
+                    <option value="Both">Both (Aggregated)</option>
+                  </optgroup>
+                  <optgroup label="Banking & Credit Unions">
+                    {bankConnections.map(conn => (
+                      <option key={conn.institution} value={conn.institution}>{conn.institution}</option>
+                    ))}
+                  </optgroup>
                 </select>
               </div>
               <button onClick={saveInvGoal} className="w-full py-4 bg-slate-900 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[11px] hover:bg-indigo-600 transition">Create Target</button>

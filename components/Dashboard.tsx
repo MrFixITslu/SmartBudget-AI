@@ -1,3 +1,4 @@
+
 import React, { useMemo, useState, useEffect } from 'react';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, Legend, BarChart, Bar, Cell } from 'recharts';
 import { Transaction, RecurringExpense, RecurringIncome, InvestmentAccount, MarketPrice, BankConnection, InvestmentGoal } from '../types';
@@ -68,13 +69,13 @@ const Dashboard: React.FC<Props> = ({
       nextCycle.setMonth(nextCycle.getMonth() + 1);
     }
     const diff = nextCycle.getTime() - now.getTime();
+    // Ensuring it always returns at least 1 day to prevent division by zero
     return Math.max(1, Math.ceil(diff / (1000 * 60 * 60 * 24)));
   }, []);
 
   const { totalActualIncome, totalActualExpenses } = useMemo(() => {
     const current = transactions.filter(t => new Date(t.date) >= cycleStartDate);
     return {
-      // Add explicit : number type to reduce accumulators to fix arithmetic operation inference
       totalActualIncome: current.filter(t => t.type === 'income').reduce((acc: number, t) => acc + t.amount, 0),
       totalActualExpenses: current.filter(t => t.type === 'expense').reduce((acc: number, t) => acc + t.amount, 0),
     };
@@ -119,10 +120,26 @@ const Dashboard: React.FC<Props> = ({
     return balances;
   }, [bankConnections, investments, transactions, marketPrices, cashOpeningBalance]);
 
-  const liquidFunds = useMemo(() => {
-    const primary = Number(institutionalBalances['1st National Bank St. Lucia']?.balance || 0);
+  const { bankTotal, cuTotal, cryptoTotal, vanguardTotal } = useMemo(() => {
+    let b = 0, c = 0, cr = 0, v = 0;
+    (Object.entries(institutionalBalances) as Array<[string, InstitutionalBalance]>).forEach(([name, data]) => {
+      if (data.type === 'bank') b += data.balance;
+      if (data.type === 'credit_union') c += data.balance;
+      if (data.type === 'investment') {
+        if (name === 'Binance') cr += data.balance;
+        else v += data.balance;
+      }
+    });
+    return { bankTotal: b, cuTotal: c, cryptoTotal: cr, vanguardTotal: v };
+  }, [institutionalBalances]);
+
+  const liquidFunds = useMemo<number>(() => {
+    // Total of money in Bank + Cash in Hand
+    const bankSum = (Object.values(institutionalBalances) as InstitutionalBalance[])
+      .filter(b => b.type === 'bank')
+      .reduce((acc, b) => acc + b.balance, 0);
     const cash = Number(institutionalBalances['Cash in Hand']?.balance || 0);
-    return primary + cash;
+    return bankSum + cash;
   }, [institutionalBalances]);
 
   const netWorth: number = (Object.values(institutionalBalances) as InstitutionalBalance[]).reduce((acc: number, b) => acc + b.balance, 0);
@@ -206,7 +223,6 @@ const Dashboard: React.FC<Props> = ({
 
   const unpaidBills = useMemo(() => {
     return recurringExpenses.map(bill => {
-      // Add explicit : number type to reduce accumulator to fix potential inference issues
       const totalPaid = transactions
         .filter(t => t.recurringId === bill.id && new Date(t.date) >= cycleStartDate)
         .reduce((sum: number, t) => sum + t.amount, 0);
@@ -216,7 +232,6 @@ const Dashboard: React.FC<Props> = ({
 
   const unconfirmedIncomes = useMemo(() => {
     return recurringIncomes.map(inc => {
-      // Add explicit : number type to reduce accumulator to fix potential inference issues
       const totalReceived = transactions
         .filter(t => t.recurringId === inc.id && t.type === 'income' && new Date(t.date) >= cycleStartDate)
         .reduce((sum: number, t) => sum + t.amount, 0);
@@ -224,25 +239,10 @@ const Dashboard: React.FC<Props> = ({
     }).filter(inc => inc.remainingAmount > 0.01);
   }, [recurringIncomes, transactions, cycleStartDate]);
 
-  const remainingBudgetCommitted = useMemo(() => {
-    return Object.entries(categoryBudgets).reduce((acc: number, [cat, budget]) => {
-      const item = categorySpendData.find(d => d.name === cat);
-      const spent = item?.amount || 0;
-      const remaining = Math.max(0, budget - spent);
-      return acc + remaining;
-    }, 0);
-  }, [categoryBudgets, categorySpendData]);
-
-  const remainingBillsCommitted = useMemo(() => {
-    // Add explicit : number type to reduce accumulator to fix arithmetic operation error
-    return unpaidBills.reduce((acc: number, bill) => acc + bill.remainingAmount, 0);
-  }, [unpaidBills]);
-
   const dailySafeSpend = useMemo(() => {
-    const totalCommitted = remainingBudgetCommitted + remainingBillsCommitted;
-    const surplus = liquidFunds - totalCommitted;
-    return Math.max(0, surplus / daysUntilNextCycle);
-  }, [liquidFunds, remainingBudgetCommitted, remainingBillsCommitted, daysUntilNextCycle]);
+    // UPDATED: (Money in Bank + Cash in Hand) / Days left before next cycle
+    return Math.max(0, liquidFunds / daysUntilNextCycle);
+  }, [liquidFunds, daysUntilNextCycle]);
 
   useEffect(() => {
     const generateSummary = async () => {
@@ -350,6 +350,37 @@ const Dashboard: React.FC<Props> = ({
         </div>
       </div>
 
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm">
+           <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1">Traditional Bank</p>
+           <h3 className="text-sm font-black text-slate-800">${bankTotal.toLocaleString()}</h3>
+           <div className="mt-2 h-1 w-full bg-slate-100 rounded-full overflow-hidden">
+             <div className="h-full bg-emerald-500" style={{ width: `${netWorth > 0 ? (bankTotal / netWorth) * 100 : 0}%` }}></div>
+           </div>
+        </div>
+        <div className="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm">
+           <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1">Credit Union</p>
+           <h3 className="text-sm font-black text-slate-800">${cuTotal.toLocaleString()}</h3>
+           <div className="mt-2 h-1 w-full bg-slate-100 rounded-full overflow-hidden">
+             <div className="h-full bg-teal-500" style={{ width: `${netWorth > 0 ? (cuTotal / netWorth) * 100 : 0}%` }}></div>
+           </div>
+        </div>
+        <div className="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm">
+           <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1">Crypto (Digital)</p>
+           <h3 className="text-sm font-black text-slate-800">${cryptoTotal.toLocaleString()}</h3>
+           <div className="mt-2 h-1 w-full bg-slate-100 rounded-full overflow-hidden">
+             <div className="h-full bg-yellow-500" style={{ width: `${netWorth > 0 ? (cryptoTotal / netWorth) * 100 : 0}%` }}></div>
+           </div>
+        </div>
+        <div className="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm">
+           <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1">Other Investments</p>
+           <h3 className="text-sm font-black text-slate-800">${vanguardTotal.toLocaleString()}</h3>
+           <div className="mt-2 h-1 w-full bg-slate-100 rounded-full overflow-hidden">
+             <div className="h-full bg-rose-500" style={{ width: `${netWorth > 0 ? (vanguardTotal / netWorth) * 100 : 0}%` }}></div>
+           </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <section className="lg:col-span-2 bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm h-[450px]">
           <div className="flex justify-between items-center mb-10">
@@ -382,7 +413,6 @@ const Dashboard: React.FC<Props> = ({
           </div>
         </section>
 
-        {/* Category Spend Matrix Report */}
         <section className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm h-[450px] flex flex-col">
           <div className="flex justify-between items-center mb-6">
             <h3 className="font-black text-slate-800 uppercase text-[10px] tracking-[0.2em]">Category Spend Matrix</h3>

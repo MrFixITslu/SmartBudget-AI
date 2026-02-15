@@ -1,4 +1,3 @@
-
 export type TransactionType = 'expense' | 'income' | 'savings' | 'withdrawal' | 'transfer';
 export type InstitutionType = 'bank' | 'credit_union' | 'investment';
 
@@ -103,7 +102,7 @@ export interface InvestmentGoal {
   id: string;
   name: string;
   targetAmount: number;
-  provider: 'Binance' | 'Vanguard' | 'Both';
+  provider: string;
 }
 
 export interface RecurringExpense {

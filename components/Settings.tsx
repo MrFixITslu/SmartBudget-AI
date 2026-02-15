@@ -72,9 +72,12 @@ const Settings: React.FC<Props> = ({
   const isFileSystemSupported = typeof window !== 'undefined' && !!(window as any).showDirectoryPicker;
   const isIframe = window.self !== window.top;
 
-  // Breakdown for formula: Assets - (Budgets + Recurring) = Surplus
+  // Breakdown for formula: Assets (Banks + Cash) - (Budgets + Recurring) = Surplus
+  // UPDATED: Filter out credit unions from assets breakdown as requested.
   const { totalAssets, totalBudgets, totalRecurring } = useMemo(() => {
-    const assets = bankConnections.reduce((acc: number, c) => acc + (c.openingBalance || 0), 0) + cashOpeningBalance;
+    const assets = bankConnections
+      .filter(c => c.institutionType === 'bank')
+      .reduce((acc: number, c) => acc + (c.openingBalance || 0), 0) + cashOpeningBalance;
     const budgets = Object.values(categoryBudgets).reduce((acc: number, b) => acc + ((b as number) || 0), 0);
     const recurring = recurringExpenses.reduce((acc: number, e) => acc + (e.amount || 0), 0);
     return { totalAssets: assets, totalBudgets: budgets, totalRecurring: recurring };
@@ -243,8 +246,7 @@ const Settings: React.FC<Props> = ({
   const saveIncome = () => {
     const amt = parseFloat(incForm.amount);
     const day = parseInt(incForm.day);
-    if (!billForm.desc || isNaN(amt) || isNaN(day)) return; // reusing desc check, but logic remains same
-    // Logic was fine before, but ensuring the forms are clear
+    if (!incForm.desc || isNaN(amt) || isNaN(day)) return; 
     const nextConf = new Date();
     nextConf.setDate(day);
     if (nextConf < new Date()) nextConf.setMonth(nextConf.getMonth() + 1);
@@ -363,7 +365,7 @@ const Settings: React.FC<Props> = ({
             <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6">Financial Strategy Hub</label>
             <div className="space-y-8">
                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                 {/* UPDATED: Monthly Target Surplus derivation now includes recurring expenses */}
+                 {/* UPDATED: Monthly Target Surplus derivation excludes credit unions from assets */}
                  <div className="p-6 bg-white/5 border border-white/10 rounded-2xl relative overflow-hidden group">
                    <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/10 rounded-full blur-2xl -mr-12 -mt-12 group-hover:bg-indigo-500/20 transition-all"></div>
                    <h3 className="text-lg font-black mb-1 relative z-10">Monthly Target Surplus</h3>
@@ -373,7 +375,7 @@ const Settings: React.FC<Props> = ({
                    </div>
                    <div className="mt-4 pt-4 border-t border-white/10 space-y-1 relative z-10">
                       <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest flex justify-between">
-                        <span>Assets (Liquid)</span>
+                        <span>Banks & Cash (Only)</span>
                         <span className="text-emerald-400">+${totalAssets.toLocaleString()}</span>
                       </p>
                       <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest flex justify-between">

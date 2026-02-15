@@ -110,8 +110,11 @@ const App: React.FC = () => {
   const isAdmin = useMemo(() => currentUsername === ADMIN_USER, [currentUsername]);
 
   // DERIVED TARGET MARGIN: (Banks + Cash) - (Category Limits + Recurring Expenses)
+  // UPDATED: Filter only 'bank' types for assets (excluding credit unions)
   const targetMargin = useMemo(() => {
-    const totalLiquid = bankConnections.reduce((acc: number, c) => acc + (c.openingBalance || 0), 0) + cashOpeningBalance;
+    const totalLiquid = bankConnections
+      .filter(c => c.institutionType === 'bank')
+      .reduce((acc: number, c) => acc + (c.openingBalance || 0), 0) + cashOpeningBalance;
     const totalBudgets = Object.values(categoryBudgets).reduce((acc: number, b) => acc + ((b as number) || 0), 0);
     const totalRecurring = recurringExpenses.reduce((acc: number, e) => acc + (e.amount || 0), 0);
     return totalLiquid - (totalBudgets + totalRecurring);

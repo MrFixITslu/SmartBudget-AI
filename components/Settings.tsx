@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { CATEGORIES, RecurringExpense, RecurringIncome, SavingGoal, BankConnection, InvestmentGoal, StoredUser } from '../types';
+import { storeMirrorHandle, clearVaultHandle } from '../services/fileStorageService';
 
 interface Props {
   salary: number;
@@ -37,630 +38,457 @@ interface Props {
   users: StoredUser[];
   onUpdateUsers: (users: StoredUser[]) => void;
   isAdmin: boolean;
+  onOpenBankSync?: () => void;
+  onUnlinkBank?: (inst: string) => void;
 }
+
+type SettingsTab = 'general' | 'recurring' | 'goals' | 'api' | 'security';
 
 const Settings: React.FC<Props> = ({ 
   targetMargin, categoryBudgets, onUpdateCategoryBudgets, 
   cashOpeningBalance, onUpdateCashOpeningBalance,
-  recurringExpenses, onAddRecurring, onUpdateRecurring, onDeleteRecurring, 
-  recurringIncomes, onAddRecurringIncome, onUpdateRecurringIncome, onDeleteRecurringIncome, 
+  recurringExpenses, onAddRecurring, onDeleteRecurring,
+  recurringIncomes, onAddRecurringIncome, onDeleteRecurringIncome,
+  savingGoals, onAddSavingGoal, onDeleteSavingGoal,
   investmentGoals, onAddInvestmentGoal, onDeleteInvestmentGoal,
-  onResetData, onClose, onLogout, remindersEnabled, onToggleReminders,
-  onSetDirectory, directoryHandle, onUpdatePassword,
-  users, onUpdateUsers, isAdmin, bankConnections
+  onResetData, onClose, onLogout, 
+  onUpdatePassword, bankConnections,
+  onOpenBankSync, onUnlinkBank,
+  onSetDirectory, directoryHandle,
+  isAdmin
 }) => {
-  const [editingBill, setEditingBill] = useState<RecurringExpense | null>(null);
-  const [editingIncome, setEditingIncome] = useState<RecurringIncome | null>(null);
-  const [isAddingBill, setIsAddingBill] = useState(false);
-  const [billForm, setBillForm] = useState({ desc: '', amount: '', category: 'Utilities', day: '1', sync: false });
-  const [isAddingIncome, setIsAddingIncome] = useState(false);
-  const [incForm, setIncForm] = useState({ desc: '', amount: '', category: 'Income', day: '25' });
-
+  const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [isChangingPass, setIsChangingPass] = useState(false);
-  const [passForm, setPassForm] = useState({ old: '', new: '', confirm: '' });
-  const [passError, setPassError] = useState('');
+  const [passForm, setPassForm] = useState({ new: '', confirm: '' });
 
-  const [isAddingInvGoal, setIsAddingInvGoal] = useState(false);
-  const [invGoalForm, setInvGoalForm] = useState({ name: '', target: '', provider: 'Both' });
+  // Temp form states for adding new items
+  const [newRec, setNewRec] = useState({ description: '', amount: '', category: CATEGORIES[0], dayOfMonth: '1' });
+  const [newInc, setNewInc] = useState({ description: '', amount: '', dayOfMonth: '25' });
+  const [newGoal, setNewGoal] = useState({ name: '', target: '', category: CATEGORIES[0] });
 
-  // User Management State
-  const [isAddingUser, setIsAddingUser] = useState(false);
-  const [userForm, setUserForm] = useState({ username: '', password: '', role: 'collaborator' as const });
-
-  const [vaultStatus, setVaultStatus] = useState<'unlinked' | 'locked' | 'active'>('unlinked');
-  const [isLinking, setIsLinking] = useState(false);
-  const [isIframe, setIsIframe] = useState(false);
-
-  const isFileSystemSupported = typeof window !== 'undefined' && !!(window as any).showDirectoryPicker;
-
-  useEffect(() => {
-    // Robust detection for preview iframes
-    try {
-      setIsIframe(window.self !== window.top);
-    } catch (e) {
-      setIsIframe(true);
-    }
-  }, []);
-
-  const { totalBanksAndCash, totalBudgets, totalRecurring } = useMemo(() => {
-    const bankSum = bankConnections
-      .filter(c => c.institutionType === 'bank')
-      .reduce((acc: number, c) => acc + (c.openingBalance || 0), 0);
-    const totalAssets = bankSum + cashOpeningBalance;
-    const budgets = Object.values(categoryBudgets).reduce((acc: number, b) => acc + ((b as number) || 0), 0);
-    const recurring = recurringExpenses.reduce((acc: number, e) => acc + (e.amount || 0), 0);
-    return { totalBanksAndCash: totalAssets, totalBudgets: budgets, totalRecurring: recurring };
+  // New logic for Monthly Surplus Target: 
+  // (total money in banks + cash in hand) - (spending thresholds + recurring expenses)
+  const calculatedSurplus = useMemo(() => {
+    const totalBanks = (bankConnections || []).reduce((acc, c) => acc + (c.openingBalance || 0), 0);
+    const totalLiquid = totalBanks + cashOpeningBalance;
+    const totalThresholds = Object.values(categoryBudgets || {}).reduce((acc, val) => acc + (val || 0), 0);
+    const totalRecurring = (recurringExpenses || []).reduce((acc, exp) => acc + (exp.amount || 0), 0);
+    return totalLiquid - (totalThresholds + totalRecurring);
   }, [bankConnections, cashOpeningBalance, categoryBudgets, recurringExpenses]);
 
-  useEffect(() => {
-    const checkVaultStatus = async () => {
-      if (!directoryHandle) {
-        setVaultStatus('unlinked');
-        return;
+  const handleLinkMirrorDirectory = async () => {
+    try {
+      if ((window as any).showDirectoryPicker) {
+        const handle = await (window as any).showDirectoryPicker({
+          mode: 'readwrite'
+        });
+        onSetDirectory(handle);
+        alert("SSD Mirror established. Filesystem Access Protocol Active.");
+      } else {
+        alert("Directory Picker API not supported in this browser.");
       }
-      try {
-        const permission = await (directoryHandle as any).queryPermission({ mode: 'readwrite' });
-        setVaultStatus(permission === 'granted' ? 'active' : 'locked');
-      } catch (e) {
-        setVaultStatus('locked');
-      }
-    };
-    checkVaultStatus();
-  }, [directoryHandle]);
+    } catch (err: any) {
+      if (err.name === 'AbortError') return;
+      alert(`Mirror Setup Failed: ${err.message}`);
+    }
+  };
+
+  const handleUnlinkMirror = async () => {
+    onSetDirectory(null);
+    alert("Mirror Unlinked.");
+  };
 
   const handleBudgetChange = (category: string, value: string) => {
     onUpdateCategoryBudgets({ ...categoryBudgets, [category]: parseFloat(value) || 0 });
   };
 
   const handlePasswordSubmit = () => {
-    setPassError('');
-    if (!passForm.new || passForm.new.length < 4) {
-      setPassError('New password must be at least 4 characters');
-      return;
-    }
-    if (passForm.new !== passForm.confirm) {
-      setPassError('New passwords do not match');
-      return;
-    }
+    if (!passForm.new || passForm.new.length < 4) return alert('Min 4 chars');
+    if (passForm.new !== passForm.confirm) return alert('Mismatch');
     onUpdatePassword(passForm.new);
     setIsChangingPass(false);
-    setPassForm({ old: '', new: '', confirm: '' });
-    alert("Vault credentials updated successfully.");
+    setPassForm({ new: '', confirm: '' });
+    alert("Vault credentials updated.");
   };
 
-  const handleAddUserSubmit = () => {
-    if (!userForm.username || !userForm.password) return;
-    if (users.some(u => u.username.toLowerCase() === userForm.username.toLowerCase())) {
-        alert("Username already exists.");
-        return;
-    }
-    const newUser: StoredUser = {
-        username: userForm.username,
-        password: userForm.password,
-        role: userForm.role,
-        createdAt: new Date().toISOString()
-    };
-    onUpdateUsers([...users, newUser]);
-    setIsAddingUser(false);
-    setUserForm({ username: '', password: '', role: 'collaborator' });
-  };
-
-  const handleDeleteUser = (username: string) => {
-    if (confirm(`Remove user ${username}? They will lose access to all projects.`)) {
-        onUpdateUsers(users.filter(u => u.username !== username));
-    }
-  };
-
-  const handleSetLocalVault = async () => {
-    if (!isFileSystemSupported) {
-      alert("Browser Restriction: The File System Access API is not available. Please use a modern desktop browser like Chrome or Edge.");
-      return;
-    }
-
-    if (isIframe) {
-      alert("Security Protocol: Browsers block direct file access inside Preview frames. Please use the 'Launch Full Command Center' button to open the app in a new tab first.");
-      return;
-    }
-
-    setIsLinking(true);
-    try {
-      if (vaultStatus === 'locked' && directoryHandle) {
-        const permission = await (directoryHandle as any).requestPermission({ mode: 'readwrite' });
-        if (permission === 'granted') {
-          setVaultStatus('active');
-          return;
-        }
-      }
-
-      // Fresh directory picker call in a user-gesture context
-      const handle = await (window as any).showDirectoryPicker({
-        mode: 'readwrite'
-      });
-      
-      onSetDirectory(handle);
-      setVaultStatus('active');
-    } catch (err: any) {
-      if (err.name === 'AbortError') return;
-      console.error("Directory access error:", err);
-      alert(`Vault Connection Error: ${err.message || 'Unknown error'}`);
-    } finally {
-      setIsLinking(false);
-    }
-  };
-
-  const handleBreakout = () => {
-    // Open the current URL in a new tab to bypass iframe restrictions
-    window.open(window.location.href, '_blank', 'noopener,noreferrer');
-  };
-
-  const saveInvGoal = () => {
-    const target = parseFloat(invGoalForm.target);
-    if (!invGoalForm.name || isNaN(target)) return;
-    onAddInvestmentGoal({
-      name: invGoalForm.name,
-      targetAmount: target,
-      provider: invGoalForm.provider
-    });
-    setInvGoalForm({ name: '', target: '', provider: 'Both' });
-    setIsAddingInvGoal(false);
-  };
-
-  const handleEditBill = (bill: RecurringExpense) => {
-    setEditingBill(bill);
-    setBillForm({
-      desc: bill.description,
-      amount: bill.amount.toString(),
-      category: bill.category,
-      day: bill.dayOfMonth.toString(),
-      sync: !!bill.externalSyncEnabled
-    });
-    setIsAddingBill(true);
-  };
-
-  const handleEditIncome = (income: RecurringIncome) => {
-    setEditingIncome(income);
-    setIncForm({
-      desc: income.description,
-      amount: income.amount.toString(),
-      category: income.category,
-      day: income.dayOfMonth.toString()
-    });
-    setIsAddingIncome(true);
-  };
-
-  const saveBill = () => {
-    const amt = parseFloat(billForm.amount);
-    const day = parseInt(billForm.day);
-    if (!billForm.desc || isNaN(amt) || isNaN(day)) return;
-    const nextDue = new Date();
-    nextDue.setDate(day);
-    if (nextDue < new Date()) nextDue.setMonth(nextDue.getMonth() + 1);
-    
-    if (editingBill) {
-      onUpdateRecurring({ 
-        ...editingBill, 
-        description: billForm.desc, 
-        amount: amt, 
-        category: billForm.category, 
-        dayOfMonth: day, 
-        nextDueDate: billForm.sync ? editingBill.nextDueDate : nextDue.toISOString().split('T')[0], 
-        externalSyncEnabled: billForm.sync 
-      });
-    } else {
-      onAddRecurring({ 
-        description: billForm.desc, 
-        amount: amt, 
-        category: billForm.category, 
-        dayOfMonth: day, 
-        nextDueDate: nextDue.toISOString().split('T')[0], 
-        externalSyncEnabled: billForm.sync 
-      });
-    }
-    resetBillForm();
-  };
-
-  const resetBillForm = () => {
-    setEditingBill(null);
-    setIsAddingBill(false);
-    setBillForm({ desc: '', amount: '', category: 'Utilities', day: '1', sync: false });
-  };
-
-  const saveIncome = () => {
-    const amt = parseFloat(incForm.amount);
-    const day = parseInt(incForm.day);
-    if (!incForm.desc || isNaN(amt) || isNaN(day)) return; 
-    const nextConf = new Date();
-    nextConf.setDate(day);
-    if (nextConf < new Date()) nextConf.setMonth(nextConf.getMonth() + 1);
-    
-    if (editingIncome) {
-      onUpdateRecurringIncome({ 
-        ...editingIncome, 
-        description: incForm.desc, 
-        amount: amt, 
-        category: incForm.category, 
-        dayOfMonth: day, 
-        nextConfirmationDate: editingIncome.nextConfirmationDate 
-      });
-    } else {
-      onAddRecurringIncome({ 
-        description: incForm.desc, 
-        amount: amt, 
-        category: incForm.category, 
-        dayOfMonth: day, 
-        nextConfirmationDate: nextConf.toISOString().split('T')[0] 
-      });
-    }
-    resetIncForm();
-  };
-
-  const resetIncForm = () => {
-    setEditingIncome(null);
-    setIsAddingIncome(false);
-    setIncForm({ desc: '', amount: '', category: 'Income', day: '25' });
-  };
+  const tabs: {id: SettingsTab, label: string, icon: string}[] = [
+    { id: 'general', label: 'Core', icon: 'fa-sliders-h' },
+    { id: 'recurring', label: 'Recurring', icon: 'fa-redo' },
+    { id: 'goals', label: 'Targets', icon: 'fa-bullseye' },
+    { id: 'api', label: 'Gateways', icon: 'fa-plug' },
+    { id: 'security', label: 'System', icon: 'fa-shield-halved' },
+  ];
 
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-white w-full max-w-2xl rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col">
-        <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-          <div><h2 className="text-2xl font-black text-slate-800">Configurations</h2><p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">Setup Due Dates & Syncs</p></div>
-          <button onClick={onClose} className="w-12 h-12 flex items-center justify-center bg-white border border-slate-200 rounded-2xl text-slate-400 hover:text-slate-800 transition shadow-sm"><i className="fas fa-times text-xl"></i></button>
+      <div className="bg-white w-full max-w-4xl rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 h-[85vh] flex flex-col md:flex-row">
+        
+        {/* Sidebar Navigation */}
+        <div className="w-full md:w-64 bg-slate-50 border-r border-slate-100 flex flex-col p-6 overflow-x-auto no-scrollbar">
+          <div className="mb-8 hidden md:block">
+            <h2 className="text-xl font-black text-slate-800">Vault Settings</h2>
+            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Logic Center</p>
+          </div>
+          
+          <div className="flex md:flex-col gap-2 flex-nowrap">
+            {tabs.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-3 px-5 py-3.5 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${activeTab === tab.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' : 'text-slate-500 hover:bg-white hover:text-slate-800'}`}
+              >
+                <i className={`fas ${tab.icon} w-4`}></i>
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-auto pt-6 hidden md:block">
+            <button onClick={onLogout} className="w-full flex items-center gap-3 px-5 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-rose-500 hover:bg-rose-50 transition">
+              <i className="fas fa-power-off"></i> Logout
+            </button>
+          </div>
         </div>
 
-        <div className="p-8 space-y-10 overflow-y-auto custom-scrollbar flex-1">
-          {/* USER MANAGEMENT SECTION - ONLY FOR NSV */}
-          {isAdmin && (
-            <section className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-lg font-black text-slate-800">Collaborator Directory</h3>
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Manage Project Matrix Users</p>
-                </div>
-                <button onClick={() => setIsAddingUser(true)} className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-900 transition">+ New User</button>
-              </div>
-              <div className="space-y-3">
-                {users.map(user => (
-                  <div key={user.username} className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between group">
-                    <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-indigo-600 shadow-sm border border-slate-100 font-black uppercase">{user.username[0]}</div>
-                      <div>
-                        <p className="font-black text-sm text-slate-800">{user.username}</p>
-                        <p className="text-[8px] text-slate-400 font-bold uppercase tracking-widest">{user.role} • Joined {new Date(user.createdAt).toLocaleDateString()}</p>
-                      </div>
-                    </div>
-                    <button onClick={() => handleDeleteUser(user.username)} className="w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-rose-600 transition flex items-center justify-center">
-                      <i className="fas fa-user-xmark text-[10px]"></i>
-                    </button>
+        {/* Content Area */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-8 bg-white relative">
+          <button onClick={onClose} className="absolute top-6 right-8 w-10 h-10 flex items-center justify-center bg-slate-50 border border-slate-200 rounded-xl text-slate-400 hover:text-slate-800 transition shadow-sm z-10"><i className="fas fa-times"></i></button>
+
+          {activeTab === 'general' && (
+            <div className="space-y-10 animate-in fade-in slide-in-from-bottom-2">
+              <section>
+                <h3 className="text-lg font-black text-slate-800 mb-6 flex items-center gap-2"><i className="fas fa-coins text-indigo-600"></i> Financial Baseline</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Opening Cash Ledger</label>
+                    <input 
+                      type="number" 
+                      value={cashOpeningBalance} 
+                      onChange={(e) => onUpdateCashOpeningBalance(parseFloat(e.target.value) || 0)} 
+                      className="w-full bg-white border border-slate-200 rounded-xl p-4 text-xl font-black outline-none focus:ring-2 focus:ring-indigo-500" 
+                    />
                   </div>
-                ))}
-                {users.length === 0 && <p className="text-[10px] italic text-slate-300 font-bold uppercase text-center py-4">No collaborators provisioned</p>}
-              </div>
-            </section>
+                  <div className="p-6 bg-indigo-50/50 rounded-[2rem] border border-indigo-100">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Monthly Surplus Target</label>
+                    <p className={`text-2xl font-black ${calculatedSurplus >= 0 ? 'text-indigo-600' : 'text-rose-600'}`}>
+                      ${calculatedSurplus.toLocaleString()}
+                    </p>
+                    <p className="text-[9px] font-bold text-slate-400 mt-2 uppercase">Derived: (Banks + Cash) - (Budgets + Recurring)</p>
+                  </div>
+                </div>
+              </section>
+
+              <section>
+                <h3 className="text-lg font-black text-slate-800 mb-6 flex items-center gap-2"><i className="fas fa-layer-group text-indigo-600"></i> Spending Thresholds</h3>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  {CATEGORIES.filter(c => !['Income', 'Savings', 'Investments', 'Other', 'Transfer'].includes(c)).map(cat => (
+                    <div key={cat} className="p-4 bg-white border border-slate-100 rounded-2xl shadow-sm">
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">{cat}</p>
+                      <input 
+                        type="number" 
+                        value={categoryBudgets[cat] || ''} 
+                        onChange={(e) => handleBudgetChange(cat, e.target.value)} 
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm font-black outline-none focus:ring-2 focus:ring-indigo-500" 
+                        placeholder="0"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
           )}
 
-          <section className="bg-indigo-50/50 p-6 rounded-[2rem] border border-indigo-100 space-y-4">
-             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex items-center gap-4">
-                <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-indigo-600 shadow-sm"><i className="fas fa-folder-open"></i></div>
-                <div><h3 className="text-sm font-black text-slate-800">Local Hard Drive Vault</h3><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">High-Performance SSD Linking</p></div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {isIframe && vaultStatus !== 'active' ? (
-                  <button 
-                    onClick={handleBreakout}
-                    className="px-6 py-3 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-2xl hover:bg-indigo-600 transition-all flex items-center gap-2"
-                  >
-                    <i className="fas fa-external-link-alt"></i> Launch Full Command Center
-                  </button>
-                ) : (
-                  <button 
-                    onClick={handleSetLocalVault}
-                    disabled={isLinking}
-                    className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-2 ${vaultStatus === 'active' ? 'bg-emerald-100 text-emerald-700' : isLinking ? 'bg-slate-100 text-slate-400 animate-pulse' : isFileSystemSupported ? 'bg-indigo-600 text-white shadow-lg active:scale-95 hover:bg-indigo-700' : 'bg-slate-200 text-slate-400'}`}
-                  >
-                    {isLinking ? (
-                      <><i className="fas fa-circle-notch fa-spin"></i> Synchronizing...</>
-                    ) : (
-                      <>{vaultStatus === 'active' ? 'Vault Linked' : vaultStatus === 'locked' ? 'Unlock Vault' : isFileSystemSupported ? 'Connect Local Folder' : 'Unsupported'}</>
-                    )}
-                  </button>
-                )}
-              </div>
-            </div>
-            
-            {isIframe && vaultStatus !== 'active' && (
-              <div className="p-5 bg-amber-50 border border-amber-200 rounded-[1.5rem] space-y-3 shadow-inner animate-in slide-in-from-top-2 duration-300">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center text-amber-600 shadow-sm">
-                    <i className="fas fa-shield-halved"></i>
-                  </div>
-                  <p className="text-[10px] text-amber-700 font-black uppercase tracking-widest leading-none">Restricted Browser Sandbox</p>
+          {activeTab === 'recurring' && (
+            <div className="space-y-10 animate-in fade-in slide-in-from-bottom-2">
+              <section>
+                <div className="flex justify-between items-center mb-6">
+                  <h3 className="text-lg font-black text-slate-800">Recurring Commitments</h3>
+                  <span className="text-[10px] font-black bg-indigo-100 text-indigo-600 px-3 py-1 rounded-full uppercase tracking-widest">Fixed Expenses</span>
                 </div>
-                <p className="text-[11px] text-amber-600 font-bold leading-relaxed">
-                  To link your physical hard drive as a vault, you must be in a <b>Top-Level Tab</b>. Browser security blocks this feature within the current "Preview" window. Click the black button above to breakout.
-                </p>
-              </div>
-            )}
-            
-            {!isFileSystemSupported && <p className="text-[8px] text-rose-500 font-black uppercase tracking-widest bg-rose-50 p-2 rounded-lg text-center"><i className="fas fa-exclamation-triangle mr-1"></i> Browser Unsupported: Use Chrome/Edge on Desktop.</p>}
-            {vaultStatus === 'active' && <p className="text-[9px] text-emerald-600 font-black uppercase tracking-widest bg-emerald-50 p-2 rounded-lg text-center"><i className="fas fa-shield-check mr-1"></i> Native SSD File Access Established</p>}
-          </section>
+                
+                <div className="grid grid-cols-1 gap-3 mb-6">
+                  {recurringExpenses.map(exp => (
+                    <div key={exp.id} className="p-5 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between group">
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 bg-white border border-slate-100 rounded-xl flex items-center justify-center text-rose-500 shadow-sm"><i className="fas fa-calendar-minus"></i></div>
+                        <div>
+                          <p className="text-sm font-black text-slate-800">{exp.description}</p>
+                          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">${exp.amount} • {exp.category} • Day {exp.dayOfMonth}</p>
+                        </div>
+                      </div>
+                      <button onClick={() => onDeleteRecurring(exp.id)} className="w-9 h-9 flex items-center justify-center text-slate-300 hover:text-rose-500 transition-colors"><i className="fas fa-trash-alt text-xs"></i></button>
+                    </div>
+                  ))}
+                </div>
 
-          <section className="bg-indigo-50/50 p-6 rounded-[2rem] border border-indigo-100">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-indigo-600 shadow-sm"><i className="fas fa-bell"></i></div>
-                <div><h3 className="text-sm font-black text-slate-800">Daily Desktop Reminders</h3><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Notification Alert for Data Entry</p></div>
-              </div>
-              <button onClick={() => onToggleReminders(!remindersEnabled)} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${remindersEnabled ? 'bg-indigo-600' : 'bg-slate-300'}`}><span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${remindersEnabled ? 'translate-x-6' : 'translate-x-1'}`} /></button>
+                <div className="p-6 bg-slate-900 rounded-[2.5rem] text-white">
+                  <h4 className="text-[10px] font-black uppercase tracking-widest text-indigo-400 mb-4">Register New Bill/Subscription</h4>
+                  <div className="grid grid-cols-2 gap-4 mb-4">
+                    <input type="text" placeholder="Description" value={newRec.description} onChange={e => setNewRec({...newRec, description: e.target.value})} className="bg-white/5 border border-white/10 rounded-xl p-3 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500" />
+                    <input type="number" placeholder="Amount" value={newRec.amount} onChange={e => setNewRec({...newRec, amount: e.target.value})} className="bg-white/5 border border-white/10 rounded-xl p-3 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500" />
+                    <select value={newRec.category} onChange={e => setNewRec({...newRec, category: e.target.value})} className="bg-white/5 border border-white/10 rounded-xl p-3 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500 appearance-none">
+                      {CATEGORIES.map(c => <option key={c} value={c} className="bg-slate-800">{c}</option>)}
+                    </select>
+                    <input type="number" placeholder="Day (1-31)" value={newRec.dayOfMonth} onChange={e => setNewRec({...newRec, dayOfMonth: e.target.value})} className="bg-white/5 border border-white/10 rounded-xl p-3 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500" />
+                  </div>
+                  <button 
+                    onClick={() => {
+                      if (!newRec.description || !newRec.amount) return;
+                      onAddRecurring({ ...newRec, amount: parseFloat(newRec.amount), dayOfMonth: parseInt(newRec.dayOfMonth), nextDueDate: new Date().toISOString() });
+                      setNewRec({ description: '', amount: '', category: CATEGORIES[0], dayOfMonth: '1' });
+                    }} 
+                    className="w-full py-3 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-500 transition"
+                  >Initialize Lifecycle</button>
+                </div>
+              </section>
+
+              <section>
+                <div className="flex justify-between items-center mb-6">
+                  <h3 className="text-lg font-black text-slate-800">Recurring Inflows</h3>
+                  <span className="text-[10px] font-black bg-emerald-100 text-emerald-600 px-3 py-1 rounded-full uppercase tracking-widest">Income Sources</span>
+                </div>
+                
+                <div className="grid grid-cols-1 gap-3 mb-6">
+                  {recurringIncomes.map(inc => (
+                    <div key={inc.id} className="p-5 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between">
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 bg-white border border-slate-100 rounded-xl flex items-center justify-center text-emerald-500 shadow-sm"><i className="fas fa-calendar-plus"></i></div>
+                        <div>
+                          <p className="text-sm font-black text-slate-800">{inc.description}</p>
+                          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">${inc.amount} • {inc.category} • Day {inc.dayOfMonth}</p>
+                        </div>
+                      </div>
+                      <button onClick={() => onDeleteRecurringIncome(inc.id)} className="w-9 h-9 flex items-center justify-center text-slate-300 hover:text-rose-500 transition-colors"><i className="fas fa-trash-alt text-xs"></i></button>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="p-6 bg-slate-900 rounded-[2.5rem] text-white">
+                  <h4 className="text-[10px] font-black uppercase tracking-widest text-emerald-400 mb-4">Register Recurring Income</h4>
+                  <div className="grid grid-cols-2 gap-4 mb-4">
+                    <input 
+                      type="text" 
+                      placeholder="Source (e.g. Salary, Rent)" 
+                      value={newInc.description} 
+                      onChange={e => setNewInc({...newInc, description: e.target.value})} 
+                      className="bg-white/5 border border-white/10 rounded-xl p-3 text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-500" 
+                    />
+                    <input 
+                      type="number" 
+                      placeholder="Amount" 
+                      value={newInc.amount} 
+                      onChange={e => setNewInc({...newInc, amount: e.target.value})} 
+                      className="bg-white/5 border border-white/10 rounded-xl p-3 text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-500" 
+                    />
+                    <div className="col-span-2">
+                      <label className="text-[9px] font-black uppercase tracking-widest text-slate-500 ml-1 block mb-1">Expected Day of Month</label>
+                      <input 
+                        type="number" 
+                        placeholder="Day (1-31)" 
+                        value={newInc.dayOfMonth} 
+                        onChange={e => setNewInc({...newInc, dayOfMonth: e.target.value})} 
+                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-500" 
+                      />
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      if (!newInc.description || !newInc.amount) return;
+                      onAddRecurringIncome({ 
+                        description: newInc.description, 
+                        amount: parseFloat(newInc.amount), 
+                        category: 'Income', 
+                        dayOfMonth: parseInt(newInc.dayOfMonth), 
+                        nextConfirmationDate: new Date().toISOString() 
+                      });
+                      setNewInc({ description: '', amount: '', dayOfMonth: '25' });
+                    }} 
+                    className="w-full py-3 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-500 transition shadow-lg shadow-emerald-900/20"
+                  >Register Inflow</button>
+                </div>
+              </section>
             </div>
-          </section>
+          )}
 
-          <section className="bg-indigo-50/50 p-6 rounded-[2rem] border border-indigo-100">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-indigo-600 shadow-sm"><i className="fas fa-shield-halved"></i></div>
-                <div><h3 className="text-sm font-black text-slate-800">Security Hub</h3><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Manage Vault Access</p></div>
-              </div>
-              <button 
-                onClick={() => setIsChangingPass(true)}
-                className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 transition"
-              >
-                Reset Password
+          {activeTab === 'goals' && (
+            <div className="space-y-10 animate-in fade-in slide-in-from-bottom-2">
+              <section>
+                <h3 className="text-lg font-black text-slate-800 mb-6 flex items-center gap-2"><i className="fas fa-mountain-sun text-indigo-600"></i> Active Saving Goals</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+                  {savingGoals.map(goal => (
+                    <div key={goal.id} className="p-6 bg-slate-50 border border-slate-100 rounded-[2rem] relative group">
+                      <div className="flex justify-between items-start mb-4">
+                        <p className="font-black text-slate-800">{goal.name}</p>
+                        <button onClick={() => onDeleteSavingGoal(goal.id)} className="text-slate-300 hover:text-rose-500"><i className="fas fa-times text-xs"></i></button>
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-slate-400">
+                          <span>Progress</span>
+                          <span className="text-indigo-600">${goal.currentAmount} / ${goal.targetAmount}</span>
+                        </div>
+                        <div className="h-2 w-full bg-slate-200 rounded-full overflow-hidden">
+                          <div className="h-full bg-indigo-600 transition-all duration-1000" style={{ width: `${(goal.currentAmount/goal.targetAmount)*100}%` }}></div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="p-8 border-2 border-dashed border-slate-200 rounded-[3rem] text-center">
+                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6">Initialize New Objective</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-lg mx-auto">
+                    <input type="text" placeholder="Goal Name (e.g. New Car)" value={newGoal.name} onChange={e => setNewGoal({...newGoal, name: e.target.value})} className="p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-bold text-sm" />
+                    <input type="number" placeholder="Target Amount" value={newGoal.target} onChange={e => setNewGoal({...newGoal, target: e.target.value})} className="p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-bold text-sm" />
+                    <button 
+                      onClick={() => {
+                        if (!newGoal.name || !newGoal.target) return;
+                        onAddSavingGoal({ name: newGoal.name, targetAmount: parseFloat(newGoal.target), institution: 'Savings Account', institutionType: 'bank', openingBalance: 0, category: 'Savings' });
+                        setNewGoal({ name: '', target: '', category: CATEGORIES[0] });
+                      }}
+                      className="md:col-span-2 py-4 bg-slate-900 text-white font-black rounded-2xl text-[10px] uppercase tracking-[0.2em] shadow-xl hover:bg-indigo-600 transition"
+                    >Activate Goal Matrix</button>
+                  </div>
+                </div>
+              </section>
+
+              <section>
+                <h3 className="text-lg font-black text-slate-800 mb-6 flex items-center gap-2"><i className="fas fa-rocket text-indigo-600"></i> Investment Targets</h3>
+                <div className="grid grid-cols-1 gap-3">
+                  {investmentGoals.map(goal => (
+                    <div key={goal.id} className="p-5 bg-slate-50 border border-slate-100 rounded-2xl flex justify-between items-center">
+                      <div>
+                        <p className="text-sm font-black text-slate-800">{goal.name}</p>
+                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Target: ${goal.targetAmount} • Provider: {goal.provider}</p>
+                      </div>
+                      <button onClick={() => onDeleteInvestmentGoal(goal.id)} className="text-slate-300 hover:text-rose-500"><i className="fas fa-trash-alt text-xs"></i></button>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
+          )}
+
+          {activeTab === 'api' && (
+            <div className="space-y-10 animate-in fade-in slide-in-from-bottom-2">
+              <section className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-black text-slate-800">Managed API Connections</h3>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">Banks & Investment Portals</p>
+                  </div>
+                  <button 
+                    onClick={onOpenBankSync}
+                    className="px-6 py-3 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all flex items-center gap-2"
+                  >
+                    <i className="fas fa-plus"></i> Link New
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3">
+                  {bankConnections.map(conn => (
+                    <div key={conn.institution} className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between group">
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 bg-white border border-slate-100 rounded-xl flex items-center justify-center text-indigo-600 shadow-sm">
+                          <i className={`fas ${conn.institutionType === 'investment' ? 'fa-chart-line' : 'fa-landmark'}`}></i>
+                        </div>
+                        <div>
+                          <p className="text-xs font-black text-slate-800">{conn.institution}</p>
+                          <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">
+                            {conn.institutionType} • {conn.accountLastFour}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <div className="text-right hidden sm:block">
+                          <p className="text-[9px] font-black text-emerald-500 uppercase">Status: Linked</p>
+                          <p className="text-[8px] text-slate-400 font-bold">Synced: {conn.lastSynced ? new Date(conn.lastSynced).toLocaleTimeString() : 'Never'}</p>
+                        </div>
+                        <button onClick={() => onUnlinkBank?.(conn.institution)} className="w-8 h-8 flex items-center justify-center text-slate-300 hover:text-rose-500 transition-colors">
+                          <i className="fas fa-unlink"></i>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {bankConnections.length === 0 && (
+                    <div className="p-12 border-2 border-dashed border-slate-100 rounded-[3rem] flex flex-col items-center justify-center text-center">
+                      <i className="fas fa-plug text-slate-200 text-4xl mb-4"></i>
+                      <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest max-w-[200px]">Link external institutions for real-time liquidity tracking</p>
+                    </div>
+                  )}
+                </div>
+              </section>
+
+              <section className="bg-indigo-50/50 p-8 rounded-[3rem] border border-indigo-100 space-y-6">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                  <div className="flex items-center gap-5">
+                    <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center text-indigo-600 shadow-xl border border-indigo-100"><i className="fas fa-folder-open text-2xl"></i></div>
+                    <div><h3 className="text-lg font-black text-slate-800">SSD Vault Mirror</h3><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Physical File Persistence</p></div>
+                  </div>
+                  {directoryHandle ? (
+                    <button 
+                      onClick={handleUnlinkMirror}
+                      className="px-8 py-4 bg-rose-600 text-white rounded-2xl text-[11px] font-black uppercase tracking-widest shadow-2xl hover:bg-rose-700 transition-all flex items-center gap-2"
+                    >
+                      <i className="fas fa-unlink"></i> Unlink Directory
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={handleLinkMirrorDirectory}
+                      className="px-8 py-4 bg-indigo-600 text-white rounded-2xl text-[11px] font-black uppercase tracking-widest shadow-2xl hover:bg-indigo-700 transition-all flex items-center gap-2"
+                    >
+                      <i className="fas fa-link"></i> Mount SSD Folder
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs text-slate-600 font-medium px-4 leading-relaxed">
+                  {directoryHandle 
+                    ? `Currently mirroring to: ${directoryHandle.name}. Project files and assets are stored physically on your local machine.`
+                    : "Mirroring is currently inactive. Link a local folder to ensure project files and backups are stored physically on your machine."}
+                </p>
+              </section>
+            </div>
+          )}
+
+          {activeTab === 'security' && (
+            <div className="space-y-10 animate-in fade-in slide-in-from-bottom-2">
+              <section className="bg-slate-50 p-10 rounded-[3rem] border border-slate-100">
+                <h3 className="text-lg font-black text-slate-800 mb-6 flex items-center gap-3"><i className="fas fa-shield-virus text-indigo-600"></i> Authentication Logic</h3>
+                <div className="space-y-6">
+                  <div className="flex gap-4">
+                    <button onClick={() => setIsChangingPass(true)} className="flex-1 py-4 bg-white border border-slate-200 rounded-2xl text-[11px] font-black uppercase tracking-widest text-slate-600 hover:bg-slate-100 transition shadow-sm">Rotate Credentials</button>
+                    <button onClick={onResetData} className="flex-1 py-4 bg-white border border-slate-200 rounded-2xl text-[11px] font-black uppercase tracking-widest text-rose-600 hover:bg-rose-50 transition shadow-sm">Factory Purge</button>
+                  </div>
+                  
+                  <div className="p-6 bg-amber-50 rounded-2xl border border-amber-100">
+                    <p className="text-[10px] text-amber-700 font-black uppercase tracking-widest flex items-center gap-2 mb-2"><i className="fas fa-exclamation-triangle"></i> Security Protocol</p>
+                    <p className="text-[11px] text-amber-900 leading-relaxed font-medium">All data is encrypted using AES-256 before being stored in IndexedDB. Only your local vault key can decrypt the ledger.</p>
+                  </div>
+                </div>
+              </section>
+
+              <button onClick={onLogout} className="w-full py-6 bg-slate-900 text-white font-black rounded-[2rem] text-xs uppercase tracking-[0.3em] hover:bg-rose-600 transition-all shadow-2xl flex items-center justify-center gap-3">
+                <i className="fas fa-lock"></i> Close Vault & Logout
               </button>
             </div>
-          </section>
-
-          <section className="p-8 bg-slate-900 text-white rounded-[2.5rem] shadow-xl">
-            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6">Financial Strategy Hub</label>
-            <div className="space-y-8">
-               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                 {/* Monthly Target Surplus derivation */}
-                 <div className="p-6 bg-white/5 border border-white/10 rounded-2xl relative overflow-hidden group">
-                   <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/10 rounded-full blur-2xl -mr-12 -mt-12 group-hover:bg-indigo-500/20 transition-all"></div>
-                   <h3 className="text-lg font-black mb-1 relative z-10">Monthly Target Surplus</h3>
-                   <div className="flex items-end gap-1 relative z-10">
-                     <span className="font-black text-indigo-400 text-2xl tracking-tighter">${targetMargin.toLocaleString()}</span>
-                     <span className="text-[9px] font-black text-slate-500 uppercase mb-1.5 tracking-widest">Calculated</span>
-                   </div>
-                   <div className="mt-4 pt-4 border-t border-white/10 space-y-1 relative z-10">
-                      <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest flex justify-between">
-                        <span>Banks & Cash (Only)</span>
-                        <span className="text-emerald-400">+${totalBanksAndCash.toLocaleString()}</span>
-                      </p>
-                      <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest flex justify-between">
-                        <span>Monthly Commitments</span>
-                        <span className="text-rose-400">-${(totalBudgets + totalRecurring).toLocaleString()}</span>
-                      </p>
-                   </div>
-                 </div>
-                 <div>
-                   <h3 className="text-lg font-black mb-1">Physical Cash Opening Balance</h3>
-                   <div className="relative">
-                     <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-emerald-400 text-lg">$</span>
-                     <input type="number" value={cashOpeningBalance || ''} onChange={(e) => onUpdateCashOpeningBalance(parseFloat(e.target.value) || 0)} className="w-full pl-10 p-4 bg-white/5 border border-white/10 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500 font-black text-xl text-white placeholder:text-white/10" />
-                   </div>
-                   <p className="text-[8px] text-slate-500 font-bold uppercase tracking-widest mt-1">Starting funds in wallet/physical safe</p>
-                 </div>
-               </div>
-               <div className="pt-4 border-t border-white/10"><h3 className="text-lg font-black mb-1">Monthly Category Limits</h3><div className="grid grid-cols-1 md:grid-cols-2 gap-4">{CATEGORIES.filter(c => !['Income', 'Savings', 'Investments', 'Other', 'Transfer'].includes(c)).map(cat => (<div key={cat} className="bg-white/5 border border-white/5 rounded-2xl p-4 flex items-center justify-between group hover:bg-white/10 transition-colors"><div><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{cat}</p><div className="relative"><span className="absolute left-0 top-1/2 -translate-y-1/2 font-black text-indigo-400 text-xs">$</span><input type="number" value={categoryBudgets[cat] || ''} onChange={(e) => handleBudgetChange(cat, e.target.value)} className="bg-transparent border-none p-0 pl-3 outline-none font-black text-sm text-white w-24" /></div></div><div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-slate-500 group-hover:text-indigo-400 transition-colors"><i className="fas fa-bullseye text-[10px]"></i></div></div>))}</div></div>
-            </div>
-          </section>
-
-          <section className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div><h3 className="text-lg font-black text-slate-800">Investment Milestones</h3><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Wealth Targets & Retirement Goals</p></div>
-              <button onClick={() => setIsAddingInvGoal(true)} className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-600 hover:text-white transition">+ Add Goal</button>
-            </div>
-            <div className="space-y-4">
-              {investmentGoals.map(goal => (
-                <div key={goal.id} className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between group">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-indigo-600 shadow-sm"><i className="fas fa-bullseye"></i></div>
-                    <div><p className="font-black text-sm text-slate-800">{goal.name}</p><p className="text-[9px] text-slate-400 font-bold uppercase">Target: ${goal.targetAmount.toLocaleString()} • Source: {goal.provider}</p></div>
-                  </div>
-                  <button onClick={() => onDeleteInvestmentGoal(goal.id)} className="w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-rose-600 transition flex items-center justify-center"><i className="fas fa-trash-alt text-[10px]"></i></button>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div><h3 className="text-lg font-black text-slate-800">Recurring Commitments</h3><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Manage Bills & Regular Income</p></div>
-              <div className="flex gap-2">
-                <button onClick={() => { resetIncForm(); setIsAddingIncome(true); }} className="px-4 py-2 bg-emerald-50 text-emerald-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 hover:text-white transition">+ Income</button>
-                <button onClick={() => { resetBillForm(); setIsAddingBill(true); }} className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-600 hover:text-white transition">+ Bill</button>
-              </div>
-            </div>
-            
-            <div className="space-y-6">
-              <div className="space-y-4">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Expected Incomes</p>
-                {recurringIncomes.map(income => (
-                  <div key={income.id} className="p-4 bg-emerald-50/50 border border-emerald-100 rounded-2xl flex items-center justify-between group">
-                    <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-emerald-600 shadow-sm"><i className="fas fa-hand-holding-dollar"></i></div>
-                      <div>
-                        <p className="font-black text-sm text-slate-800">{income.description}</p>
-                        <p className="text-[9px] text-slate-400 font-bold uppercase">Received the {income.dayOfMonth}th • ${income.amount}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => handleEditIncome(income)} className="w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-emerald-600 transition flex items-center justify-center"><i className="fas fa-edit text-[10px]"></i></button>
-                      <button onClick={() => onDeleteRecurringIncome(income.id)} className="w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-rose-600 transition flex items-center justify-center"><i className="fas fa-trash-alt text-[10px]"></i></button>
-                    </div>
-                  </div>
-                ))}
-                {recurringIncomes.length === 0 && <p className="text-[10px] italic text-slate-300 font-bold uppercase tracking-widest ml-2">No recurring incomes setup</p>}
-              </div>
-
-              <div className="space-y-4">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Active Bills</p>
-                {recurringExpenses.map(bill => (
-                  <div key={bill.id} className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between group">
-                    <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-rose-500 shadow-sm"><i className="fas fa-file-invoice"></i></div>
-                      <div>
-                        <p className="font-black text-sm text-slate-800">{bill.description}</p>
-                        <p className="text-[9px] text-slate-400 font-bold uppercase">Due the {bill.dayOfMonth}th • ${bill.amount}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => handleEditBill(bill)} className="w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-indigo-600 transition flex items-center justify-center"><i className="fas fa-edit text-[10px]"></i></button>
-                      <button onClick={() => onDeleteRecurring(bill.id)} className="w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-rose-600 transition flex items-center justify-center"><i className="fas fa-trash-alt text-[10px]"></i></button>
-                    </div>
-                  </div>
-                ))}
-                {recurringExpenses.length === 0 && <p className="text-[10px] italic text-slate-300 font-bold uppercase tracking-widest ml-2">No recurring bills setup</p>}
-              </div>
-            </div>
-          </section>
-
-          <section className="bg-slate-50 p-6 rounded-[2rem] border border-slate-200 space-y-4">
-             <div><h3 className="text-sm font-black text-slate-800">Data Management</h3><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Local JSON State Portability</p></div>
-             <div className="flex gap-3">
-                <button onClick={() => alert("Export feature initialized. Compiling encrypted bundle...")} className="flex-1 py-3 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-600 hover:bg-slate-100 transition">Export JSON</button>
-                <button onClick={onResetData} className="flex-1 py-3 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase tracking-widest text-rose-600 hover:bg-rose-50 transition">Purge Store</button>
-             </div>
-          </section>
-
-          <section className="pt-6 border-t border-slate-100 space-y-4">
-            <button onClick={onLogout} className="w-full py-5 bg-rose-50 text-rose-600 font-black rounded-2xl text-xs uppercase tracking-[0.2em] hover:bg-rose-600 hover:text-white transition-all shadow-lg shadow-rose-100"><i className="fas fa-sign-out-alt mr-2"></i> Terminate Session</button>
-          </section>
+          )}
         </div>
       </div>
 
-      {isAddingUser && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-white w-full max-w-sm rounded-[2rem] p-8 shadow-2xl">
-            <h3 className="text-lg font-black text-slate-800 mb-2">Provision Matrix Access</h3>
-            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-6">Create Collaborative Account</p>
-            <div className="space-y-4">
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Username</label>
-                <input 
-                  type="text"
-                  value={userForm.username} 
-                  onChange={e => setUserForm({...userForm, username: e.target.value})} 
-                  className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" 
-                  placeholder="e.g. jdoe_matrix" 
-                />
-              </div>
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Password</label>
-                <input 
-                  type="password"
-                  value={userForm.password} 
-                  onChange={e => setUserForm({...userForm, password: e.target.value})} 
-                  className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" 
-                  placeholder="••••••••" 
-                />
-              </div>
-              <button onClick={handleAddUserSubmit} className="w-full py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[11px] hover:bg-slate-900 transition">Create Account</button>
-              <button onClick={() => setIsAddingUser(false)} className="w-full py-2 text-slate-400 font-bold text-[10px] uppercase tracking-widest">Discard</button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {isChangingPass && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-white w-full max-sm rounded-[2rem] p-8 shadow-2xl">
-            <h3 className="text-lg font-black text-slate-800 mb-2">Reset Vault Key</h3>
-            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-6">Update Access Credentials</p>
-            <div className="space-y-4">
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">New Password</label>
-                <input 
-                  type="password"
-                  value={passForm.new} 
-                  onChange={e => setPassForm({...passForm, new: e.target.value})} 
-                  className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" 
-                  placeholder="••••••••" 
-                />
+          <div className="bg-white w-full max-w-sm rounded-[3rem] p-10 shadow-2xl">
+            <h3 className="text-xl font-black text-slate-800 mb-2">Security Update</h3>
+            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-8">Update Vault Credentials</p>
+            <div className="space-y-5">
+              <div className="relative">
+                <i className="fas fa-key absolute left-4 top-1/2 -translate-y-1/2 text-slate-300"></i>
+                <input type="password" value={passForm.new} onChange={e => setPassForm({...passForm, new: e.target.value})} className="w-full pl-12 p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-bold text-slate-800" placeholder="New Password" />
               </div>
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Confirm New Password</label>
-                <input 
-                  type="password"
-                  value={passForm.confirm} 
-                  onChange={e => setPassForm({...passForm, confirm: e.target.value})} 
-                  className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" 
-                  placeholder="••••••••" 
-                />
+              <div className="relative">
+                <i className="fas fa-check-double absolute left-4 top-1/2 -translate-y-1/2 text-slate-300"></i>
+                <input type="password" value={passForm.confirm} onChange={e => setPassForm({...passForm, confirm: e.target.value})} className="w-full pl-12 p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-bold text-slate-800" placeholder="Confirm Password" />
               </div>
-              {passError && <p className="text-[9px] font-black text-rose-500 uppercase tracking-widest ml-1">{passError}</p>}
-              <button onClick={handlePasswordSubmit} className="w-full py-4 bg-slate-900 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[11px] hover:bg-indigo-600 transition">Update Security</button>
-              <button onClick={() => { setIsChangingPass(false); setPassError(''); }} className="w-full py-2 text-slate-400 font-bold text-[10px] uppercase tracking-widest">Discard Changes</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {isAddingInvGoal && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-white w-full max-w-sm rounded-[2rem] p-8 shadow-2xl">
-            <h3 className="text-lg font-black text-slate-800 mb-6">New Wealth Target</h3>
-            <div className="space-y-4">
-              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Goal Name</label><input value={invGoalForm.name} onChange={e => setInvGoalForm({...invGoalForm, name: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" placeholder="Retirement Fund" /></div>
-              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Target Amount ($)</label><input type="number" value={invGoalForm.target} onChange={e => setInvGoalForm({...invGoalForm, target: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" placeholder="500000" /></div>
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Linked Provider</label>
-                <select value={invGoalForm.provider} onChange={e => setInvGoalForm({...invGoalForm, provider: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold">
-                  <optgroup label="Investment Platforms">
-                    <option value="Binance">Binance (Crypto)</option>
-                    <option value="Vanguard">Vanguard (Stocks)</option>
-                    <option value="Both">Both (Aggregated)</option>
-                  </optgroup>
-                  <optgroup label="Banking & Credit Unions">
-                    {bankConnections.map(conn => (
-                      <option key={conn.institution} value={conn.institution}>{conn.institution}</option>
-                    ))}
-                  </optgroup>
-                </select>
-              </div>
-              <button onClick={saveInvGoal} className="w-full py-4 bg-slate-900 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[11px] hover:bg-indigo-600 transition">Create Target</button>
-              <button onClick={() => setIsAddingInvGoal(false)} className="w-full py-2 text-slate-400 font-bold text-[10px] uppercase tracking-widest">Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {isAddingBill && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-white w-full max-w-sm rounded-[2rem] p-8 shadow-2xl">
-            <h3 className="text-lg font-black text-slate-800 mb-6">{editingBill ? 'Edit Bill' : 'New Recurring Bill'}</h3>
-            <div className="space-y-4">
-              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Description</label><input value={billForm.desc} onChange={e => setBillForm({...billForm, desc: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" /></div>
-              <div className="grid grid-cols-2 gap-4">
-                <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Amount</label><input type="number" value={billForm.amount} onChange={e => setBillForm({...billForm, amount: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" /></div>
-                <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Day of Month</label><input type="number" min="1" max="31" value={billForm.day} onChange={e => setBillForm({...billForm, day: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" /></div>
-              </div>
-              <button onClick={saveBill} className="w-full py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[11px] hover:bg-slate-900 transition">
-                {editingBill ? 'Update Commitment' : 'Save Commitment'}
-              </button>
-              <button onClick={resetBillForm} className="w-full py-2 text-slate-400 font-bold text-[10px] uppercase tracking-widest">Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {isAddingIncome && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-white w-full max-w-sm rounded-[2rem] p-8 shadow-2xl">
-            <h3 className="text-lg font-black text-slate-800 mb-6">{editingIncome ? 'Edit Income' : 'New Recurring Income'}</h3>
-            <div className="space-y-4">
-              <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Description</label><input value={incForm.desc} onChange={e => setIncForm({...incForm, desc: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" /></div>
-              <div className="grid grid-cols-2 gap-4">
-                <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Amount</label><input type="number" value={incForm.amount} onChange={e => setIncForm({...incForm, amount: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" /></div>
-                <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Day of Month</label><input type="number" min="1" max="31" value={incForm.day} onChange={e => setIncForm({...incForm, day: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" /></div>
-              </div>
-              <button onClick={saveIncome} className="w-full py-4 bg-emerald-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[11px] hover:bg-slate-900 transition">
-                {editingIncome ? 'Update Commitment' : 'Save Commitment'}
-              </button>
-              <button onClick={resetIncForm} className="w-full py-2 text-slate-400 font-bold text-[10px] uppercase tracking-widest">Cancel</button>
+              <button onClick={handlePasswordSubmit} className="w-full py-5 bg-slate-900 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[11px] hover:bg-indigo-600 transition active:scale-95">Apply Cryptography</button>
+              <button onClick={() => setIsChangingPass(false)} className="w-full py-2 text-slate-400 font-bold text-[10px] uppercase tracking-widest">Abort Process</button>
             </div>
           </div>
         </div>

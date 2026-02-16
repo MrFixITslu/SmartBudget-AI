@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { BudgetEvent, EventItem, EVENT_ITEM_CATEGORIES, ProjectTask, ProjectFile, EventLog, Contact, User } from '../types';
-import { saveFileToHardDrive, getFileFromHardDrive } from '../services/fileStorageService';
+import { saveFileToHardDrive, getFileFromHardDrive, triggerSecureDownload } from '../services/fileStorageService';
 
 const ADMIN_USER = "nsv";
 
@@ -18,7 +18,7 @@ interface Props {
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
-type ProjectTab = 'ledger' | 'tasks' | 'vault' | 'team' | 'directory' | 'log';
+type ProjectTab = 'ledger' | 'tasks' | 'vault' | 'team' | 'contacts' | 'log';
 
 const MOCK_ONLINE_USERS: User[] = [
   { id: 'u1', name: 'nsv', role: 'admin', online: true },
@@ -35,32 +35,14 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
   
   const [taskText, setTaskText] = useState('');
   const [inviteUsername, setInviteUsername] = useState('');
-  const [subTaskInput, setSubTaskInput] = useState<{ taskId: string, text: string } | null>(null);
+  const [subTaskInputs, setSubTaskInputs] = useState<Record<string, string>>({});
 
-  const [isAddingContact, setIsAddingContact] = useState(false);
-  const [contactForm, setContactForm] = useState({ name: '', email: '', address: '', number: '' });
+  // Contact States
+  const [contactSearch, setContactSearch] = useState('');
+  const [showContactForm, setShowContactForm] = useState(false);
+  const [newContact, setNewContact] = useState({ name: '', number: '', email: '' });
 
-  // Vault Resource State
-  const [isAddingResource, setIsAddingResource] = useState(false);
-  const [resourceForm, setResourceForm] = useState({ name: '', url: '' });
-
-  const [isVideoCallActive, setIsVideoCallActive] = useState(false);
-  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  const [isConnecting, setIsConnecting] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
-  const [isCameraOff, setIsCameraOff] = useState(false);
-  const [isIframe, setIsIframe] = useState(false);
-  
-  const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    try {
-      setIsIframe(window.self !== window.top);
-    } catch (e) {
-      setIsIframe(true);
-    }
-  }, []);
 
   const selectedEvent = useMemo(() => (events || []).find(e => e.id === selectedEventId), [events, selectedEventId]);
 
@@ -78,32 +60,6 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
       lastUpdated: new Date().toISOString()
     });
   };
-
-  useEffect(() => {
-    if (isVideoCallActive && !localStream) {
-      const initMedia = async () => {
-        setIsConnecting(true);
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-          setLocalStream(stream);
-        } catch (err) {
-          setIsCameraOff(true);
-        } finally {
-          setTimeout(() => setIsConnecting(false), 800);
-        }
-      };
-      initMedia();
-    } else if (!isVideoCallActive && localStream) {
-      localStream.getTracks().forEach(t => t.stop());
-      setLocalStream(null);
-    }
-  }, [isVideoCallActive]);
-
-  useEffect(() => {
-    if (videoRef.current && localStream && !isCameraOff) {
-      videoRef.current.srcObject = localStream;
-    }
-  }, [localStream, isCameraOff]);
 
   const handleAddItem = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -142,10 +98,12 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
   };
 
   const handleAddSubTask = (parentTaskId: string) => {
-    if (!selectedEvent || !subTaskInput || !subTaskInput.text.trim()) return;
+    const text = subTaskInputs[parentTaskId];
+    if (!selectedEvent || !text?.trim()) return;
+
     const newSubTask: ProjectTask = {
       id: generateId(),
-      text: subTaskInput.text.trim(),
+      text: text.trim(),
       completed: false,
       assignedToId: currentUser,
       subTasks: []
@@ -159,8 +117,8 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
     });
 
     const updatedEvent = { ...selectedEvent, tasks: updatedTasks };
-    addActionLog(updatedEvent, `Added sub-task "${newSubTask.text}"`, 'task');
-    setSubTaskInput(null);
+    addActionLog(updatedEvent, `Linked sub-milestone to "${parentTaskId}": "${newSubTask.text}"`, 'task');
+    setSubTaskInputs(prev => ({ ...prev, [parentTaskId]: '' }));
   };
 
   const toggleTaskCompletion = (taskId: string, parentTaskId?: string) => {
@@ -172,22 +130,18 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
         if (t.id === parentTaskId) {
           return {
             ...t,
-            subTasks: (t.subTasks || []).map(st => st.id === taskId ? { ...st, completed: !st.completed } : st)
+            subTasks: t.subTasks?.map(st => st.id === taskId ? { ...st, completed: !st.completed } : st)
           };
         }
         return t;
       });
     } else {
-      updatedTasks = selectedEvent.tasks.map(t => {
-        if (t.id === taskId) {
-          return { ...t, completed: !t.completed };
-        }
-        return t;
-      });
+      updatedTasks = selectedEvent.tasks.map(t => 
+        t.id === taskId ? { ...t, completed: !t.completed } : t
+      );
     }
     
-    const updatedEvent = { ...selectedEvent, tasks: updatedTasks };
-    addActionLog(updatedEvent, `Updated status for task matrix`, 'task');
+    onUpdateEvent({ ...selectedEvent, tasks: updatedTasks });
   };
 
   const handleAddMember = () => {
@@ -203,17 +157,44 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
     setInviteUsername('');
   };
 
+  // Contact Handlers
+  const handleLinkContact = (contactId: string) => {
+    if (!selectedEvent) return;
+    const currentIds = selectedEvent.contactIds || [];
+    if (currentIds.includes(contactId)) return;
+
+    const updatedEvent = { ...selectedEvent, contactIds: [...currentIds, contactId] };
+    const contact = contacts.find(c => c.id === contactId);
+    addActionLog(updatedEvent, `Linked stakeholder: "${contact?.name || 'Unknown'}"`, 'contact');
+    onUpdateEvent(updatedEvent);
+  };
+
+  const handleUnlinkContact = (contactId: string) => {
+    if (!selectedEvent) return;
+    const updatedEvent = { 
+      ...selectedEvent, 
+      contactIds: (selectedEvent.contactIds || []).filter(id => id !== contactId) 
+    };
+    const contact = contacts.find(c => c.id === contactId);
+    addActionLog(updatedEvent, `Removed stakeholder: "${contact?.name || 'Unknown'}"`, 'contact');
+    onUpdateEvent(updatedEvent);
+  };
+
+  const handleCreateContact = () => {
+    if (!newContact.name) return;
+    const contact: Contact = { ...newContact, id: generateId() };
+    onUpdateContacts([...contacts, contact]);
+    if (selectedEvent) handleLinkContact(contact.id);
+    setNewContact({ name: '', number: '', email: '' });
+    setShowContactForm(false);
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!selectedEvent || !file) return;
 
-    if (isIframe) {
-      alert("Browser Security: Direct local file linking is blocked in Preview mode. Please open the app in a new tab to use the Local Vault.");
-      return;
-    }
-
     if (!directoryHandle) {
-      alert("Action Required: Please link a Local Vault in Settings first.");
+      alert("Hard Drive Vault not linked. Please mount SSD in Settings.");
       return;
     }
 
@@ -235,30 +216,7 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
       addActionLog(updatedEvent, `Linked local asset: "${file.name}"`, 'file');
     } catch (err) {
       console.error("Vault access error:", err);
-      alert("Vault Security: Permission to write to disk denied or expired. Unlock the vault in Settings.");
     }
-  };
-
-  const handleAddWebLink = () => {
-    if (!selectedEvent || !resourceForm.name.trim() || !resourceForm.url.trim()) return;
-    
-    const newFile: ProjectFile = {
-      id: generateId(),
-      name: resourceForm.name.trim(),
-      type: 'url',
-      size: 0,
-      timestamp: new Date().toISOString(),
-      storageRef: resourceForm.url.trim(),
-      storageType: 'url',
-      version: 1,
-      lastModifiedBy: currentUser
-    };
-
-    const updatedEvent = { ...selectedEvent, files: [...(selectedEvent.files || []), newFile] };
-    addActionLog(updatedEvent, `Linked web resource: "${newFile.name}"`, 'file');
-    
-    setIsAddingResource(false);
-    setResourceForm({ name: '', url: '' });
   };
 
   const handleAssetClick = async (file: ProjectFile) => {
@@ -268,119 +226,67 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
     }
 
     if (file.storageType === 'filesystem') {
-      if (isIframe) {
-        alert("Browser Restricted: Local resources (blob URLs) cannot be opened inside a secure frame sandbox. To view this file, please use the 'Launch Full Tab' mode in Settings.");
-        return;
-      }
-
       if (!directoryHandle) {
-        alert("Vault Unlinked: Reconnect your Local Vault in Settings to access this resource.");
+        alert("SSD Vault Disconnected. Re-mount in Settings.");
         return;
       }
-
       try {
         const blob = await getFileFromHardDrive(directoryHandle, file.storageRef);
-        const url = URL.createObjectURL(blob);
-        
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = file.name;
-        a.style.display = 'none';
-        document.body.appendChild(a);
-        a.click();
-        
-        setTimeout(() => {
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-        }, 100);
+        triggerSecureDownload(blob, file.name);
       } catch (err) {
         console.error("File retrieval error:", err);
-        alert("File System Error: The linked file was moved or the folder permission has expired.");
+        alert("Mirror Asset Error: File missing or access denied.");
       }
     }
   };
 
-  const handleAddContactToProject = () => {
-    if (!selectedEvent || !contactForm.name.trim()) return;
-    const newContact: Contact = {
-      id: generateId(),
-      name: contactForm.name.trim(),
-      email: contactForm.email.trim(),
-      address: contactForm.address.trim(),
-      number: contactForm.number.trim(),
-    };
-
-    onUpdateContacts([...contacts, newContact]);
-    const updatedEvent = {
-      ...selectedEvent,
-      contactIds: [...(selectedEvent.contactIds || []), newContact.id]
-    };
-    addActionLog(updatedEvent, `Linked contact: "${newContact.name}"`, 'contact');
-
-    setIsAddingContact(false);
-    setContactForm({ name: '', email: '', address: '', number: '' });
-  };
-
-  const projectContacts = useMemo(() => {
+  const eventContacts = useMemo(() => {
     if (!selectedEvent) return [];
     return contacts.filter(c => selectedEvent.contactIds?.includes(c.id));
-  }, [contacts, selectedEvent]);
+  }, [selectedEvent, contacts]);
 
-  const getTimeAgo = (timestamp: string) => {
-    const seconds = Math.floor((new Date().getTime() - new Date(timestamp).getTime()) / 1000);
-    if (seconds < 60) return 'just now';
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-    return new Date(timestamp).toLocaleDateString();
-  };
+  const availableContacts = useMemo(() => {
+    if (!selectedEvent) return [];
+    const search = contactSearch.toLowerCase();
+    return contacts.filter(c => 
+      !selectedEvent.contactIds?.includes(c.id) && 
+      (c.name.toLowerCase().includes(search) || c.email.toLowerCase().includes(search))
+    );
+  }, [selectedEvent, contacts, contactSearch]);
 
   return (
-    <div className={`space-y-6 pb-20 max-w-6xl mx-auto px-2 ${!isAdmin ? 'text-slate-200' : ''}`}>
-      {/* Presence Header */}
+    <div className={`space-y-6 pb-20 max-w-6xl mx-auto px-2`}>
       <div className="flex items-center justify-between bg-slate-900/60 p-4 rounded-[3rem] border border-slate-800 backdrop-blur-2xl mb-8 shadow-2xl relative overflow-hidden group">
-        <div className="absolute inset-0 bg-indigo-600/10 opacity-0 group-hover:opacity-100 transition-opacity"></div>
         <div className="flex items-center gap-5 relative z-10">
           <div className="flex -space-x-4">
             {MOCK_ONLINE_USERS.filter(u => u.online).map(u => (
-              <div key={u.id} className="w-12 h-12 rounded-full bg-slate-800 border-2 border-slate-900 flex items-center justify-center text-[11px] font-black uppercase ring-2 ring-indigo-500/20 shadow-2xl" title={`${u.name} online`}>
+              <div key={u.id} className="w-12 h-12 rounded-full bg-slate-800 border-2 border-slate-900 flex items-center justify-center text-[11px] font-black uppercase ring-2 ring-indigo-500/20 shadow-2xl">
                 {u.name[0]}
-                <span className="absolute bottom-0.5 right-0.5 w-3.5 h-3.5 bg-emerald-500 rounded-full border-2 border-slate-900 shadow-lg"></span>
               </div>
             ))}
           </div>
           <div>
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] block leading-none mb-1.5">Peer Bridge Active</span>
-            <span className="text-[9px] font-extrabold text-emerald-400 uppercase tracking-widest bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">{MOCK_ONLINE_USERS.filter(u => u.online).length} Synchronized Sessions</span>
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] block leading-none mb-1.5">Hard Drive Mirroring: {directoryHandle ? <span className="text-emerald-400">ACTIVE</span> : <span className="text-rose-400">INACTIVE</span>}</span>
+            <span className="text-[9px] font-extrabold text-emerald-400 uppercase tracking-widest bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">FileSystem Access Protocol: {directoryHandle?.name || 'ROOT'}</span>
           </div>
         </div>
-        <button 
-          onClick={() => setIsVideoCallActive(!isVideoCallActive)}
-          className={`px-8 py-3.5 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all flex items-center gap-3 ${isVideoCallActive ? 'bg-rose-600 text-white animate-pulse shadow-rose-600/30 shadow-2xl' : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-indigo-600/30 shadow-2xl active:scale-95'}`}
-        >
-          <div className={`w-2.5 h-2.5 rounded-full ${isVideoCallActive ? 'bg-white' : 'bg-indigo-400'} animate-ping`}></div>
-          {isVideoCallActive ? 'Close Terminal' : 'Launch Video Portal'}
-        </button>
       </div>
 
       <div className="flex justify-between items-end mb-8">
         <div>
-          <h2 className={`text-4xl font-black tracking-tighter ${isAdmin ? 'text-slate-800' : 'text-white'}`}>Project Matrix</h2>
-          <p className="text-[11px] text-slate-400 font-bold uppercase tracking-[0.3em] mt-1">Multi-User Financial Strategic Command</p>
+          <h2 className={`text-4xl font-black tracking-tighter ${isAdmin ? 'text-slate-800' : 'text-slate-700'}`}>Project Matrix</h2>
         </div>
         {isAdmin && !selectedEventId && (
-          <button onClick={() => setShowAddForm(!showAddForm)} className="flex items-center gap-3 px-8 py-4 bg-indigo-600 text-white rounded-2xl text-[11px] font-black uppercase tracking-widest shadow-2xl hover:bg-indigo-500 transition-all active:scale-95">
-            <i className={`fas ${showAddForm ? 'fa-times' : 'fa-plus'}`}></i> {showAddForm ? 'Abort' : 'Initiate Project'}
+          <button onClick={() => setShowAddForm(!showAddForm)} className="px-8 py-4 bg-indigo-600 text-white rounded-2xl text-[11px] font-black uppercase tracking-widest shadow-2xl hover:bg-indigo-500 transition-all">
+            {showAddForm ? 'Abort' : 'Initiate Project'}
           </button>
         )}
       </div>
 
       {showAddForm && !selectedEventId && (
         <div className="p-12 bg-white border border-slate-100 rounded-[3.5rem] shadow-2xl animate-in zoom-in-95 mb-8">
-          <div>
-            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-2 block">Matrix Frame Label</label>
-            <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. OPERATIONS_HUB_2025" className="w-full p-6 bg-slate-50 border border-slate-200 text-slate-800 rounded-3xl outline-none font-black text-xl focus:ring-4 focus:ring-indigo-500/20" />
-          </div>
-          <button onClick={() => { if (!newName) return; onAddEvent({ name: newName, date: new Date().toISOString().split('T')[0], status: 'active' }); setShowAddForm(false); setNewName(''); }} className="w-full mt-8 py-6 bg-indigo-600 text-white font-black rounded-[2rem] shadow-2xl uppercase tracking-[0.2em] text-[12px] hover:bg-indigo-500 transition-all">Publish Framework</button>
+          <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. OPERATIONS_HUB_2025" className="w-full p-6 bg-slate-50 border border-slate-200 text-slate-800 rounded-3xl outline-none font-black text-xl" />
+          <button onClick={() => { if (!newName) return; onAddEvent({ name: newName, date: new Date().toISOString().split('T')[0], status: 'active' }); setShowAddForm(false); setNewName(''); }} className="w-full mt-8 py-6 bg-indigo-600 text-white font-black rounded-[2rem] shadow-2xl uppercase tracking-[0.2em] text-[12px]">Publish Framework</button>
         </div>
       )}
 
@@ -394,110 +300,253 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
                  <p className="text-[10px] text-white/70 font-black uppercase tracking-[0.3em] mt-2">Active Strategic Logic</p>
                </div>
              </div>
-             <div className="flex bg-black/30 p-2 rounded-3xl border border-white/10 overflow-x-auto no-scrollbar max-w-full relative z-10 backdrop-blur-md">
-               {(['ledger', 'tasks', 'vault', 'team', 'directory', 'log'] as ProjectTab[]).map(tab => (
-                 <button key={tab} onClick={() => setActiveTab(tab)} className={`px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all min-w-max ${activeTab === tab ? 'bg-white text-slate-900 shadow-2xl' : 'text-white/60 hover:text-white hover:bg-white/5'}`}>{tab}</button>
+             <div className="flex bg-black/30 p-2 rounded-3xl border border-white/10 overflow-x-auto no-scrollbar relative z-10 backdrop-blur-md">
+               {(['ledger', 'tasks', 'vault', 'team', 'contacts', 'log'] as ProjectTab[]).map(tab => (
+                 <button key={tab} onClick={() => setActiveTab(tab)} className={`px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === tab ? 'bg-white text-slate-900 shadow-2xl' : 'text-white/60 hover:text-white hover:bg-white/5'}`}>{tab}</button>
                ))}
              </div>
           </div>
 
           <div className="min-h-[500px]">
             {activeTab === 'ledger' && (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 animate-in fade-in duration-300">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-in fade-in">
                 <div className="lg:col-span-2 space-y-6">
-                  <div className="bg-white p-10 rounded-[3.5rem] border border-slate-100 shadow-xl">
-                    <h3 className="font-black text-slate-800 uppercase text-[10px] tracking-[0.4em] mb-10">Matrix Ledger Flow</h3>
-                    <div className="space-y-4">
+                  <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm">
+                    <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-6">Financial Ledger</h3>
+                    <div className="space-y-3">
                       {selectedEvent.items.length > 0 ? selectedEvent.items.map(item => (
-                        <div key={item.id} className="p-6 bg-slate-50 border border-slate-100 rounded-[2rem] flex items-center justify-between group hover:bg-white hover:border-indigo-500/30 transition-all">
-                          <div className="flex items-center gap-6">
-                            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-lg ${item.type === 'income' ? 'bg-emerald-500/15 text-emerald-600' : 'bg-rose-500/15 text-rose-600'}`}>
-                              <i className={`fas ${item.type === 'income' ? 'fa-plus-circle' : 'fa-minus-circle'}`}></i>
+                        <div key={item.id} className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between">
+                          <div className="flex items-center gap-4">
+                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white ${item.type === 'income' ? 'bg-emerald-500' : 'bg-rose-500'}`}>
+                              <i className={`fas ${item.type === 'income' ? 'fa-plus' : 'fa-minus'}`}></i>
                             </div>
                             <div>
-                              <p className="font-black text-sm text-slate-800">{item.description}</p>
-                              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-1">{item.category} • {item.date}</p>
+                              <p className="text-sm font-black text-slate-800">{item.description}</p>
+                              <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">{item.category} • {item.date}</p>
                             </div>
                           </div>
-                          <p className={`font-black text-xl ${item.type === 'income' ? 'text-emerald-600' : 'text-slate-900'}`}>${item.amount.toLocaleString()}</p>
+                          <p className={`font-black ${item.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                            {item.type === 'income' ? '+' : '-'}${item.amount.toLocaleString()}
+                          </p>
                         </div>
-                      )) : <div className="py-20 text-center text-slate-300 uppercase text-[10px] font-black">No Data Points Registered</div>}
+                      )) : (
+                        <div className="py-12 text-center text-slate-300">
+                          <i className="fas fa-file-invoice-dollar text-3xl mb-3"></i>
+                          <p className="text-[10px] font-black uppercase tracking-widest">No entries recorded</p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
-                <div className="bg-white p-8 rounded-[3.5rem] border border-slate-100 shadow-2xl h-fit">
-                   <h3 className="font-black text-slate-800 uppercase text-[10px] tracking-[0.3em] mb-8 text-center">Register Entry</h3>
-                   <form onSubmit={handleAddItem} className="space-y-6">
-                    <div><label className="text-[9px] font-black text-slate-400 uppercase ml-2 mb-2 block tracking-widest">Entry Label</label><input name="description" className="w-full p-4 bg-slate-50 border border-slate-200 text-slate-800 rounded-2xl font-black text-xs outline-none focus:ring-2 focus:ring-indigo-500" required /></div>
-                    <div><label className="text-[9px] font-black text-slate-400 uppercase ml-2 mb-2 block tracking-widest">Amount ($)</label><input name="amount" type="number" step="0.01" className="w-full p-4 bg-slate-50 border border-slate-200 text-slate-800 rounded-2xl font-black text-sm outline-none focus:ring-2 focus:ring-indigo-500" required /></div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <select name="type" className="p-3 bg-slate-50 border border-slate-200 text-slate-600 rounded-xl font-black uppercase text-[8px] tracking-widest outline-none">
-                        <option value="expense">Expense</option><option value="income">Income</option>
+
+                <div className="space-y-6">
+                  <div className="bg-slate-900 p-8 rounded-[3rem] text-white shadow-2xl">
+                    <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400 mb-6">Append Entry</h3>
+                    <form onSubmit={handleAddItem} className="space-y-4">
+                      <input name="description" placeholder="Description" required className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-sm font-bold outline-none" />
+                      <input name="amount" type="number" step="0.01" placeholder="Amount" required className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-sm font-bold outline-none" />
+                      <select name="type" className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-sm font-bold outline-none appearance-none">
+                        <option value="expense" className="bg-slate-800">Expense</option>
+                        <option value="income" className="bg-slate-800">Income</option>
                       </select>
-                      <select name="category" className="p-3 bg-slate-50 border border-slate-200 text-slate-600 rounded-xl font-black uppercase text-[8px] tracking-widest outline-none">
-                        {EVENT_ITEM_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                      <select name="category" className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-sm font-bold outline-none appearance-none">
+                        {EVENT_ITEM_CATEGORIES.map(c => <option key={c} value={c} className="bg-slate-800">{c}</option>)}
                       </select>
-                    </div>
-                    <button type="submit" className="w-full py-5 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-[0.2em] text-[10px] hover:bg-indigo-500 transition-all">Authorize Broadcast</button>
-                   </form>
+                      <button type="submit" className="w-full py-4 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest">Authorize Transaction</button>
+                    </form>
+                  </div>
                 </div>
               </div>
             )}
 
             {activeTab === 'tasks' && (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 animate-in fade-in duration-300">
-                <div className="lg:col-span-2 bg-white p-10 rounded-[4rem] border border-slate-100 shadow-2xl">
-                  <h3 className="font-black text-slate-800 uppercase text-[10px] tracking-[0.4em] mb-10">Milestone Roadmaps</h3>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-in fade-in">
+                <div className="lg:col-span-2 bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
+                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-6">Deployment Milestones</h3>
                   <div className="space-y-6">
                     {selectedEvent.tasks.length > 0 ? selectedEvent.tasks.map(task => (
                       <div key={task.id} className="space-y-3">
-                        <div className={`p-6 bg-slate-50 border rounded-[2.5rem] flex items-center gap-6 group transition-all ${task.completed ? 'border-emerald-200 opacity-60' : 'border-slate-100 hover:border-indigo-200'}`}>
-                          <button onClick={() => toggleTaskCompletion(task.id)} className={`w-12 h-12 rounded-2xl flex items-center justify-center border-2 transition-all ${task.completed ? 'bg-emerald-500 border-emerald-500 text-white shadow-emerald-500/20' : 'bg-white border-slate-200 text-transparent'}`}><i className="fas fa-check text-sm"></i></button>
-                          <div className="flex-1">
-                            <p className={`font-black text-md ${task.completed ? 'text-slate-400 line-through' : 'text-slate-800'}`}>{task.text}</p>
-                            <button onClick={() => setSubTaskInput(subTaskInput?.taskId === task.id ? null : { taskId: task.id, text: '' })} className="text-[8px] font-black text-indigo-600 uppercase tracking-widest mt-1 hover:underline">+ New Sub-Objective</button>
+                        <div className={`p-5 rounded-[2rem] border transition-all flex items-center gap-4 ${task.completed ? 'bg-emerald-50 border-emerald-100' : 'bg-slate-50 border-slate-100'}`}>
+                          <button onClick={() => toggleTaskCompletion(task.id)} className={`w-10 h-10 rounded-xl flex items-center justify-center border-2 transition-all ${task.completed ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 text-slate-300'}`}>
+                            {task.completed && <i className="fas fa-check"></i>}
+                          </button>
+                          <p className={`font-black text-sm flex-1 ${task.completed ? 'text-emerald-800 line-through' : 'text-slate-800'}`}>{task.text}</p>
+                        </div>
+                        
+                        {/* Sub Tasks */}
+                        <div className="pl-12 space-y-2">
+                          {task.subTasks?.map(st => (
+                            <div key={st.id} className={`p-3 rounded-2xl border flex items-center gap-3 ${st.completed ? 'bg-emerald-50 border-emerald-100 opacity-60' : 'bg-white border-slate-100'}`}>
+                              <button onClick={() => toggleTaskCompletion(st.id, task.id)} className={`w-6 h-6 rounded-lg flex items-center justify-center border transition-all ${st.completed ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 text-slate-300'}`}>
+                                {st.completed && <i className="fas fa-check text-[10px]"></i>}
+                              </button>
+                              <p className={`font-bold text-xs flex-1 ${st.completed ? 'text-emerald-700 line-through' : 'text-slate-600'}`}>{st.text}</p>
+                            </div>
+                          ))}
+                          <div className="flex gap-2 mt-2">
+                             <input 
+                               type="text" 
+                               placeholder="Add sub-milestone..." 
+                               value={subTaskInputs[task.id] || ''}
+                               onChange={e => setSubTaskInputs(prev => ({ ...prev, [task.id]: e.target.value }))}
+                               onKeyDown={e => e.key === 'Enter' && handleAddSubTask(task.id)}
+                               className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500"
+                             />
+                             <button onClick={() => handleAddSubTask(task.id)} className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center hover:bg-indigo-100 transition shadow-sm"><i className="fas fa-plus"></i></button>
                           </div>
                         </div>
-                        {(task.subTasks || []).length > 0 && (
-                          <div className="ml-16 space-y-2 border-l-2 border-slate-100 pl-6">
-                            {task.subTasks?.map(sub => (
-                              <div key={sub.id} className={`p-4 bg-slate-50/50 border rounded-[1.5rem] flex items-center gap-4 transition-all ${sub.completed ? 'border-emerald-100 opacity-60' : 'border-slate-100'}`}>
-                                <button onClick={() => toggleTaskCompletion(sub.id, task.id)} className={`w-8 h-8 rounded-xl flex items-center justify-center border transition-all ${sub.completed ? 'bg-emerald-400 border-emerald-400 text-white' : 'bg-white border-slate-200 text-transparent'}`}><i className="fas fa-check text-[10px]"></i></button>
-                                <p className={`text-xs font-bold ${sub.completed ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{sub.text}</p>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {subTaskInput?.taskId === task.id && (
-                          <div className="ml-16 animate-in slide-in-from-left-4 duration-300">
-                            <div className="flex gap-2">
-                              <input value={subTaskInput.text} onChange={e => setSubTaskInput({ ...subTaskInput, text: e.target.value })} onKeyDown={e => e.key === 'Enter' && handleAddSubTask(task.id)} placeholder="Description..." className="flex-1 p-3 bg-slate-50 border border-indigo-200 rounded-xl text-xs font-bold outline-none" autoFocus />
-                              <button onClick={() => handleAddSubTask(task.id)} className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest">Link</button>
-                            </div>
-                          </div>
-                        )}
                       </div>
-                    )) : <div className="py-20 text-center text-slate-300 uppercase text-[10px] font-black">No Active Milestones</div>}
+                    )) : (
+                      <div className="py-20 text-center text-slate-300">
+                        <i className="fas fa-list-check text-4xl mb-4"></i>
+                        <p className="text-[10px] font-black uppercase tracking-widest">No milestones defined</p>
+                      </div>
+                    )}
                   </div>
                 </div>
-                <div className="bg-white p-8 rounded-[3.5rem] border border-slate-100 shadow-2xl h-fit">
-                   <h3 className="font-black text-slate-800 uppercase text-[10px] tracking-[0.3em] mb-8 text-center">Deploy Objective</h3>
-                   <textarea value={taskText} onChange={e => setTaskText(e.target.value)} className="w-full p-6 bg-slate-50 border border-slate-200 text-slate-800 rounded-3xl font-black text-xs h-40 no-scrollbar outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Milestone parameters..."></textarea>
-                   <button onClick={handleAddTask} className="w-full mt-6 py-5 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-[0.2em] text-[10px] hover:bg-indigo-500 transition-all">Launch Task</button>
+
+                <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm">
+                  <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">New Framework Milestone</h3>
+                  <textarea value={taskText} onChange={e => setTaskText(e.target.value)} placeholder="Specify project objective..." className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold min-h-[120px] outline-none" />
+                  <button onClick={handleAddTask} className="w-full mt-4 py-4 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl">Deploy Phase</button>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'team' && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in fade-in">
+                <div className="bg-white p-10 rounded-[4rem] border border-slate-100 shadow-sm">
+                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-8">Authorized Personnel</h3>
+                  <div className="space-y-4">
+                    {selectedEvent.memberUsernames?.map(username => (
+                      <div key={username} className="p-5 bg-slate-50 border border-slate-100 rounded-[2.5rem] flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-indigo-600 shadow-sm border border-slate-100 font-black uppercase">{username[0]}</div>
+                          <p className="font-black text-slate-800">{username}</p>
+                        </div>
+                        <span className="text-[8px] font-black bg-indigo-100 text-indigo-600 px-3 py-1 rounded-full uppercase">Collaborator</span>
+                      </div>
+                    ))}
+                    <div className="p-5 bg-indigo-600 text-white rounded-[2.5rem] flex items-center gap-4">
+                      <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center text-white shadow-sm border border-white/10 font-black uppercase">{currentUser[0]}</div>
+                      <p className="font-black flex-1">{currentUser}</p>
+                      <span className="text-[8px] font-black bg-white text-indigo-600 px-3 py-1 rounded-full uppercase">Current User</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900 p-10 rounded-[4rem] text-white shadow-2xl">
+                  <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-8">Grant Access</h3>
+                  <div className="space-y-6">
+                    <p className="text-xs text-slate-400 font-medium leading-relaxed">Authorize a new collaborator to mirror this project in their terminal.</p>
+                    <input value={inviteUsername} onChange={e => setInviteUsername(e.target.value)} placeholder="Username" className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-sm font-black outline-none" />
+                    <button onClick={handleAddMember} className="w-full py-5 bg-indigo-600 text-white rounded-[2rem] text-[11px] font-black uppercase tracking-widest shadow-xl">Issue Access Key</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'contacts' && (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-in fade-in">
+                <div className="lg:col-span-2 bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm h-full flex flex-col">
+                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-6">Project Stakeholders</h3>
+                  <div className="space-y-4 overflow-y-auto max-h-[600px] pr-2 custom-scrollbar">
+                    {eventContacts.length > 0 ? eventContacts.map(contact => (
+                      <div key={contact.id} className="p-5 bg-slate-50 border border-slate-100 rounded-[2rem] flex items-center justify-between group">
+                        <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-indigo-600 shadow-sm border border-slate-100 font-black">
+                            {contact.name[0]}
+                          </div>
+                          <div>
+                            <p className="font-black text-slate-800">{contact.name}</p>
+                            <p className="text-[10px] text-slate-400 font-bold tracking-widest">{contact.number || contact.email || 'No Details'}</p>
+                          </div>
+                        </div>
+                        <button onClick={() => handleUnlinkContact(contact.id)} className="w-10 h-10 flex items-center justify-center text-slate-300 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100">
+                          <i className="fas fa-user-minus"></i>
+                        </button>
+                      </div>
+                    )) : (
+                      <div className="py-20 text-center text-slate-300">
+                        <i className="fas fa-address-book text-4xl mb-4"></i>
+                        <p className="text-[10px] font-black uppercase tracking-widest">No stakeholders linked</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-6">
+                  <div className="bg-slate-900 p-8 rounded-[3rem] text-white shadow-2xl">
+                    <h3 className="text-[10px] font-black uppercase tracking-widest text-indigo-400 mb-6">Link External Contact</h3>
+                    <div className="relative mb-4">
+                      <i className="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"></i>
+                      <input 
+                        type="text" 
+                        placeholder="Search directory..." 
+                        value={contactSearch}
+                        onChange={e => setContactSearch(e.target.value)}
+                        className="w-full pl-12 pr-4 py-3 bg-white/5 border border-white/10 rounded-xl text-sm font-bold outline-none"
+                      />
+                    </div>
+                    <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar mb-6">
+                      {availableContacts.map(contact => (
+                        <button 
+                          key={contact.id} 
+                          onClick={() => handleLinkContact(contact.id)}
+                          className="w-full p-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl flex items-center justify-between transition-all"
+                        >
+                          <span className="text-xs font-bold">{contact.name}</span>
+                          <i className="fas fa-plus-circle text-indigo-400"></i>
+                        </button>
+                      ))}
+                      {availableContacts.length === 0 && (
+                        <p className="text-center py-4 text-[9px] font-black text-slate-500 uppercase tracking-widest">No available contacts</p>
+                      )}
+                    </div>
+                    <button 
+                      onClick={() => setShowContactForm(!showContactForm)}
+                      className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest transition shadow-xl"
+                    >
+                      {showContactForm ? 'Cancel' : 'Register New Contact'}
+                    </button>
+                  </div>
+
+                  {showContactForm && (
+                    <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm animate-in slide-in-from-top-4 duration-300">
+                      <div className="space-y-4">
+                        <input 
+                          type="text" 
+                          placeholder="Full Name" 
+                          value={newContact.name}
+                          onChange={e => setNewContact({...newContact, name: e.target.value})}
+                          className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none" 
+                        />
+                        <input 
+                          type="text" 
+                          placeholder="Phone Number" 
+                          value={newContact.number}
+                          onChange={e => setNewContact({...newContact, number: e.target.value})}
+                          className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none" 
+                        />
+                        <input 
+                          type="email" 
+                          placeholder="Email Address" 
+                          value={newContact.email}
+                          onChange={e => setNewContact({...newContact, email: e.target.value})}
+                          className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none" 
+                        />
+                        <button onClick={handleCreateContact} className="w-full py-4 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest">Confirm & Link</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
 
             {activeTab === 'vault' && (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 animate-in fade-in duration-300">
-                <div className="lg:col-span-2 bg-white p-10 rounded-[4rem] border border-slate-100 shadow-2xl min-h-[450px]">
-                  <div className="flex justify-between items-center mb-10">
-                    <div>
-                      <h3 className="font-black text-slate-800 uppercase text-[10px] tracking-[0.4em]">Asset Archive</h3>
-                      <p className="text-[9px] text-slate-400 font-bold uppercase mt-1 tracking-widest">Linked Resources & Strategic Intelligence</p>
-                    </div>
-                    <button onClick={() => setIsAddingResource(true)} className="px-6 py-3 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl hover:bg-indigo-500 transition-all">+ Link Intelligence</button>
-                  </div>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 animate-in fade-in">
+                <div className="lg:col-span-2 bg-white p-10 rounded-[4rem] border border-slate-100 shadow-sm min-h-[450px]">
+                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-8">Digital Assets</h3>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-8">
                     {selectedEvent.files.map(file => (
                       <div key={file.id} className="p-8 bg-slate-50 border border-slate-100 rounded-[3rem] flex flex-col items-center text-center group cursor-pointer hover:bg-white hover:border-indigo-500/50 transition-all shadow-sm" onClick={() => handleAssetClick(file)}>
@@ -505,7 +554,7 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
                           <i className={`fas ${file.storageType === 'url' ? 'fa-link' : 'fa-file-invoice'} text-2xl`}></i>
                         </div>
                         <p className="font-black text-[11px] text-slate-800 truncate w-full mb-1">{file.name}</p>
-                        <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest truncate w-full">{file.storageType === 'url' ? 'Web Link' : 'SSD Asset'}</p>
+                        <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest truncate w-full">{file.storageType === 'url' ? 'Web Link' : 'Secure Vault Asset'}</p>
                       </div>
                     ))}
                     <div className="p-8 border-4 border-dashed border-slate-200 rounded-[3rem] flex flex-col items-center justify-center text-slate-400 hover:border-indigo-500/30 hover:text-indigo-400 cursor-pointer transition-all group" onClick={() => fileInputRef.current?.click()}>
@@ -515,55 +564,40 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
                     </div>
                   </div>
                 </div>
-                <div className="bg-white p-8 rounded-[3.5rem] border border-slate-100 shadow-2xl h-fit">
-                   <h3 className="font-black text-slate-800 uppercase text-[10px] tracking-[0.3em] mb-6 text-center">Storage Protocols</h3>
-                   <div className="space-y-6">
-                      <div className={`p-4 rounded-2xl border ${directoryHandle ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100'}`}>
-                        <p className={`text-[9px] font-black uppercase tracking-widest mb-1 ${directoryHandle ? 'text-emerald-600' : 'text-rose-600'}`}>Local Vault Status</p>
-                        <p className="text-[11px] font-bold text-slate-700">{directoryHandle ? 'SSD Interface Active' : 'Native Archive Offline'}</p>
+              </div>
+            )}
+
+            {activeTab === 'log' && (
+              <div className="bg-white p-10 rounded-[4rem] border border-slate-100 shadow-sm animate-in fade-in">
+                <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-8">Strategic Log</h3>
+                <div className="space-y-4">
+                  {selectedEvent.logs?.length ? selectedEvent.logs.map(log => (
+                    <div key={log.id} className="p-4 bg-slate-50 border-l-4 border-l-indigo-500 rounded-r-2xl flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-black text-slate-800">{log.action}</p>
+                        <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">By {log.username} • {new Date(log.timestamp).toLocaleString()}</p>
                       </div>
-                      <div className="space-y-4">
-                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Native Browser Sandbox</p>
-                        <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
-                           <p className="text-[10px] font-medium text-slate-500 leading-relaxed">Browser security prohibits local file extraction within Preview frames. Use <b>Full Mode</b> to interact with your hard drive.</p>
-                        </div>
-                      </div>
-                   </div>
+                      <span className="text-[8px] font-black bg-indigo-100 text-indigo-600 px-2 py-0.5 rounded uppercase">{log.type}</span>
+                    </div>
+                  )) : (
+                    <p className="text-center py-20 text-slate-300 text-[10px] font-black uppercase">No activity history</p>
+                  )}
                 </div>
               </div>
             )}
-            
-            {/* Standard Tab Implementations (Team, Directory, Log) omitted for brevity as they follow similar patterns */}
-            {activeTab === 'team' && <div className="bg-white p-10 rounded-[3.5rem] border border-slate-100 shadow-2xl">...</div>}
-            {activeTab === 'directory' && <div className="bg-white p-10 rounded-[3.5rem] border border-slate-100 shadow-2xl">...</div>}
-            {activeTab === 'log' && <div className="bg-white p-10 rounded-[3.5rem] border border-slate-100 shadow-2xl">...</div>}
           </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 animate-in fade-in duration-500">
            {events.map(event => (
-              <div key={event.id} onClick={() => setSelectedEventId(event.id)} className={`${isAdmin ? 'bg-white' : 'bg-slate-900'} p-10 rounded-[4rem] border ${isAdmin ? 'border-slate-100' : 'border-slate-800'} shadow-2xl cursor-pointer hover:border-indigo-600/50 hover:-translate-y-2 transition-all group relative overflow-hidden`}>
-                <div className="absolute top-0 left-0 w-2 h-full bg-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                <div className="flex justify-between items-start mb-12">
-                  <div className={`w-16 h-16 ${isAdmin ? 'bg-slate-50 border-slate-100' : 'bg-slate-800 border-slate-700'} rounded-2xl flex items-center justify-center text-slate-600 group-hover:text-indigo-600 transition-all border`}><i className="fas fa-layer-group text-2xl"></i></div>
-                  <div className="flex -space-x-3">
-                    {(event.memberUsernames || [ADMIN_USER]).slice(0, 3).map(u => (
-                      <div key={u} className={`${isAdmin ? 'bg-white border-slate-100' : 'bg-slate-800 border-slate-900'} w-10 h-10 rounded-full border-2 flex items-center justify-center text-[10px] font-black uppercase ring-2 ring-indigo-500/10`} title={u}>{u[0]}</div>
-                    ))}
-                  </div>
-                </div>
-                <h3 className={`font-black ${isAdmin ? 'text-slate-800' : 'text-white'} text-2xl leading-none mb-4 group-hover:text-indigo-600 transition-colors tracking-tight`}>{event.name}</h3>
+              <div key={event.id} onClick={() => setSelectedEventId(event.id)} className={`bg-white p-10 rounded-[4rem] border border-slate-100 shadow-2xl cursor-pointer hover:border-indigo-600/50 hover:-translate-y-2 transition-all group relative overflow-hidden`}>
+                <h3 className={`font-black text-slate-800 text-2xl leading-none mb-4 group-hover:text-indigo-600 transition-colors tracking-tight`}>{event.name}</h3>
                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em] mb-12">Modified: {new Date(event.lastUpdated).toLocaleDateString()}</p>
-                <div className="flex flex-wrap gap-3">
-                  <div className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest border ${isAdmin ? 'bg-indigo-50 border-indigo-100 text-indigo-600' : 'bg-slate-800/60 border-slate-700/50 text-indigo-400'}`}>{event.files.length} Data Points</div>
-                  <div className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest border ${isAdmin ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-slate-800/60 border-slate-700/50 text-emerald-400'}`}>{event.tasks.filter(t => t.completed).length} Resolved</div>
-                </div>
+                <div className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest border bg-indigo-50 border-indigo-100 text-indigo-600`}>{event.files.length} Vault Items</div>
               </div>
            ))}
         </div>
       )}
-
-      {/* MODALS (ADD CONTACT / RESOURCE) OMITTED AS PER MINIMAL UPDATE RULE, UNCHANGED LOGIC */}
     </div>
   );
 };

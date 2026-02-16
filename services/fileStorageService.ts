@@ -1,101 +1,85 @@
-
 /**
- * Fire Finance File Storage Engine
- * Prevents localStorage crashes by using IndexedDB for large blobs
- * and supports real Hard Drive folder syncing via File System Access API.
+ * Fire Finance - Mirrored Storage Engine
+ * High-performance persistence using IndexedDB with optional SSD Mirroring.
  */
 
-const DB_NAME = 'FireFinanceVault';
-const STORE_NAME = 'project_files';
-const HANDLE_STORE = 'vault_handles';
+const DB_NAME = 'FireFinance_v1';
+const DATA_STORE = 'app_state';
+const MIRROR_HANDLE_STORE = 'mirror_handles';
 
 const initDB = (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 2); // Incremented version to add handles store
+    const request = indexedDB.open(DB_NAME, 3);
     request.onupgradeneeded = () => {
-      if (!request.result.objectStoreNames.contains(STORE_NAME)) {
-        request.result.createObjectStore(STORE_NAME);
-      }
-      if (!request.result.objectStoreNames.contains(HANDLE_STORE)) {
-        request.result.createObjectStore(HANDLE_STORE);
-      }
+      const db = request.result;
+      if (!db.objectStoreNames.contains(DATA_STORE)) db.createObjectStore(DATA_STORE);
+      if (!db.objectStoreNames.contains(MIRROR_HANDLE_STORE)) db.createObjectStore(MIRROR_HANDLE_STORE);
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
 };
 
-export const saveFileToIndexedDB = async (id: string, data: Blob): Promise<void> => {
-  const db = await initDB();
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, 'readwrite');
-    const store = transaction.objectStore(STORE_NAME);
-    const request = store.put(data, id);
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
-  });
-};
-
-export const getFileFromIndexedDB = async (id: string): Promise<Blob | null> => {
-  const db = await initDB();
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, 'readonly');
-    const store = transaction.objectStore(STORE_NAME);
-    const request = store.get(id);
-    request.onsuccess = () => resolve(request.result || null);
-    request.onerror = () => reject(request.error);
-  });
-};
-
-export const deleteFileFromIndexedDB = async (id: string): Promise<void> => {
-  const db = await initDB();
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, 'readwrite');
-    const store = transaction.objectStore(STORE_NAME);
-    const request = store.delete(id);
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
-  });
-};
-
 /**
- * Vault Handle Persistence
+ * Universal Download Utility for ad-hoc exports
  */
-export const storeVaultHandle = async (handle: FileSystemDirectoryHandle): Promise<void> => {
+export const triggerSecureDownload = (blob: Blob, fileName: string) => {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  
+  setTimeout(() => {
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, 2000);
+};
+
+/**
+ * Mirror App State to Hard Drive via FileSystemFileHandle
+ */
+export const saveToMirrorFile = async (handle: FileSystemFileHandle, data: any): Promise<boolean> => {
+  try {
+    const permission = await (handle as any).requestPermission({ mode: 'readwrite' });
+    if (permission !== 'granted') return false;
+
+    const writable = await (handle as any).createWritable();
+    await writable.write(JSON.stringify(data, null, 2));
+    await writable.close();
+    return true;
+  } catch (err) {
+    console.error("Mirror Sync Failed:", err);
+    return false;
+  }
+};
+
+/**
+ * Persist/Retrieve Mirror Handle from IndexedDB
+ */
+export const storeMirrorHandle = async (handle: FileSystemFileHandle): Promise<void> => {
   const db = await initDB();
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction(HANDLE_STORE, 'readwrite');
-    const store = transaction.objectStore(HANDLE_STORE);
-    const request = store.put(handle, 'primary_vault');
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
+    const transaction = db.transaction(MIRROR_HANDLE_STORE, 'readwrite');
+    transaction.objectStore(MIRROR_HANDLE_STORE).put(handle, 'active_mirror');
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
   });
 };
 
-export const getStoredVaultHandle = async (): Promise<FileSystemDirectoryHandle | null> => {
+export const getMirrorHandle = async (): Promise<FileSystemFileHandle | null> => {
   const db = await initDB();
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction(HANDLE_STORE, 'readonly');
-    const store = transaction.objectStore(HANDLE_STORE);
-    const request = store.get('primary_vault');
+    const transaction = db.transaction(MIRROR_HANDLE_STORE, 'readonly');
+    const request = transaction.objectStore(MIRROR_HANDLE_STORE).get('active_mirror');
     request.onsuccess = () => resolve(request.result || null);
     request.onerror = () => reject(request.error);
   });
 };
 
-export const clearVaultHandle = async (): Promise<void> => {
-  const db = await initDB();
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(HANDLE_STORE, 'readwrite');
-    const store = transaction.objectStore(HANDLE_STORE);
-    const request = store.delete('primary_vault');
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
-  });
-};
-
 /**
- * Native File System Access Logic
+ * Legacy Support for Event Planner Directory Access
  */
 export const saveFileToHardDrive = async (
   directoryHandle: FileSystemDirectoryHandle,
@@ -104,24 +88,14 @@ export const saveFileToHardDrive = async (
   blob: Blob
 ): Promise<string> => {
   try {
-    // Ensure we have permission
-    // Fix: Cast to any as queryPermission might be missing from some FileSystemDirectoryHandle definitions
-    const permission = await (directoryHandle as any).queryPermission({ mode: 'readwrite' });
-    if (permission !== 'granted') {
-      throw new Error("Hard drive access permission not granted.");
-    }
-
-    // Sanitize folder name
     const folderName = projectName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
     const projectFolder = await directoryHandle.getDirectoryHandle(folderName, { create: true });
     const fileHandle = await projectFolder.getFileHandle(fileName, { create: true });
-    // Fix: Cast to any as createWritable might be missing from some FileSystemFileHandle definitions
     const writable = await (fileHandle as any).createWritable();
     await writable.write(blob);
     await writable.close();
     return `${folderName}/${fileName}`;
   } catch (error) {
-    console.error("Native File System Error:", error);
     throw error;
   }
 };
@@ -133,6 +107,13 @@ export const getFileFromHardDrive = async (
   const [folderName, fileName] = storageRef.split('/');
   const projectFolder = await directoryHandle.getDirectoryHandle(folderName);
   const fileHandle = await projectFolder.getFileHandle(fileName);
-  const file = await fileHandle.getFile();
-  return file;
+  return await fileHandle.getFile();
+};
+
+export const storeVaultHandle = storeMirrorHandle as any;
+export const getStoredVaultHandle = getMirrorHandle as any;
+export const clearVaultHandle = async () => {
+  const db = await initDB();
+  const transaction = db.transaction(MIRROR_HANDLE_STORE, 'readwrite');
+  transaction.objectStore(MIRROR_HANDLE_STORE).delete('active_mirror');
 };

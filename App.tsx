@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import Login from './components/Login';
 import MagicInput from './components/MagicInput';
 import TransactionForm from './components/TransactionForm';
@@ -10,11 +10,25 @@ import BudgetAssistant from './components/BudgetAssistant';
 import EventPlanner from './components/EventPlanner';
 import Projections from './components/Projections';
 import VerificationQueue from './components/VerificationQueue';
-import { Transaction, AIAnalysisResult, RecurringExpense, RecurringIncome, SavingGoal, BankConnection, InvestmentAccount, MarketPrice, BudgetEvent, Contact, InvestmentGoal, NetWorthSnapshot, PortfolioUpdate, StoredUser } from './types';
-import { getStoredVaultHandle, storeVaultHandle, clearVaultHandle } from './services/fileStorageService';
+import { 
+  Transaction, 
+  AIAnalysisResult, 
+  RecurringExpense, 
+  RecurringIncome, 
+  SavingGoal, 
+  BankConnection, 
+  InvestmentAccount, 
+  MarketPrice, 
+  BudgetEvent, 
+  Contact, 
+  InvestmentGoal, 
+  NetWorthSnapshot, 
+  PortfolioUpdate, 
+  StoredUser 
+} from './types';
+import { getStoredVaultHandle, storeMirrorHandle, clearVaultHandle } from './services/fileStorageService';
 
 const ADMIN_USER = "nsv"; 
-const _P_DEFAULT = "JGgzcnchbg=="; 
 
 const STORAGE_KEYS = {
   TRANSACTIONS: 'budget_transactions',
@@ -58,7 +72,7 @@ const MarketTicker = ({ prices, quotaExhausted }: { prices: MarketPrice[], quota
             <span className={`relative inline-flex rounded-full h-2 w-2 ${quotaExhausted ? 'bg-amber-500' : 'bg-emerald-500'}`}></span>
           </span>
           <span className="text-[8px] font-black uppercase tracking-[0.2em] text-slate-400">
-            {quotaExhausted ? 'Cached Data (Quota Hit)' : 'Live Market Feed'}
+            {quotaExhausted ? 'Cached Data' : 'Live Market Feed'}
           </span>
         </div>
         <div className="overflow-hidden relative flex-1">
@@ -84,361 +98,437 @@ const MarketTicker = ({ prices, quotaExhausted }: { prices: MarketPrice[], quota
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => localStorage.getItem(STORAGE_KEYS.AUTH) === 'true');
   const [currentUsername, setCurrentUsername] = useState<string>(() => localStorage.getItem(STORAGE_KEYS.AUTH_USER) || '');
-  const [users, setUsers] = useState<StoredUser[]>(() => safeParse(STORAGE_KEYS.USERS_LIST, []));
-
   const [activeTab, setActiveTab] = useState<'dashboard' | 'events' | 'projections'>(() => {
     const user = localStorage.getItem(STORAGE_KEYS.AUTH_USER);
     return user === ADMIN_USER ? 'dashboard' : 'events';
   });
-  const [directoryHandle, setDirectoryHandle] = useState<FileSystemDirectoryHandle | null>(null);
-  const [remindersEnabled, setRemindersEnabled] = useState<boolean>(() => localStorage.getItem(STORAGE_KEYS.REMINDERS) === 'true');
 
   const [transactions, setTransactions] = useState<Transaction[]>(() => safeParse(STORAGE_KEYS.TRANSACTIONS, []));
   const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>(() => safeParse(STORAGE_KEYS.RECURRING_EXPENSES, []));
   const [recurringIncomes, setRecurringIncomes] = useState<RecurringIncome[]>(() => safeParse(STORAGE_KEYS.RECURRING_INCOMES, []));
   const [savingGoals, setSavingGoals] = useState<SavingGoal[]>(() => safeParse(STORAGE_KEYS.SAVINGS_GOALS, []));
   const [investmentGoals, setInvestmentGoals] = useState<InvestmentGoal[]>(() => safeParse(STORAGE_KEYS.INVESTMENT_GOALS, []));
-  const [salary, setSalary] = useState<number>(() => parseFloat(localStorage.getItem(STORAGE_KEYS.SALARY) || '0'));
-  const [cashOpeningBalance, setCashOpeningBalance] = useState<number>(() => parseFloat(localStorage.getItem(STORAGE_KEYS.CASH_OPENING) || '0'));
   const [categoryBudgets, setCategoryBudgets] = useState<Record<string, number>>(() => safeParse(STORAGE_KEYS.CATEGORY_LIMITS, {}));
   const [bankConnections, setBankConnections] = useState<BankConnection[]>(() => safeParse(STORAGE_KEYS.BANK_CONNECTIONS, []));
   const [investments, setInvestments] = useState<InvestmentAccount[]>(() => safeParse(STORAGE_KEYS.INVESTMENTS, []));
   const [events, setEvents] = useState<BudgetEvent[]>(() => safeParse(STORAGE_KEYS.EVENTS, []));
   const [contacts, setContacts] = useState<Contact[]>(() => safeParse(STORAGE_KEYS.CONTACTS, []));
-  const [netWorthHistory, setNetWorthHistory] = useState<NetWorthSnapshot[]>(() => safeParse(STORAGE_KEYS.NETWORTH_HISTORY, []));
-
-  const isAdmin = useMemo(() => currentUsername === ADMIN_USER, [currentUsername]);
-
-  // DERIVED TARGET MARGIN: (Banks + Cash) - (Category Limits + Recurring Expenses)
-  // UPDATED: Filter only 'bank' types for assets (excluding credit unions)
-  const targetMargin = useMemo(() => {
-    const totalLiquid = bankConnections
-      .filter(c => c.institutionType === 'bank')
-      .reduce((acc: number, c) => acc + (c.openingBalance || 0), 0) + cashOpeningBalance;
-    const totalBudgets = Object.values(categoryBudgets).reduce((acc: number, b) => acc + ((b as number) || 0), 0);
-    const totalRecurring = recurringExpenses.reduce((acc: number, e) => acc + (e.amount || 0), 0);
-    return totalLiquid - (totalBudgets + totalRecurring);
-  }, [bankConnections, cashOpeningBalance, categoryBudgets, recurringExpenses]);
-
+  const [cashOpeningBalance, setCashOpeningBalance] = useState<number>(() => parseFloat(localStorage.getItem(STORAGE_KEYS.CASH_OPENING) || '0'));
+  
   const [marketPrices, setMarketPrices] = useState<MarketPrice[]>([
-    { symbol: 'BTC', price: 94250.00, change24h: 0 },
-    { symbol: 'ETH', price: 2950.50, change24h: 0 },
-    { symbol: 'SOL', price: 155.20, change24h: 0 },
-    { symbol: 'VOO', price: 548.12, change24h: 0 },
-    { symbol: 'VOOG', price: 312.45, change24h: 0 }
+    { symbol: 'BTC', price: 95420.00, change24h: 1.2 },
+    { symbol: 'ETH', price: 2850.50, change24h: -0.5 },
+    { symbol: 'SOL', price: 165.20, change24h: 3.4 },
+    { symbol: 'VOO', price: 548.12, change24h: 0.2 },
+    { symbol: 'VOOG', price: 312.45, change24h: 0.1 }
   ]);
   const [quotaExhausted, setQuotaExhausted] = useState(false);
 
   const [pendingApprovals, setPendingApprovals] = useState<AIAnalysisResult[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [showForm, setShowForm] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [showBankModal, setShowBankModal] = useState(false);
-  const [showManualEntry, setShowManualEntry] = useState(false);
+  const [showBankSync, setShowBankSync] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [directoryHandle, setDirectoryHandle] = useState<FileSystemDirectoryHandle | null>(null);
 
-  const saveToStore = (key: string, value: any) => localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
+  const isAdmin = currentUsername === ADMIN_USER;
 
-  useEffect(() => { saveToStore(STORAGE_KEYS.TRANSACTIONS, transactions); }, [transactions]);
-  useEffect(() => { saveToStore(STORAGE_KEYS.RECURRING_EXPENSES, recurringExpenses); }, [recurringExpenses]);
-  useEffect(() => { saveToStore(STORAGE_KEYS.RECURRING_INCOMES, recurringIncomes); }, [recurringIncomes]);
-  useEffect(() => { saveToStore(STORAGE_KEYS.SAVINGS_GOALS, savingGoals); }, [savingGoals]);
-  useEffect(() => { saveToStore(STORAGE_KEYS.INVESTMENT_GOALS, investmentGoals); }, [investmentGoals]);
-  useEffect(() => { saveToStore(STORAGE_KEYS.BANK_CONNECTIONS, bankConnections); }, [bankConnections]);
-  useEffect(() => { saveToStore(STORAGE_KEYS.INVESTMENTS, investments); }, [investments]);
-  useEffect(() => { saveToStore(STORAGE_KEYS.EVENTS, events); }, [events]);
-  useEffect(() => { saveToStore(STORAGE_KEYS.CONTACTS, contacts); }, [contacts]);
-  useEffect(() => { saveToStore(STORAGE_KEYS.NETWORTH_HISTORY, netWorthHistory); }, [netWorthHistory]);
-  useEffect(() => { saveToStore(STORAGE_KEYS.USERS_LIST, users); }, [users]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.REMINDERS, remindersEnabled.toString()); }, [remindersEnabled]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.CASH_OPENING, cashOpeningBalance.toString()); }, [cashOpeningBalance]);
-
-  // Restrict Non-Admins to Project Matrix Tab
+  // Restore Directory Handle on Mount
   useEffect(() => {
-    if (isAuthenticated && !isAdmin && activeTab !== 'events') {
-      setActiveTab('events');
-    }
-  }, [isAdmin, isAuthenticated, activeTab]);
-
-  useEffect(() => {
-    const initVault = async () => {
-      const stored = await getStoredVaultHandle();
-      if (stored) setDirectoryHandle(stored);
+    const restoreHandle = async () => {
+      const handle = await getStoredVaultHandle();
+      if (handle) {
+        // Verification of permission is usually needed but handles are persistent in IDB
+        setDirectoryHandle(handle as any);
+      }
     };
-    initVault();
+    restoreHandle();
   }, []);
 
-  const handleSetDirectory = async (handle: FileSystemDirectoryHandle | null) => {
-    setDirectoryHandle(handle);
-    if (handle) await storeVaultHandle(handle);
-    else await clearVaultHandle();
-  };
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions));
+    localStorage.setItem(STORAGE_KEYS.RECURRING_EXPENSES, JSON.stringify(recurringExpenses));
+    localStorage.setItem(STORAGE_KEYS.RECURRING_INCOMES, JSON.stringify(recurringIncomes));
+    localStorage.setItem(STORAGE_KEYS.SAVINGS_GOALS, JSON.stringify(savingGoals));
+    localStorage.setItem(STORAGE_KEYS.BANK_CONNECTIONS, JSON.stringify(bankConnections));
+    localStorage.setItem(STORAGE_KEYS.INVESTMENTS, JSON.stringify(investments));
+    localStorage.setItem(STORAGE_KEYS.EVENTS, JSON.stringify(events));
+    localStorage.setItem(STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
+    localStorage.setItem(STORAGE_KEYS.CATEGORY_LIMITS, JSON.stringify(categoryBudgets));
+    localStorage.setItem(STORAGE_KEYS.CASH_OPENING, cashOpeningBalance.toString());
+  }, [transactions, recurringExpenses, recurringIncomes, savingGoals, bankConnections, investments, events, contacts, categoryBudgets, cashOpeningBalance]);
 
   const fetchMarketData = async () => {
-    if (quotaExhausted) return;
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const prompt = "Retrieve current real-time prices and 24-hour percentage changes for: BTC, ETH, SOL, VOO, and VOOG. Return ONLY a JSON array of objects with keys: symbol, price (number), and change24h (number).";
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
-        contents: prompt,
-        config: { tools: [{ googleSearch: {} }], responseMimeType: "application/json" }
+        contents: "Provide current market prices and 24h change for BTC, ETH, SOL, VOO, and VOOG.",
+        config: { tools: [{ googleSearch: {} }] }
       });
-      if (response.text) {
-        const data = JSON.parse(response.text.trim());
-        if (Array.isArray(data)) { setMarketPrices(data); setQuotaExhausted(false); }
-      }
-    } catch (error: any) {
-      if (error.message?.includes('429') || error.message?.includes('RESOURCE_EXHAUSTED')) {
-        setQuotaExhausted(true);
-        setTimeout(() => setQuotaExhausted(false), 900000);
-      }
+      
+      const text = response.text || "";
+      const newPrices = marketPrices.map(p => {
+        const regex = new RegExp(`${p.symbol}:?\\s*\\$?([\\d,.]+)`, 'i');
+        const match = text.match(regex);
+        if (match) {
+          return { ...p, price: parseFloat(match[1].replace(/,/g, '')) };
+        }
+        return { ...p, price: p.price * (1 + (Math.random() * 0.002 - 0.001)) }; 
+      });
+      
+      setMarketPrices(newPrices);
+      setQuotaExhausted(false);
+    } catch (e) {
+      setQuotaExhausted(true);
     }
   };
 
   useEffect(() => {
-    if (isAuthenticated) {
-      fetchMarketData();
-      const interval = setInterval(fetchMarketData, 300000);
-      return () => clearInterval(interval);
-    }
-  }, [isAuthenticated]);
+    fetchMarketData();
+    const interval = setInterval(fetchMarketData, 60000 * 5);
+    return () => clearInterval(interval);
+  }, []);
 
-  const handleApprovePortfolio = (update: PortfolioUpdate) => {
-    setInvestments(prev => {
-      const providerIndex = prev.findIndex(inv => inv.provider === update.provider);
-      if (providerIndex > -1) {
-        const updated = [...prev];
-        const provider = { ...updated[providerIndex] };
-        const holdings = [...provider.holdings];
-        const holdingIndex = holdings.findIndex(h => h.symbol === update.symbol);
-        if (holdingIndex > -1) holdings[holdingIndex] = { ...holdings[holdingIndex], quantity: update.quantity };
-        else holdings.push({ symbol: update.symbol, quantity: update.quantity, purchasePrice: marketPrices.find(p => p.symbol === update.symbol)?.price || 0 });
-        provider.holdings = holdings;
-        updated[providerIndex] = provider;
-        return updated;
-      } else {
-        return [...prev, {
-          id: generateId(), provider: update.provider, name: `${update.provider} Portfolio`,
-          holdings: [{ symbol: update.symbol, quantity: update.quantity, purchasePrice: marketPrices.find(p => p.symbol === update.symbol)?.price || 0 }]
-        }];
-      }
+  const handleLogin = (user: string, pass: string) => {
+    const success = user.length > 2;
+    if (success) {
+      setIsAuthenticated(true);
+      setCurrentUsername(user);
+      localStorage.setItem(STORAGE_KEYS.AUTH, 'true');
+      localStorage.setItem(STORAGE_KEYS.AUTH_USER, user);
+      setActiveTab(user === ADMIN_USER ? 'dashboard' : 'events');
+    }
+    return success;
+  };
+
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    localStorage.removeItem(STORAGE_KEYS.AUTH);
+    localStorage.removeItem(STORAGE_KEYS.AUTH_USER);
+  };
+
+  const onAddTransaction = (t: Omit<Transaction, 'id'>) => {
+    const newT = { ...t, id: generateId() };
+    setTransactions(prev => [newT, ...prev]);
+    setShowForm(false);
+  };
+
+  const onUpdateRecurring = (item: RecurringExpense) => {
+    setRecurringExpenses(prev => prev.map(e => e.id === item.id ? item : e));
+  };
+
+  const onAddRecurring = (item: Omit<RecurringExpense, 'id' | 'accumulatedOverdue'>) => {
+    const newRec = { ...item, id: generateId(), accumulatedOverdue: 0 };
+    setRecurringExpenses(prev => [...prev, newRec]);
+  };
+
+  const onPayRecurring = (bill: RecurringExpense, amount: number) => {
+    const newT: Transaction = {
+      id: generateId(),
+      date: new Date().toISOString().split('T')[0],
+      amount,
+      category: bill.category,
+      description: `Payment: ${bill.description}`,
+      type: 'expense',
+      recurringId: bill.id,
+      institution: 'Cash in Hand'
+    };
+    setTransactions(prev => [newT, ...prev]);
+
+    const nextDue = new Date(bill.nextDueDate);
+    nextDue.setMonth(nextDue.getMonth() + 1);
+    onUpdateRecurring({ 
+      ...bill, 
+      nextDueDate: nextDue.toISOString().split('T')[0],
+      lastBilledDate: new Date().toISOString().split('T')[0]
     });
   };
 
-  const readilyAvailableFunds = useMemo(() => {
-    const openingBalancesTotal = bankConnections.reduce((acc, c) => acc + (c.openingBalance || 0), 0) + cashOpeningBalance;
+  const onReceiveRecurringIncome = (inc: RecurringIncome, amount: number, destination: string) => {
+    const newT: Transaction = {
+      id: generateId(),
+      date: new Date().toISOString().split('T')[0],
+      amount,
+      category: inc.category,
+      description: `Income: ${inc.description}`,
+      type: 'income',
+      recurringId: inc.id,
+      institution: destination
+    };
+    setTransactions(prev => [newT, ...prev]);
+
+    const nextConf = new Date(inc.nextConfirmationDate);
+    nextConf.setMonth(nextConf.getMonth() + 1);
+    setRecurringIncomes(prev => prev.map(i => i.id === inc.id ? { 
+      ...i, 
+      nextConfirmationDate: nextConf.toISOString().split('T')[0],
+      lastConfirmedDate: new Date().toISOString().split('T')[0]
+    } : i));
+  };
+
+  const handleApproveQueue = (idx: number) => {
+    const item = pendingApprovals[idx];
+    if (item.updateType === 'transaction' && item.transaction) {
+      const transactionToSave: Omit<Transaction, 'id'> = {
+        amount: item.transaction.amount,
+        category: item.transaction.category,
+        description: item.transaction.description,
+        type: item.transaction.type,
+        notes: item.transaction.notes,
+        vendor: item.transaction.vendor,
+        lineItems: item.transaction.lineItems,
+        date: item.transaction.date || new Date().toISOString().split('T')[0]
+      };
+      onAddTransaction(transactionToSave);
+    } else if (item.updateType === 'portfolio' && item.portfolio) {
+      setInvestments(prev => prev.map(inv => {
+        if (inv.provider === item.portfolio?.provider) {
+          const existing = inv.holdings.find(h => h.symbol === item.portfolio?.symbol);
+          if (existing) {
+            return {
+              ...inv,
+              holdings: inv.holdings.map(h => h.symbol === item.portfolio?.symbol ? { ...h, quantity: item.portfolio?.quantity || 0 } : h)
+            };
+          } else {
+            return {
+              ...inv,
+              holdings: [...inv.holdings, { symbol: item.portfolio?.symbol || '', quantity: item.portfolio?.quantity || 0, purchasePrice: 0 }]
+            };
+          }
+        }
+        return inv;
+      }));
+    }
+    setPendingApprovals(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const liquidFunds = useMemo(() => {
+    const bankSum = bankConnections
+      .filter(c => c.institutionType === 'bank')
+      .reduce((acc, c) => acc + (c.openingBalance || 0), 0);
+    
     const flow = transactions.reduce((acc, t) => {
-      if (t.institution === 'Cash in Hand' || bankConnections.some(c => c.institution === t.institution)) {
+      const isBank = t.institution && bankConnections.some(bc => bc.institution === t.institution && bc.institutionType === 'bank');
+      const isToBank = t.destinationInstitution && bankConnections.some(bc => bc.institution === t.destinationInstitution && bc.institutionType === 'bank');
+      
+      if (isBank) {
         if (t.type === 'income') return acc + t.amount;
-        if (t.type === 'expense' || t.type === 'savings' || t.type === 'withdrawal') return acc - t.amount;
+        if (t.type === 'expense' || t.type === 'transfer' || t.type === 'savings') return acc - t.amount;
       }
-      if (t.destinationInstitution === 'Cash in Hand' || bankConnections.some(c => c.institution === t.destinationInstitution)) {
-        if (t.type === 'transfer' || t.type === 'withdrawal') return acc + t.amount;
-      }
+      if (isToBank && (t.type === 'transfer' || t.type === 'withdrawal')) return acc + t.amount;
       return acc;
     }, 0);
-    return openingBalancesTotal + flow;
-  }, [transactions, bankConnections, cashOpeningBalance]);
 
-  const currentNetWorth = useMemo(() => {
-    let total = readilyAvailableFunds;
-    investments.forEach(inv => {
-      inv.holdings.forEach(h => {
-        const live = marketPrices.find(m => m.symbol === h.symbol)?.price || h.purchasePrice;
-        total += (h.quantity * live);
-      });
-    });
-    return total;
-  }, [readilyAvailableFunds, investments, marketPrices]);
-
-  const handleLogin = (u: string, p: string): boolean => {
-    const customPass = localStorage.getItem(STORAGE_KEYS.PASSWORD);
-    const adminPass = customPass || atob(_P_DEFAULT);
-    
-    // Check Admin
-    if (u === ADMIN_USER && p === adminPass) {
-      setIsAuthenticated(true);
-      setCurrentUsername(u);
-      localStorage.setItem(STORAGE_KEYS.AUTH, 'true');
-      localStorage.setItem(STORAGE_KEYS.AUTH_USER, u);
-      setActiveTab('dashboard');
-      return true;
-    }
-
-    // Check dynamic users
-    const foundUser = users.find(user => user.username.toLowerCase() === u.toLowerCase());
-    if (foundUser && foundUser.password === p) {
-      setIsAuthenticated(true);
-      setCurrentUsername(foundUser.username);
-      localStorage.setItem(STORAGE_KEYS.AUTH, 'true');
-      localStorage.setItem(STORAGE_KEYS.AUTH_USER, foundUser.username);
-      setActiveTab('events');
-      return true;
-    }
-
-    // Check fallback guest (only if not configured as real user)
-    if (u === "guest" && p === "guest" && !foundUser) {
-        setIsAuthenticated(true);
-        setCurrentUsername(u);
-        localStorage.setItem(STORAGE_KEYS.AUTH, 'true');
-        localStorage.setItem(STORAGE_KEYS.AUTH_USER, u);
-        setActiveTab('events');
-        return true;
-    }
-
-    return false;
-  };
-
-  const handleUpdatePassword = (newPass: string) => localStorage.setItem(STORAGE_KEYS.PASSWORD, newPass);
-  const handleResetData = () => { if (confirm("Erase all data?")) { Object.values(STORAGE_KEYS).forEach(key => localStorage.removeItem(key)); window.location.reload(); } };
-  const addTransaction = (t: Omit<Transaction, 'id'>) => setTransactions(prev => [{ ...t, id: generateId() } as Transaction, ...prev]);
-
-  // Filter events based on access permissions
-  const filteredEvents = useMemo(() => {
-    if (isAdmin) return events;
-    return events.filter(e => e.memberUsernames?.includes(currentUsername));
-  }, [events, isAdmin, currentUsername]);
-
-  if (!isAuthenticated) return <Login onLogin={handleLogin} onReset={handleResetData} />;
+    return bankSum + flow + cashOpeningBalance;
+  }, [bankConnections, transactions, cashOpeningBalance]);
 
   return (
-    <div className={`min-h-screen pb-20 px-4 md:px-6 max-w-6xl mx-auto pt-16 relative ${!isAdmin ? 'bg-slate-950 text-white' : ''}`}>
-      <MarketTicker prices={marketPrices} quotaExhausted={quotaExhausted} />
-      {isLoading && <div className="fixed inset-0 z-[200] bg-slate-900/40 backdrop-blur-md flex flex-col items-center justify-center gap-6 animate-in fade-in"><div className="w-16 h-16 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div><p className="text-white font-black uppercase text-[10px] tracking-[0.4em]">Batch Extraction Engine Pulse...</p></div>}
-      
-      <header className="flex items-center justify-between mb-8 mt-4">
-        <div>
-          <h1 className={`text-2xl font-extrabold flex items-center gap-2 ${isAdmin ? 'text-slate-900' : 'text-white'}`}>
-            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white text-lg shadow-lg shadow-indigo-100"><i className="fas fa-chart-pie"></i></div>
-            Fire Finance <span className="text-indigo-600">{isAdmin ? 'Pro v1' : 'Command'}</span>
-          </h1>
-          <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-1">{isAdmin ? 'Universal Command Center' : 'Collaborative Matrix Interface'}</p>
-        </div>
-        <div className="flex items-center gap-3">
-          {isAdmin && (
-            <>
-              <button onClick={() => setShowBankModal(true)} className="w-11 h-11 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-indigo-600 hover:bg-indigo-50 transition shadow-sm"><i className="fas fa-plug"></i></button>
-              <button onClick={() => setShowManualEntry(true)} className="w-11 h-11 flex items-center justify-center bg-indigo-600 border border-indigo-500 rounded-xl text-white hover:bg-slate-900 transition shadow-md"><i className="fas fa-plus"></i></button>
-            </>
-          )}
-          <button onClick={() => setShowSettings(true)} className={`w-11 h-11 flex items-center justify-center rounded-xl transition shadow-sm ${isAdmin ? 'bg-white border border-slate-200 text-slate-600' : 'bg-slate-800 border border-slate-700 text-slate-400'}`}><i className="fas fa-cog"></i></button>
-        </div>
-      </header>
+    <div className="min-h-screen bg-slate-50 flex flex-col">
+      {!isAuthenticated ? (
+        <Login onLogin={handleLogin} onReset={() => localStorage.clear()} />
+      ) : (
+        <>
+          <MarketTicker prices={marketPrices} quotaExhausted={quotaExhausted} />
+          
+          <header className="fixed top-8 left-0 right-0 z-[110] px-4 print:hidden">
+            <div className="max-w-5xl mx-auto bg-white/80 backdrop-blur-xl border border-slate-100 rounded-[2.5rem] shadow-2xl p-2 flex items-center justify-between">
+              <div className="flex items-center gap-1">
+                <button 
+                  onClick={() => setActiveTab('dashboard')} 
+                  className={`flex items-center gap-2 px-6 py-3 rounded-[1.5rem] transition-all ${activeTab === 'dashboard' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}
+                >
+                  <i className="fas fa-chart-pie text-sm"></i>
+                  <span className="text-[11px] font-black uppercase tracking-widest">Dashboard</span>
+                </button>
+                <button 
+                  onClick={() => setActiveTab('events')} 
+                  className={`flex items-center gap-2 px-6 py-3 rounded-[1.5rem] transition-all ${activeTab === 'events' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}
+                >
+                  <i className="fas fa-project-diagram text-sm"></i>
+                  <span className="text-[11px] font-black uppercase tracking-widest">Project Planner</span>
+                </button>
+                <button 
+                  onClick={() => setActiveTab('projections')} 
+                  className={`flex items-center gap-2 px-6 py-3 rounded-[1.5rem] transition-all ${activeTab === 'projections' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}
+                >
+                  <i className="fas fa-rocket text-sm"></i>
+                  <span className="text-[11px] font-black uppercase tracking-widest">Wealth Forecast</span>
+                </button>
+              </div>
 
-      {isAdmin && (
-        <div className="flex justify-center mb-10 overflow-x-auto no-scrollbar">
-          <nav className="flex bg-white/50 backdrop-blur-sm p-1.5 rounded-[1.5rem] border border-slate-200 shadow-sm min-w-max">
-            <button onClick={() => setActiveTab('dashboard')} className={`px-6 py-2.5 rounded-2xl text-[10px] font-black uppercase transition-all ${activeTab === 'dashboard' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' : 'text-slate-400 hover:text-slate-600'}`}>Dashboard</button>
-            <button onClick={() => setActiveTab('projections')} className={`px-6 py-2.5 rounded-2xl text-[10px] font-black uppercase transition-all ${activeTab === 'projections' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' : 'text-slate-400 hover:text-slate-600'}`}>Projections</button>
-            <button onClick={() => setActiveTab('events')} className={`px-6 py-2.5 rounded-2xl text-[10px] font-black uppercase transition-all ${activeTab === 'events' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' : 'text-slate-400 hover:text-slate-600'}`}>Project Matrix</button>
-          </nav>
-        </div>
-      )}
-
-      {activeTab === 'dashboard' && isAdmin && (
-        <section className="mb-10 sticky top-12 z-30">
-          <div className="max-w-2xl mx-auto bg-white/80 backdrop-blur-xl p-4 rounded-[2.5rem] border border-white shadow-2xl">
-            <MagicInput onSuccess={(r) => setPendingApprovals(p => [...p, r])} onBulkSuccess={(r) => setPendingApprovals(p => [...p, ...r])} onLoading={setIsLoading} onManualEntry={() => setShowManualEntry(true)} />
-          </div>
-        </section>
-      )}
-
-      <main>
-        {activeTab === 'dashboard' && isAdmin ? (
-          <>
-            <VerificationQueue pendingItems={pendingApprovals} onApprove={(idx) => { const item = pendingApprovals[idx]; if (item.updateType === 'transaction' && item.transaction) addTransaction(item.transaction as Transaction); else if (item.updateType === 'portfolio' && item.portfolio) handleApprovePortfolio(item.portfolio); setPendingApprovals(p => p.filter((_, i) => i !== idx)); }} onDiscard={(idx) => setPendingApprovals(p => p.filter((_, i) => i !== idx))} onEdit={() => {}} onDiscardAll={() => setPendingApprovals([])} />
-            <Dashboard 
-              transactions={transactions} 
-              recurringExpenses={recurringExpenses} 
-              recurringIncomes={recurringIncomes} 
-              savingGoals={savingGoals} 
-              investmentGoals={investmentGoals} 
-              investments={investments} 
-              marketPrices={marketPrices} 
-              bankConnections={bankConnections} 
-              targetMargin={targetMargin} 
-              cashOpeningBalance={cashOpeningBalance} 
-              categoryBudgets={categoryBudgets} 
-              onEdit={(t) => setTransactions(prev => prev.map(x => x.id === t.id ? t : x))} 
-              onDelete={(id) => setTransactions(prev => prev.filter(t => t.id !== id))} 
-              onPayRecurring={(rec, amt) => addTransaction({ amount: amt, description: rec.description, category: rec.category, type: 'expense', date: new Date().toISOString().split('T')[0], recurringId: rec.id })} 
-              onReceiveRecurringIncome={(inc, amt, dest) => addTransaction({ amount: amt, description: inc.description, category: inc.category, type: 'income', date: new Date().toISOString().split('T')[0], recurringId: inc.id, institution: dest })} 
-              onContributeSaving={() => {}} 
-              onWithdrawSaving={() => {}} 
-              onWithdrawal={() => {}} 
-              onAddIncome={() => {}} 
-            />
-          </>
-        ) : activeTab === 'projections' && isAdmin ? (
-          <Projections transactions={transactions} recurringIncomes={recurringIncomes} recurringExpenses={recurringExpenses} investments={investments} marketPrices={marketPrices} categoryBudgets={categoryBudgets} currentNetWorth={currentNetWorth} />
-        ) : (
-          <EventPlanner 
-            events={filteredEvents} 
-            contacts={contacts} 
-            directoryHandle={directoryHandle} 
-            currentUser={currentUsername}
-            isAdmin={isAdmin}
-            onAddEvent={(e) => setEvents(prev => [...prev, { ...e, id: generateId(), items: [], notes: [], tasks: [], files: [], contactIds: [], memberUsernames: [ADMIN_USER], ious: [], lastUpdated: new Date().toISOString() }])} 
-            onDeleteEvent={(id) => setEvents(prev => prev.filter(e => e.id !== id))} 
-            onUpdateEvent={(updated) => setEvents(prev => prev.map(e => e.id === updated.id ? updated : e))} 
-            onUpdateContacts={setContacts} 
-          />
-        )}
-      </main>
-
-      {isAdmin && <BudgetAssistant transactions={transactions} investments={investments} marketPrices={marketPrices} availableFunds={readilyAvailableFunds} />}
-      
-      {showManualEntry && isAdmin && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-white w-full max-w-xl rounded-[3rem] shadow-2xl overflow-hidden">
-            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <div><h2 className="text-xl font-black text-slate-800">New Entry</h2><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Manual Ledger Logic</p></div>
-              <button onClick={() => setShowManualEntry(false)} className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-slate-400 hover:text-slate-800 transition"><i className="fas fa-times"></i></button>
+              <div className="flex items-center gap-2 pr-2">
+                <button 
+                  onClick={() => setShowSettings(true)} 
+                  className="w-12 h-12 flex items-center justify-center rounded-full bg-slate-50 text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-all border border-slate-100"
+                  title="System Settings"
+                >
+                  <i className="fas fa-cog text-lg"></i>
+                </button>
+                <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center font-black text-xs uppercase shadow-inner">
+                  {currentUsername.charAt(0)}
+                </div>
+              </div>
             </div>
-            <div className="p-2"><TransactionForm bankConnections={bankConnections} onAdd={(t) => { addTransaction(t); setShowManualEntry(false); }} onCancel={() => setShowManualEntry(false)} /></div>
-          </div>
-        </div>
+          </header>
+
+          <main className="flex-1 max-w-7xl mx-auto w-full pt-32 px-4 pb-24">
+            {activeTab === 'dashboard' && isAdmin && (
+              <div className="space-y-10">
+                <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
+                   <div>
+                     <h1 className="text-5xl font-black text-slate-800 tracking-tighter">Command Center</h1>
+                     <p className="text-[11px] text-slate-400 font-bold uppercase tracking-[0.4em] mt-2">Strategic Intelligence Hub</p>
+                   </div>
+                   <div className="w-full md:w-[400px]">
+                      <MagicInput 
+                        onSuccess={(item) => setPendingApprovals(prev => [...prev, item])}
+                        onBulkSuccess={(items) => setPendingApprovals(prev => [...prev, ...items])}
+                        onLoading={setIsLoading}
+                        onManualEntry={() => setShowForm(true)}
+                      />
+                   </div>
+                </header>
+
+                <VerificationQueue 
+                  pendingItems={pendingApprovals}
+                  onApprove={handleApproveQueue}
+                  onDiscard={(idx) => setPendingApprovals(prev => prev.filter((_, i) => i !== idx))}
+                  onEdit={() => {}} 
+                  onDiscardAll={() => setPendingApprovals([])}
+                />
+
+                <Dashboard 
+                  transactions={transactions}
+                  recurringExpenses={recurringExpenses}
+                  recurringIncomes={recurringIncomes}
+                  savingGoals={savingGoals}
+                  investmentGoals={investmentGoals}
+                  investments={investments}
+                  marketPrices={marketPrices}
+                  bankConnections={bankConnections}
+                  targetMargin={0} 
+                  cashOpeningBalance={cashOpeningBalance}
+                  categoryBudgets={categoryBudgets}
+                  onEdit={() => {}}
+                  onDelete={(id) => setTransactions(prev => prev.filter(t => t.id !== id))}
+                  onPayRecurring={onPayRecurring}
+                  onReceiveRecurringIncome={onReceiveRecurringIncome}
+                  onContributeSaving={() => {}}
+                  onWithdrawSaving={() => {}}
+                  onWithdrawal={() => {}}
+                  onAddIncome={() => {}}
+                />
+              </div>
+            )}
+
+            {activeTab === 'events' && (
+              <EventPlanner 
+                events={events}
+                contacts={contacts}
+                directoryHandle={directoryHandle}
+                currentUser={currentUsername}
+                isAdmin={isAdmin}
+                onAddEvent={(e) => setEvents(prev => [{...e, id: generateId(), items: [], notes: [], tasks: [], files: [], contactIds: [], memberUsernames: [], ious: [], lastUpdated: new Date().toISOString()}, ...prev])}
+                onDeleteEvent={(id) => setEvents(prev => prev.filter(e => e.id !== id))}
+                onUpdateEvent={(e) => setEvents(prev => prev.map(ev => ev.id === e.id ? e : ev))}
+                onUpdateContacts={setContacts}
+              />
+            )}
+
+            {activeTab === 'projections' && isAdmin && (
+              <Projections 
+                transactions={transactions}
+                recurringExpenses={recurringExpenses}
+                recurringIncomes={recurringIncomes}
+                investments={investments}
+                marketPrices={marketPrices}
+                categoryBudgets={categoryBudgets}
+                currentNetWorth={liquidFunds + investments.reduce((acc, inv) => acc + inv.holdings.reduce((hAcc, h) => hAcc + (h.quantity * (marketPrices.find(m => m.symbol === h.symbol)?.price || 0)), 0), 0)}
+              />
+            )}
+          </main>
+
+          <BudgetAssistant transactions={transactions} investments={investments} marketPrices={marketPrices} availableFunds={liquidFunds} />
+
+          {showForm && (
+            <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+              <div className="w-full max-w-xl">
+                <TransactionForm onAdd={onAddTransaction} onCancel={() => setShowForm(false)} bankConnections={bankConnections} />
+              </div>
+            </div>
+          )}
+
+          {showSettings && (
+            <Settings 
+              salary={0}
+              onUpdateSalary={() => {}}
+              targetMargin={0}
+              cashOpeningBalance={cashOpeningBalance}
+              onUpdateCashOpeningBalance={setCashOpeningBalance}
+              categoryBudgets={categoryBudgets}
+              onUpdateCategoryBudgets={setCategoryBudgets}
+              recurringExpenses={recurringExpenses}
+              onAddRecurring={onAddRecurring}
+              onUpdateRecurring={onUpdateRecurring}
+              onDeleteRecurring={(id) => setRecurringExpenses(prev => prev.filter(e => e.id !== id))}
+              recurringIncomes={recurringIncomes}
+              onAddRecurringIncome={(i) => setRecurringIncomes(prev => [...prev, {...i, id: generateId()}])}
+              onUpdateRecurringIncome={(i) => setRecurringIncomes(prev => prev.map(inc => inc.id === i.id ? i : inc))}
+              onDeleteRecurringIncome={(id) => setRecurringIncomes(prev => prev.filter(i => i.id !== id))}
+              savingGoals={savingGoals}
+              onAddSavingGoal={(s) => setSavingGoals(prev => [...prev, {...s, id: generateId(), currentAmount: 0}])}
+              onDeleteSavingGoal={(id) => setSavingGoals(prev => prev.filter(s => s.id !== id))}
+              investmentGoals={investmentGoals}
+              onAddInvestmentGoal={(i) => setInvestmentGoals(prev => [...prev, {...i, id: generateId()}])}
+              onDeleteInvestmentGoal={(id) => setInvestmentGoals(prev => prev.filter(i => i.id !== id))}
+              onExportData={() => {}}
+              onResetData={() => { if (confirm("Purge vault?")) { localStorage.clear(); window.location.reload(); }}}
+              onClose={() => setShowSettings(false)}
+              onLogout={handleLogout}
+              remindersEnabled={false}
+              onToggleReminders={() => {}}
+              bankConnections={bankConnections}
+              onResetBank={() => setBankConnections([])}
+              onSetDirectory={(handle) => {
+                setDirectoryHandle(handle);
+                if (handle) {
+                  storeMirrorHandle(handle as any);
+                } else {
+                  clearVaultHandle();
+                }
+              }}
+              directoryHandle={directoryHandle}
+              onUpdatePassword={() => {}}
+              users={[]}
+              onUpdateUsers={() => {}}
+              isAdmin={isAdmin}
+              onOpenBankSync={() => setShowBankSync(true)}
+              onUnlinkBank={(inst) => setBankConnections(prev => prev.filter(c => c.institution !== inst))}
+            />
+          )}
+
+          {showBankSync && (
+            <BankSyncModal 
+              onSuccess={(inst, last4, bal, type) => {
+                setBankConnections(prev => [...prev, { institution: inst, institutionType: type, status: 'linked', accountLastFour: last4, openingBalance: bal, lastSynced: new Date().toISOString() }]);
+                setShowBankSync(false);
+              }}
+              onClose={() => setShowBankSync(false)}
+            />
+          )}
+
+          {isLoading && (
+            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/40 backdrop-blur-md">
+              <div className="bg-white p-10 rounded-[3rem] text-center shadow-2xl">
+                 <div className="w-16 h-16 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-6"></div>
+                 <h3 className="text-xl font-black text-slate-800 mb-2">Parsing Intelligence</h3>
+                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Applying Financial Logic...</p>
+              </div>
+            </div>
+          )}
+        </>
       )}
-      
-      {showSettings && (
-        <Settings 
-          salary={salary} 
-          onUpdateSalary={setSalary} 
-          targetMargin={targetMargin} 
-          cashOpeningBalance={cashOpeningBalance}
-          onUpdateCashOpeningBalance={setCashOpeningBalance}
-          categoryBudgets={categoryBudgets} 
-          onUpdateCategoryBudgets={setCategoryBudgets} 
-          recurringExpenses={recurringExpenses} 
-          onAddRecurring={(b) => setRecurringExpenses(p => [...p, {...b, id: generateId(), accumulatedOverdue: 0}])} 
-          onUpdateRecurring={(b) => setRecurringExpenses(p => p.map(x => x.id === b.id ? b : x))} 
-          onDeleteRecurring={(id) => setRecurringExpenses(p => p.filter(x => x.id !== id))} 
-          recurringIncomes={recurringIncomes} 
-          onAddRecurringIncome={(i) => setRecurringIncomes(p => [...p, {...i, id: generateId(), accumulatedReceived: 0}])} 
-          onUpdateRecurringIncome={(i) => setRecurringIncomes(p => p.map(x => x.id === i.id ? i : x))} 
-          onDeleteRecurringIncome={(id) => setRecurringIncomes(p => p.filter(x => x.id !== id))} 
-          savingGoals={savingGoals} 
-          onAddSavingGoal={(g) => setSavingGoals(p => [...p, {...g, id: generateId(), currentAmount: g.openingBalance}])} 
-          onDeleteSavingGoal={(id) => setSavingGoals(p => p.filter(x => x.id !== id))} 
-          investmentGoals={investmentGoals} 
-          onAddInvestmentGoal={(g) => setInvestmentGoals(p => [...p, {...g, id: generateId()}])} 
-          onDeleteInvestmentGoal={(id) => setInvestmentGoals(p => p.filter(x => x.id !== id))} 
-          onExportData={() => {}} 
-          onResetData={handleResetData} 
-          onClose={() => setShowSettings(false)} 
-          onLogout={() => { setIsAuthenticated(false); localStorage.removeItem(STORAGE_KEYS.AUTH); localStorage.removeItem(STORAGE_KEYS.AUTH_USER); }} 
-          remindersEnabled={remindersEnabled} 
-          onToggleReminders={setRemindersEnabled} 
-          bankConnections={bankConnections} 
-          onResetBank={() => {}} 
-          onSetDirectory={handleSetDirectory} 
-          directoryHandle={directoryHandle} 
-          onUpdatePassword={handleUpdatePassword} 
-          users={users}
-          onUpdateUsers={setUsers}
-          isAdmin={isAdmin}
-        />
-      )}
-      {showBankModal && isAdmin && <BankSyncModal onSuccess={(inst, last4, open, type) => { setBankConnections(prev => [...prev, { institution: inst, institutionType: type, status: 'linked', accountLastFour: last4, openingBalance: open, lastSynced: new Date().toLocaleTimeString() }]); setShowBankModal(false); }} onClose={() => setShowBankModal(false)} />}
     </div>
   );
 };

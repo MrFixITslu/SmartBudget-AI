@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { Transaction, RecurringIncome, RecurringExpense, InvestmentAccount, MarketPrice } from '../types';
@@ -22,34 +21,48 @@ const Projections: React.FC<Props> = ({
   categoryBudgets, 
   currentNetWorth 
 }) => {
-  const [yearsToProject, setYearsToProject] = useState(5);
-  const [monthlyContribution, setMonthlyContribution] = useState(500);
-  const [expectedReturn, setExpectedReturn] = useState(8); // Annual %
+  // Persist sliders in local storage
+  const [yearsToProject, setYearsToProject] = useState(() => {
+    const saved = localStorage.getItem('ff_proj_years');
+    return saved ? parseInt(saved) : 5;
+  });
+  
+  const [monthlyContribution, setMonthlyContribution] = useState(() => {
+    const saved = localStorage.getItem('ff_proj_contribution');
+    return saved ? parseInt(saved) : 500;
+  });
+  
+  const [expectedReturn, setExpectedReturn] = useState(() => {
+    const saved = localStorage.getItem('ff_proj_roi');
+    return saved ? parseInt(saved) : 8;
+  });
+
   const [aiAnalysis, setAiAnalysis] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
+  // Update storage when sliders change
+  useEffect(() => {
+    localStorage.setItem('ff_proj_years', yearsToProject.toString());
+  }, [yearsToProject]);
+
+  useEffect(() => {
+    localStorage.setItem('ff_proj_contribution', monthlyContribution.toString());
+  }, [monthlyContribution]);
+
+  useEffect(() => {
+    localStorage.setItem('ff_proj_roi', expectedReturn.toString());
+  }, [expectedReturn]);
+
   // Calculate base monthly savings
-  // Added explicit type ': number' to accumulators to resolve type inference errors
   const monthlyIncome = useMemo(() => recurringIncomes.reduce((acc: number, inc) => acc + inc.amount, 0), [recurringIncomes]);
   const monthlyFixedExpenses = useMemo(() => recurringExpenses.reduce((acc: number, exp) => acc + exp.amount, 0), [recurringExpenses]);
-  // Explicitly cast val to number to fix "+" operator type error
   const monthlyBudgetedExpenses = useMemo(() => Object.values(categoryBudgets).reduce((acc: number, val) => acc + ((val as number) || 0), 0), [categoryBudgets]);
   const netMonthlyCashflow = monthlyIncome - monthlyFixedExpenses - monthlyBudgetedExpenses;
-
-  // Initialize sliders with realistic default derived from user data
-  useEffect(() => {
-    if (netMonthlyCashflow > 0) {
-      setMonthlyContribution(Math.floor(netMonthlyCashflow * 0.8));
-    }
-  }, [netMonthlyCashflow]);
 
   const projectionData = useMemo(() => {
     const data = [];
     const monthlyRate = expectedReturn / 100 / 12;
-    let balance = currentNetWorth;
     
-    // Separate balance into Invested vs Cash for more accurate simulation
-    // Added explicit type ': number' to accumulators to resolve type inference errors
     const investedBalance = investments.reduce((acc: number, inv) => {
         return acc + inv.holdings.reduce((hAcc: number, h) => {
           const live = marketPrices.find(m => m.symbol === h.symbol)?.price || h.purchasePrice;
@@ -65,7 +78,7 @@ const Projections: React.FC<Props> = ({
     data.push({
       month: 0,
       label: 'Now',
-      total: balance,
+      total: currentNetWorth,
       invested: runningInvested,
       cash: runningCash
     });

@@ -1,7 +1,6 @@
-
 import React, { useMemo, useState, useEffect } from 'react';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, Legend, BarChart, Bar, Cell } from 'recharts';
-import { Transaction, RecurringExpense, RecurringIncome, InvestmentAccount, MarketPrice, BankConnection, InvestmentGoal } from '../types';
+import { Transaction, RecurringExpense, RecurringIncome, InvestmentAccount, MarketPrice, BankConnection, InvestmentGoal, SavingGoal } from '../types';
 import { GoogleGenAI } from "@google/genai";
 
 interface InstitutionalBalance {
@@ -16,7 +15,7 @@ interface Props {
   transactions: Transaction[];
   recurringExpenses: RecurringExpense[];
   recurringIncomes: RecurringIncome[];
-  savingGoals: any[];
+  savingGoals: SavingGoal[];
   investmentGoals: InvestmentGoal[];
   investments: InvestmentAccount[];
   marketPrices: MarketPrice[];
@@ -37,7 +36,7 @@ interface Props {
 type Timeframe = 'daily' | 'monthly' | 'yearly';
 
 const Dashboard: React.FC<Props> = ({ 
-  transactions, investments, marketPrices, bankConnections, recurringExpenses, recurringIncomes, categoryBudgets, cashOpeningBalance, onPayRecurring, onReceiveRecurringIncome
+  transactions, investments, marketPrices, bankConnections, recurringExpenses, recurringIncomes, categoryBudgets, cashOpeningBalance, savingGoals, investmentGoals, onPayRecurring, onReceiveRecurringIncome
 }) => {
   const [trendTimeframe, setTrendTimeframe] = useState<Timeframe>('monthly');
   const [aiInsight, setAiInsight] = useState<string>("");
@@ -69,7 +68,6 @@ const Dashboard: React.FC<Props> = ({
       nextCycle.setMonth(nextCycle.getMonth() + 1);
     }
     const diff = nextCycle.getTime() - now.getTime();
-    // Ensuring it always returns at least 1 day to prevent division by zero
     return Math.max(1, Math.ceil(diff / (1000 * 60 * 60 * 24)));
   }, []);
 
@@ -134,7 +132,6 @@ const Dashboard: React.FC<Props> = ({
   }, [institutionalBalances]);
 
   const liquidFunds = useMemo<number>(() => {
-    // Total of money in Bank + Cash in Hand
     const bankSum = (Object.values(institutionalBalances) as InstitutionalBalance[])
       .filter(b => b.type === 'bank')
       .reduce((acc, b) => acc + b.balance, 0);
@@ -240,7 +237,6 @@ const Dashboard: React.FC<Props> = ({
   }, [recurringIncomes, transactions, cycleStartDate]);
 
   const dailySafeSpend = useMemo(() => {
-    // UPDATED: (Money in Bank + Cash in Hand) / Days left before next cycle
     return Math.max(0, liquidFunds / daysUntilNextCycle);
   }, [liquidFunds, daysUntilNextCycle]);
 
@@ -451,10 +447,10 @@ const Dashboard: React.FC<Props> = ({
         </section>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <section className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <section className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col">
           <h3 className="font-black text-slate-800 uppercase text-[10px] tracking-[0.2em] mb-6">Upcoming Commitments</h3>
-          <div className="space-y-4">
+          <div className="space-y-4 flex-1 overflow-y-auto custom-scrollbar pr-2">
             {unpaidBills.concat(unconfirmedIncomes as any).length > 0 ? unpaidBills.concat(unconfirmedIncomes as any).slice(0, 10).map((bill: any) => {
               const isIncome = 'nextConfirmationDate' in bill;
               const isActive = activePaymentId === bill.id;
@@ -518,9 +514,6 @@ const Dashboard: React.FC<Props> = ({
                           </button>
                         ))}
                       </div>
-                      {isSalary && bankConnections.length === 0 && (
-                        <p className="text-[8px] text-rose-500 font-black italic">Link a bank account to route salary automatically.</p>
-                      )}
                     </div>
                   )}
 
@@ -557,10 +550,75 @@ const Dashboard: React.FC<Props> = ({
           </div>
         </section>
 
-        <section className="bg-slate-900 p-8 rounded-[3rem] text-white shadow-2xl">
+        <section className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col">
+          <h3 className="font-black text-slate-800 uppercase text-[10px] tracking-[0.2em] mb-6">Financial Objectives</h3>
+          <div className="space-y-6 flex-1 overflow-y-auto custom-scrollbar pr-2">
+            {savingGoals.length > 0 || investmentGoals.length > 0 ? (
+              <>
+                {savingGoals.map(goal => (
+                  <div key={goal.id} className="space-y-2">
+                    <div className="flex justify-between items-end px-1">
+                      <div>
+                        <p className="text-[11px] font-black text-slate-800">{goal.name}</p>
+                        <p className="text-[8px] font-black text-indigo-400 uppercase tracking-widest">{goal.institution}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[11px] font-black text-slate-900">${goal.currentAmount.toLocaleString()} / ${goal.targetAmount.toLocaleString()}</p>
+                        <p className="text-[8px] font-black text-slate-400 uppercase">Savings Target</p>
+                      </div>
+                    </div>
+                    <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-indigo-500 transition-all duration-1000" 
+                        style={{ width: `${Math.min(100, (goal.currentAmount / goal.targetAmount) * 100)}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                ))}
+                {investmentGoals.map(goal => {
+                  const currentVal = institutionalBalances[goal.provider]?.balance || 0;
+                  const progress = (currentVal / goal.targetAmount) * 100;
+                  return (
+                    <div key={goal.id} className="space-y-2">
+                      <div className="flex justify-between items-end px-1">
+                        <div>
+                          <p className="text-[11px] font-black text-slate-800">{goal.name}</p>
+                          <p className="text-[8px] font-black text-emerald-400 uppercase tracking-widest">{goal.provider} Portfolio</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[11px] font-black text-slate-900">${currentVal.toLocaleString()} / ${goal.targetAmount.toLocaleString()}</p>
+                          <p className="text-[8px] font-black text-slate-400 uppercase">Asset Target</p>
+                        </div>
+                      </div>
+                      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-emerald-500 transition-all duration-1000" 
+                          style={{ width: `${Math.min(100, progress)}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </>
+            ) : (
+              <p className="py-10 text-center text-slate-300 font-black uppercase text-[9px] tracking-widest">No Active Objectives</p>
+            )}
+          </div>
+        </section>
+
+        <section className="bg-slate-900 p-8 rounded-[3rem] text-white shadow-2xl overflow-hidden flex flex-col">
           <h3 className="font-black uppercase text-[10px] tracking-[0.2em] text-indigo-400 mb-6">Market Pulse</h3>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-4 flex-1 overflow-y-auto custom-scrollbar pr-2">
             {marketPrices.slice(0, 4).map(p => (
+              <div key={p.symbol} className="p-4 bg-white/5 border border-white/5 rounded-[2rem] flex flex-col justify-between">
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{p.symbol}</span>
+                <h4 className="text-sm font-black mt-2">${p.price.toLocaleString()}</h4>
+                <div className={`text-[8px] font-black mt-1 ${p.change24h >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {p.change24h > 0 ? '+' : ''}{p.change24h.toFixed(1)}%
+                </div>
+              </div>
+            ))}
+            {marketPrices.length > 4 && marketPrices.slice(4).map(p => (
               <div key={p.symbol} className="p-4 bg-white/5 border border-white/5 rounded-[2rem] flex flex-col justify-between">
                 <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{p.symbol}</span>
                 <h4 className="text-sm font-black mt-2">${p.price.toLocaleString()}</h4>

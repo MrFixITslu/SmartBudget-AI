@@ -92,8 +92,8 @@ const Dashboard: React.FC<Props> = ({
       const flow = history.reduce((acc: number, t) => {
         if (t.destinationInstitution === conn.institution && (t.type === 'transfer' || t.type === 'withdrawal')) return acc + t.amount;
         if (t.institution === conn.institution) {
-          if (t.type === 'income') return acc + t.amount;
-          if (t.type === 'expense' || t.type === 'transfer' || t.type === 'withdrawal' || t.type === 'savings') return acc - t.amount;
+          if (t.type === 'income' || t.type === 'savings') return acc + t.amount; // savings deposits go TO institution
+          if (t.type === 'expense' || t.type === 'transfer' || t.type === 'withdrawal') return acc - t.amount;
         }
         return acc;
       }, 0);
@@ -209,19 +209,6 @@ const Dashboard: React.FC<Props> = ({
     return sortedData;
   }, [transactions, trendTimeframe]);
 
-  const filteredTransactions = useMemo(() => {
-    return transactions.filter(t => {
-      const query = searchTerm.toLowerCase();
-      return (
-        t.description.toLowerCase().includes(query) ||
-        t.category.toLowerCase().includes(query) ||
-        (t.vendor && t.vendor.toLowerCase().includes(query)) ||
-        (t.notes && t.notes.toLowerCase().includes(query)) ||
-        t.amount.toString().includes(query)
-      );
-    });
-  }, [transactions, searchTerm]);
-
   const unpaidBills = useMemo(() => {
     return recurringExpenses.map(bill => {
       const totalPaid = transactions
@@ -239,6 +226,53 @@ const Dashboard: React.FC<Props> = ({
       return { ...inc, remainingAmount: Math.max(0, inc.amount - totalReceived), receivedAmount: totalReceived };
     }).filter(inc => inc.remainingAmount > 0.01);
   }, [recurringIncomes, transactions, cycleStartDate]);
+
+  // NOTIFICATION SYSTEM: Identify items due within 3 days or overdue
+  const criticalNotifications = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const notifications = [];
+
+    unpaidBills.forEach(bill => {
+      const dueDate = new Date(bill.nextDueDate);
+      dueDate.setHours(0, 0, 0, 0);
+      const diffTime = dueDate.getTime() - today.getTime();
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      
+      if (diffDays <= 3) {
+        notifications.push({
+          id: `notif-bill-${bill.id}`,
+          type: 'bill',
+          title: bill.description,
+          amount: bill.remainingAmount,
+          days: diffDays,
+          item: bill,
+          isIncome: false
+        });
+      }
+    });
+
+    unconfirmedIncomes.forEach(inc => {
+      const confDate = new Date(inc.nextConfirmationDate);
+      confDate.setHours(0, 0, 0, 0);
+      const diffTime = confDate.getTime() - today.getTime();
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      
+      if (diffDays <= 3) {
+        notifications.push({
+          id: `notif-inc-${inc.id}`,
+          type: 'income',
+          title: inc.description,
+          amount: inc.remainingAmount,
+          days: diffDays,
+          item: inc,
+          isIncome: true
+        });
+      }
+    });
+
+    return notifications.sort((a, b) => a.days - b.days);
+  }, [unpaidBills, unconfirmedIncomes]);
 
   const dailySafeSpend = useMemo(() => {
     return Math.max(0, liquidFunds / daysUntilNextCycle);
@@ -310,6 +344,46 @@ const Dashboard: React.FC<Props> = ({
       <div className="hidden print:block border-b-2 border-slate-900 pb-6 mb-8">
         <h1 className="text-3xl font-black text-slate-900 uppercase tracking-tighter">Financial Audit Statement</h1>
       </div>
+
+      {/* CRITICAL NOTIFICATIONS SECTION */}
+      {criticalNotifications.length > 0 && (
+        <section className="animate-in slide-in-from-top-4 duration-500">
+          <div className="flex items-center gap-3 mb-4 px-2">
+            <div className="w-8 h-8 bg-rose-100 text-rose-600 rounded-lg flex items-center justify-center text-sm shadow-sm">
+              <i className="fas fa-bell"></i>
+            </div>
+            <div>
+              <h3 className="font-black text-slate-800 uppercase text-[10px] tracking-widest">Priority Reminders</h3>
+              <p className="text-[9px] text-slate-400 font-bold uppercase">{criticalNotifications.length} items requiring attention</p>
+            </div>
+          </div>
+          <div className="flex gap-4 overflow-x-auto no-scrollbar pb-2">
+            {criticalNotifications.map((notif) => (
+              <div 
+                key={notif.id}
+                className={`min-w-[280px] p-5 rounded-[2.5rem] border-2 shadow-lg transition-all flex flex-col justify-between ${notif.isIncome ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-slate-900 border-slate-800 text-white'}`}
+              >
+                <div>
+                  <div className="flex justify-between items-start mb-3">
+                    <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest ${notif.isIncome ? 'bg-white/20 text-white' : 'bg-rose-500 text-white'}`}>
+                      {notif.days < 0 ? 'Overdue' : notif.days === 0 ? 'Due Today' : `Due in ${notif.days} Days`}
+                    </span>
+                    <i className={`fas ${notif.isIncome ? 'fa-arrow-trend-up' : 'fa-receipt'} opacity-30`}></i>
+                  </div>
+                  <h4 className="font-black text-lg tracking-tight leading-none mb-1 truncate">{notif.title}</h4>
+                  <p className="text-sm font-black opacity-80">${notif.amount.toLocaleString()}</p>
+                </div>
+                <button 
+                  onClick={() => startRecordCommitment(notif.item, notif.isIncome)}
+                  className={`mt-4 py-3 w-full rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${notif.isIncome ? 'bg-white text-emerald-700 hover:bg-emerald-50' : 'bg-indigo-600 text-white hover:bg-indigo-500'}`}
+                >
+                  Clear Commitment
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <div className="bg-slate-900 p-8 rounded-[3rem] shadow-2xl relative overflow-hidden group print:rounded-none">
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">

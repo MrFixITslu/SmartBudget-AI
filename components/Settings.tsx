@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { CATEGORIES, RecurringExpense, RecurringIncome, SavingGoal, BankConnection, InvestmentGoal, StoredUser } from '../types';
-import { storeMirrorHandle, clearVaultHandle } from '../services/fileStorageService';
+import { storeMirrorHandle, clearVaultHandle, triggerSecureDownload } from '../services/fileStorageService';
 
 interface Props {
   salary: number;
@@ -44,6 +44,27 @@ interface Props {
 
 type SettingsTab = 'general' | 'recurring' | 'goals' | 'api' | 'security';
 
+const STORAGE_KEYS = [
+  'budget_transactions',
+  'budget_recurring',
+  'budget_recurring_incomes',
+  'budget_savings_goals',
+  'budget_investment_goals',
+  'budget_salary',
+  'budget_cash_opening',
+  'budget_category_limits',
+  'budget_bank_conns',
+  'budget_investments',
+  'budget_events',
+  'ff_contacts',
+  'ff_networth_history',
+  'ff_auth',
+  'ff_auth_username',
+  'ff_users_list',
+  'ff_reminders_enabled',
+  'ff_custom_password'
+];
+
 const Settings: React.FC<Props> = ({ 
   targetMargin, categoryBudgets, onUpdateCategoryBudgets, 
   cashOpeningBalance, onUpdateCashOpeningBalance,
@@ -60,21 +81,56 @@ const Settings: React.FC<Props> = ({
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [isChangingPass, setIsChangingPass] = useState(false);
   const [passForm, setPassForm] = useState({ new: '', confirm: '' });
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Temp form states for adding new items
   const [newRec, setNewRec] = useState({ description: '', amount: '', category: CATEGORIES[0], dayOfMonth: '1' });
   const [newInc, setNewInc] = useState({ description: '', amount: '', dayOfMonth: '25' });
   const [newGoal, setNewGoal] = useState({ name: '', target: '', category: CATEGORIES[0] });
 
-  // New logic for Monthly Surplus Target: 
-  // (total money in banks + cash in hand) - (spending thresholds + recurring expenses)
+  // Fix: Explicitly type accumulators in reduce to avoid 'unknown' type errors
   const calculatedSurplus = useMemo(() => {
-    const totalBanks = (bankConnections || []).reduce((acc, c) => acc + (c.openingBalance || 0), 0);
-    const totalLiquid = totalBanks + cashOpeningBalance;
-    const totalThresholds = Object.values(categoryBudgets || {}).reduce((acc, val) => acc + (val || 0), 0);
-    const totalRecurring = (recurringExpenses || []).reduce((acc, exp) => acc + (exp.amount || 0), 0);
+    const totalBanks: number = (bankConnections || []).reduce((acc: number, c) => acc + (c.openingBalance || 0), 0);
+    const totalLiquid: number = totalBanks + cashOpeningBalance;
+    const totalThresholds: number = (Object.values(categoryBudgets || {}) as number[]).reduce((acc: number, val: number) => acc + (val || 0), 0);
+    const totalRecurring: number = (recurringExpenses || []).reduce((acc: number, exp) => acc + (exp.amount || 0), 0);
     return totalLiquid - (totalThresholds + totalRecurring);
   }, [bankConnections, cashOpeningBalance, categoryBudgets, recurringExpenses]);
+
+  const handleExportBackup = () => {
+    const backupData: Record<string, string | null> = {};
+    STORAGE_KEYS.forEach(key => {
+      backupData[key] = localStorage.getItem(key);
+    });
+    
+    const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    triggerSecureDownload(blob, `fire_finance_backup_${timestamp}.json`);
+  };
+
+  const handleImportRestore = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = JSON.parse(event.target?.result as string);
+        if (confirm("RESTORE WARNING: This will overwrite ALL current vault data. This action cannot be undone. Proceed?")) {
+          Object.keys(data).forEach(key => {
+            if (data[key] !== null) {
+              localStorage.setItem(key, data[key]);
+            }
+          });
+          alert("Vault Data Restored Successfully. Terminal will now reload.");
+          window.location.reload();
+        }
+      } catch (err) {
+        alert("CRITICAL ERROR: Invalid backup file structure.");
+      }
+    };
+    reader.readAsText(file);
+  };
 
   const handleLinkMirrorDirectory = async () => {
     try {
@@ -133,7 +189,7 @@ const Settings: React.FC<Props> = ({
           <div className="flex md:flex-col gap-2 flex-nowrap">
             {tabs.map(tab => (
               <button
-                key={tab.id}
+                key={tab}
                 onClick={() => setActiveTab(tab.id)}
                 className={`flex items-center gap-3 px-5 py-3.5 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${activeTab === tab.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' : 'text-slate-500 hover:bg-white hover:text-slate-800'}`}
               >
@@ -463,6 +519,32 @@ const Settings: React.FC<Props> = ({
                     <p className="text-[11px] text-amber-900 leading-relaxed font-medium">All data is encrypted using AES-256 before being stored in IndexedDB. Only your local vault key can decrypt the ledger.</p>
                   </div>
                 </div>
+              </section>
+
+              <section className="bg-white p-10 rounded-[3rem] border border-slate-100">
+                <h3 className="text-lg font-black text-slate-800 mb-6 flex items-center gap-3"><i className="fas fa-cloud-arrow-down text-indigo-600"></i> Vault Backup & Restore</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <button 
+                    onClick={handleExportBackup}
+                    className="py-5 bg-indigo-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[11px] hover:bg-indigo-700 transition flex items-center justify-center gap-3"
+                  >
+                    <i className="fas fa-file-export"></i> Export Local Backup
+                  </button>
+                  <button 
+                    onClick={() => fileInputRef.current?.click()}
+                    className="py-5 bg-slate-900 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest text-[11px] hover:bg-slate-800 transition flex items-center justify-center gap-3"
+                  >
+                    <i className="fas fa-file-import"></i> Restore from Backup
+                  </button>
+                  <input 
+                    type="file" 
+                    ref={fileInputRef} 
+                    className="hidden" 
+                    accept=".json"
+                    onChange={handleImportRestore} 
+                  />
+                </div>
+                <p className="mt-4 text-[9px] text-slate-400 font-bold uppercase text-center">Use this to move your financial hub to another device or create a redundant snapshot.</p>
               </section>
 
               <button onClick={onLogout} className="w-full py-6 bg-slate-900 text-white font-black rounded-[2rem] text-xs uppercase tracking-[0.3em] hover:bg-rose-600 transition-all shadow-2xl flex items-center justify-center gap-3">

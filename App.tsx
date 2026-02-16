@@ -423,6 +423,7 @@ const App: React.FC = () => {
                   onWithdrawSaving={() => {}}
                   onWithdrawal={() => {}}
                   onAddIncome={() => {}}
+                  onUpdateCategoryBudget={(cat, amt) => setCategoryBudgets(prev => ({ ...prev, [cat]: amt }))}
                 />
               </div>
             )}

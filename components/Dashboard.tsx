@@ -1,3 +1,4 @@
+
 import React, { useMemo, useState, useEffect } from 'react';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, Legend, BarChart, Bar, Cell } from 'recharts';
 import { Transaction, RecurringExpense, RecurringIncome, InvestmentAccount, MarketPrice, BankConnection, InvestmentGoal, SavingGoal } from '../types';
@@ -31,12 +32,13 @@ interface Props {
   onWithdrawSaving: (goalId: string, amount: number) => void;
   onWithdrawal: (institution: string, amount: number) => void;
   onAddIncome: (amount: number, description: string, notes: string) => void;
+  onUpdateCategoryBudget?: (category: string, amount: number) => void;
 }
 
 type Timeframe = 'daily' | 'monthly' | 'yearly';
 
 const Dashboard: React.FC<Props> = ({ 
-  transactions, investments, marketPrices, bankConnections, recurringExpenses, recurringIncomes, categoryBudgets, cashOpeningBalance, savingGoals, investmentGoals, onPayRecurring, onReceiveRecurringIncome
+  transactions, investments, marketPrices, bankConnections, recurringExpenses, recurringIncomes, categoryBudgets, cashOpeningBalance, savingGoals, investmentGoals, onPayRecurring, onReceiveRecurringIncome, onUpdateCategoryBudget
 }) => {
   const [trendTimeframe, setTrendTimeframe] = useState<Timeframe>('monthly');
   const [aiInsight, setAiInsight] = useState<string>("");
@@ -45,6 +47,8 @@ const Dashboard: React.FC<Props> = ({
   const [activePaymentId, setActivePaymentId] = useState<string | null>(null);
   const [partialAmount, setPartialAmount] = useState<string>("");
   const [selectedDestination, setSelectedDestination] = useState<string | null>(null);
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
+  const [editBudgetVal, setEditBudgetVal] = useState<string>("");
 
   const cycleStartDate = useMemo(() => {
     const now = new Date();
@@ -288,6 +292,19 @@ const Dashboard: React.FC<Props> = ({
     }
   };
 
+  const startEditCategoryBudget = (name: string, currentBudget: number) => {
+    setEditingCategory(name);
+    setEditBudgetVal(currentBudget > 0 ? currentBudget.toString() : "");
+  };
+
+  const saveCategoryBudget = () => {
+    if (editingCategory && onUpdateCategoryBudget) {
+      onUpdateCategoryBudget(editingCategory, parseFloat(editBudgetVal) || 0);
+      setEditingCategory(null);
+      setEditBudgetVal("");
+    }
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-24 print:p-0">
       <div className="hidden print:block border-b-2 border-slate-900 pb-6 mb-8">
@@ -415,28 +432,57 @@ const Dashboard: React.FC<Props> = ({
             <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Active Cycle</span>
           </div>
           <div className="flex-1 overflow-y-auto custom-scrollbar space-y-5 pr-2">
-            {categorySpendData.map((cat, idx) => (
-              <div key={idx} className="space-y-1.5">
-                <div className="flex justify-between items-end px-1">
-                  <div>
-                    <p className="text-[11px] font-black text-slate-800">{cat.name}</p>
-                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Avg: ${cat.dailyAvg.toFixed(2)}/day</p>
+            {categorySpendData.map((cat, idx) => {
+              const isEditing = editingCategory === cat.name;
+              return (
+                <div key={idx} className="space-y-1.5 group">
+                  <div className="flex justify-between items-end px-1">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="text-[11px] font-black text-slate-800">{cat.name}</p>
+                        {!isEditing && onUpdateCategoryBudget && (
+                          <button 
+                            onClick={() => startEditCategoryBudget(cat.name, cat.budget)}
+                            className="opacity-0 group-hover:opacity-100 text-[10px] text-slate-400 hover:text-indigo-600 transition-all"
+                          >
+                            <i className="fas fa-pencil-alt"></i>
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Avg: ${cat.dailyAvg.toFixed(2)}/day</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[11px] font-black text-slate-900">${cat.amount.toLocaleString()}</p>
+                      {isEditing ? (
+                        <div className="flex items-center gap-1 mt-1 animate-in fade-in slide-in-from-right-1">
+                          <input 
+                            type="number"
+                            autoFocus
+                            value={editBudgetVal}
+                            onChange={(e) => setEditBudgetVal(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && saveCategoryBudget()}
+                            className="w-16 h-5 bg-slate-50 border border-indigo-200 rounded text-[9px] font-black px-1 outline-none focus:ring-1 focus:ring-indigo-500"
+                            placeholder="Limit"
+                          />
+                          <button onClick={saveCategoryBudget} className="w-5 h-5 bg-indigo-600 text-white rounded flex items-center justify-center text-[8px]"><i className="fas fa-check"></i></button>
+                          <button onClick={() => setEditingCategory(null)} className="w-5 h-5 bg-slate-100 text-slate-400 rounded flex items-center justify-center text-[8px]"><i className="fas fa-times"></i></button>
+                        </div>
+                      ) : (
+                        <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">
+                          {cat.budget > 0 ? `${cat.progress.toFixed(0)}% of $${cat.budget}` : 'Uncapped'}
+                        </p>
+                      )}
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-[11px] font-black text-slate-900">${cat.amount.toLocaleString()}</p>
-                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">
-                      {cat.budget > 0 ? `${cat.progress.toFixed(0)}% of $${cat.budget}` : 'Uncapped'}
-                    </p>
+                  <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                    <div 
+                      className={`h-full transition-all duration-1000 ${cat.progress > 90 ? 'bg-rose-500' : cat.progress > 70 ? 'bg-amber-500' : 'bg-indigo-500'}`} 
+                      style={{ width: `${Math.min(100, cat.budget > 0 ? cat.progress : 100)}%` }}
+                    ></div>
                   </div>
                 </div>
-                <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                  <div 
-                    className={`h-full transition-all duration-1000 ${cat.progress > 90 ? 'bg-rose-500' : cat.progress > 70 ? 'bg-amber-500' : 'bg-indigo-500'}`} 
-                    style={{ width: `${Math.min(100, cat.budget > 0 ? cat.progress : 100)}%` }}
-                  ></div>
-                </div>
-              </div>
-            ))}
+              );
+            })}
             {categorySpendData.length === 0 && (
               <div className="h-full flex flex-col items-center justify-center text-center py-10">
                 <i className="fas fa-chart-simple text-slate-200 text-3xl mb-4"></i>

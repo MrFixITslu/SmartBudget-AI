@@ -199,6 +199,14 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
     }
 
     try {
+      // Ensure we have active permissions before writing
+      if ((await (directoryHandle as any).queryPermission({ mode: 'readwrite' })) !== 'granted') {
+        if ((await (directoryHandle as any).requestPermission({ mode: 'readwrite' })) !== 'granted') {
+          alert("Permission denied to SSD Vault.");
+          return;
+        }
+      }
+
       const storageRef = await saveFileToHardDrive(directoryHandle, selectedEvent.name, file.name, file);
       const newFile: ProjectFile = {
         id: generateId(),
@@ -214,8 +222,9 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
       
       const updatedEvent = { ...selectedEvent, files: [...(selectedEvent.files || []), newFile] };
       addActionLog(updatedEvent, `Linked local asset: "${file.name}"`, 'file');
-    } catch (err) {
+    } catch (err: any) {
       console.error("Vault access error:", err);
+      alert(`Vault Access Failed: ${err.message || 'Unknown error'}`);
     }
   };
 
@@ -230,12 +239,22 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
         alert("SSD Vault Disconnected. Re-mount in Settings.");
         return;
       }
+
       try {
+        // Essential: Re-verify permission on click if handle was restored from IndexedDB
+        // Browsers require a user gesture (like this click) to re-authorize file system handles.
+        if ((await (directoryHandle as any).queryPermission({ mode: 'readwrite' })) !== 'granted') {
+          if ((await (directoryHandle as any).requestPermission({ mode: 'readwrite' })) !== 'granted') {
+            alert("Permission denied to access SSD Vault.");
+            return;
+          }
+        }
+
         const blob = await getFileFromHardDrive(directoryHandle, file.storageRef);
         triggerSecureDownload(blob, file.name);
-      } catch (err) {
+      } catch (err: any) {
         console.error("File retrieval error:", err);
-        alert("Mirror Asset Error: File missing or access denied.");
+        alert(`Mirror Asset Error: ${err.message || 'File missing or access denied.'}`);
       }
     }
   };
@@ -554,7 +573,9 @@ const EventPlanner: React.FC<Props> = ({ events, contacts, directoryHandle, curr
                           <i className={`fas ${file.storageType === 'url' ? 'fa-link' : 'fa-file-invoice'} text-2xl`}></i>
                         </div>
                         <p className="font-black text-[11px] text-slate-800 truncate w-full mb-1">{file.name}</p>
-                        <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest truncate w-full">{file.storageType === 'url' ? 'Web Link' : 'Secure Vault Asset'}</p>
+                        <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest truncate w-full">
+                          {file.storageType === 'url' ? 'Web Link' : (file.storageType === 'filesystem' ? 'Secure SSD Asset' : 'Local Archive')}
+                        </p>
                       </div>
                     ))}
                     <div className="p-8 border-4 border-dashed border-slate-200 rounded-[3rem] flex flex-col items-center justify-center text-slate-400 hover:border-indigo-500/30 hover:text-indigo-400 cursor-pointer transition-all group" onClick={() => fileInputRef.current?.click()}>

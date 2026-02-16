@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import Login from './components/Login';
@@ -22,34 +23,11 @@ import {
   BudgetEvent, 
   Contact, 
   InvestmentGoal, 
-  NetWorthSnapshot, 
-  PortfolioUpdate, 
-  StoredUser 
+  STORAGE_KEYS 
 } from './types';
 import { getStoredVaultHandle, storeMirrorHandle, clearVaultHandle } from './services/fileStorageService';
 
 const ADMIN_USER = "nsv"; 
-
-const STORAGE_KEYS = {
-  TRANSACTIONS: 'budget_transactions',
-  RECURRING_EXPENSES: 'budget_recurring',
-  RECURRING_INCOMES: 'budget_recurring_incomes',
-  SAVINGS_GOALS: 'budget_savings_goals',
-  INVESTMENT_GOALS: 'budget_investment_goals',
-  SALARY: 'budget_salary',
-  CASH_OPENING: 'budget_cash_opening',
-  CATEGORY_LIMITS: 'budget_category_limits',
-  BANK_CONNECTIONS: 'budget_bank_conns',
-  INVESTMENTS: 'budget_investments',
-  EVENTS: 'budget_events',
-  CONTACTS: 'ff_contacts',
-  NETWORTH_HISTORY: 'ff_networth_history',
-  AUTH: 'ff_auth',
-  AUTH_USER: 'ff_auth_username',
-  USERS_LIST: 'ff_users_list',
-  REMINDERS: 'ff_reminders_enabled',
-  PASSWORD: 'ff_custom_password'
-};
 
 const safeParse = (key: string, fallback: any) => {
   try {
@@ -133,12 +111,39 @@ const App: React.FC = () => {
 
   const isAdmin = currentUsername === ADMIN_USER;
 
+  // Synchronization Listener: Pull updates from other tabs
+  useEffect(() => {
+    const handleSync = (e: StorageEvent) => {
+      if (!e.newValue || e.key === null) return;
+      try {
+        const val = JSON.parse(e.newValue);
+        switch (e.key) {
+          case STORAGE_KEYS.TRANSACTIONS: setTransactions(val); break;
+          case STORAGE_KEYS.RECURRING_EXPENSES: setRecurringExpenses(val); break;
+          case STORAGE_KEYS.RECURRING_INCOMES: setRecurringIncomes(val); break;
+          case STORAGE_KEYS.SAVINGS_GOALS: setSavingGoals(val); break;
+          case STORAGE_KEYS.BANK_CONNECTIONS: setBankConnections(val); break;
+          case STORAGE_KEYS.INVESTMENTS: setInvestments(val); break;
+          case STORAGE_KEYS.EVENTS: setEvents(val); break;
+          case STORAGE_KEYS.CONTACTS: setContacts(val); break;
+          case STORAGE_KEYS.CATEGORY_LIMITS: setCategoryBudgets(val); break;
+          case STORAGE_KEYS.CASH_OPENING: setCashOpeningBalance(parseFloat(e.newValue) || 0); break;
+          case STORAGE_KEYS.AUTH: setIsAuthenticated(e.newValue === 'true'); break;
+          case STORAGE_KEYS.AUTH_USER: setCurrentUsername(e.newValue || ''); break;
+        }
+      } catch (err) {
+        console.warn("Storage Sync Parse Error", err);
+      }
+    };
+    window.addEventListener('storage', handleSync);
+    return () => window.removeEventListener('storage', handleSync);
+  }, []);
+
   // Restore Directory Handle on Mount
   useEffect(() => {
     const restoreHandle = async () => {
       const handle = await getStoredVaultHandle();
       if (handle) {
-        // Verification of permission is usually needed but handles are persistent in IDB
         setDirectoryHandle(handle as any);
       }
     };
@@ -326,7 +331,7 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       {!isAuthenticated ? (
-        <Login onLogin={handleLogin} onReset={() => localStorage.clear()} />
+        <Login onLogin={handleLogin} onReset={() => { localStorage.clear(); window.location.reload(); }} />
       ) : (
         <>
           <MarketTicker prices={marketPrices} quotaExhausted={quotaExhausted} />

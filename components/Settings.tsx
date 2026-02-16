@@ -1,5 +1,6 @@
+
 import React, { useState, useMemo, useRef } from 'react';
-import { CATEGORIES, RecurringExpense, RecurringIncome, SavingGoal, BankConnection, InvestmentGoal, StoredUser } from '../types';
+import { CATEGORIES, RecurringExpense, RecurringIncome, SavingGoal, BankConnection, InvestmentGoal, StoredUser, STORAGE_KEYS } from '../types';
 import { storeMirrorHandle, clearVaultHandle, triggerSecureDownload } from '../services/fileStorageService';
 
 interface Props {
@@ -44,27 +45,6 @@ interface Props {
 
 type SettingsTab = 'general' | 'recurring' | 'goals' | 'api' | 'security';
 
-const STORAGE_KEYS = [
-  'budget_transactions',
-  'budget_recurring',
-  'budget_recurring_incomes',
-  'budget_savings_goals',
-  'budget_investment_goals',
-  'budget_salary',
-  'budget_cash_opening',
-  'budget_category_limits',
-  'budget_bank_conns',
-  'budget_investments',
-  'budget_events',
-  'ff_contacts',
-  'ff_networth_history',
-  'ff_auth',
-  'ff_auth_username',
-  'ff_users_list',
-  'ff_reminders_enabled',
-  'ff_custom_password'
-];
-
 const Settings: React.FC<Props> = ({ 
   targetMargin, categoryBudgets, onUpdateCategoryBudgets, 
   cashOpeningBalance, onUpdateCashOpeningBalance,
@@ -88,18 +68,22 @@ const Settings: React.FC<Props> = ({
   const [newInc, setNewInc] = useState({ description: '', amount: '', dayOfMonth: '25' });
   const [newGoal, setNewGoal] = useState({ name: '', target: '', category: CATEGORIES[0] });
 
-  // Fix: Explicitly type accumulators in reduce to avoid 'unknown' type errors
   const calculatedSurplus = useMemo(() => {
-    const totalBanks: number = (bankConnections || []).reduce((acc: number, c) => acc + (c.openingBalance || 0), 0);
-    const totalLiquid: number = totalBanks + cashOpeningBalance;
+    // Filter out everything except institutionType === 'bank'
+    const totalOnlyBanks: number = (bankConnections || [])
+      .filter(c => c.institutionType === 'bank')
+      .reduce((acc: number, c) => acc + (c.openingBalance || 0), 0);
+    
+    const totalLiquid: number = totalOnlyBanks + cashOpeningBalance;
     const totalThresholds: number = (Object.values(categoryBudgets || {}) as number[]).reduce((acc: number, val: number) => acc + (val || 0), 0);
     const totalRecurring: number = (recurringExpenses || []).reduce((acc: number, exp) => acc + (exp.amount || 0), 0);
+    
     return totalLiquid - (totalThresholds + totalRecurring);
   }, [bankConnections, cashOpeningBalance, categoryBudgets, recurringExpenses]);
 
   const handleExportBackup = () => {
     const backupData: Record<string, string | null> = {};
-    STORAGE_KEYS.forEach(key => {
+    Object.values(STORAGE_KEYS).forEach(key => {
       backupData[key] = localStorage.getItem(key);
     });
     
@@ -189,7 +173,7 @@ const Settings: React.FC<Props> = ({
           <div className="flex md:flex-col gap-2 flex-nowrap">
             {tabs.map(tab => (
               <button
-                key={tab}
+                key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
                 className={`flex items-center gap-3 px-5 py-3.5 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${activeTab === tab.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' : 'text-slate-500 hover:bg-white hover:text-slate-800'}`}
               >

@@ -1,3 +1,4 @@
+
 export type TransactionType = 'expense' | 'income' | 'savings' | 'withdrawal' | 'transfer';
 export type InstitutionType = 'bank' | 'credit_union' | 'investment';
 
@@ -229,4 +230,26 @@ export const CATEGORIES = [
 export const EVENT_ITEM_CATEGORIES = [
   'Venue', 'Catering', 'Decor', 'Entertainment', 'Staff', 'Marketing', 'Tickets', 'Donation', 'Other'
 ];
+
 export type EventItemCategory = typeof EVENT_ITEM_CATEGORIES[number];
+
+export const STORAGE_KEYS = {
+  TRANSACTIONS: 'budget_transactions',
+  RECURRING_EXPENSES: 'budget_recurring',
+  RECURRING_INCOMES: 'budget_recurring_incomes',
+  SAVINGS_GOALS: 'budget_savings_goals',
+  INVESTMENT_GOALS: 'budget_investment_goals',
+  SALARY: 'budget_salary',
+  CASH_OPENING: 'budget_cash_opening',
+  CATEGORY_LIMITS: 'budget_category_limits',
+  BANK_CONNECTIONS: 'budget_bank_conns',
+  INVESTMENTS: 'budget_investments',
+  EVENTS: 'budget_events',
+  CONTACTS: 'ff_contacts',
+  NETWORTH_HISTORY: 'ff_networth_history',
+  AUTH: 'ff_auth',
+  AUTH_USER: 'ff_auth_username',
+  USERS_LIST: 'ff_users_list',
+  REMINDERS: 'ff_reminders_enabled',
+  PASSWORD: 'ff_custom_password'
+};

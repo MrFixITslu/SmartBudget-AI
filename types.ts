@@ -206,6 +206,17 @@ export interface BudgetEvent {
   activeCollaborators?: string[];
 }
 
+export interface CalendarItem {
+  id: string;
+  title: string;
+  date: string; // YYYY-MM-DD
+  type: 'meeting' | 'reminder' | 'event';
+  startTime?: string;
+  description?: string;
+  recurring: 'none' | 'daily' | 'weekly' | 'monthly';
+  completed?: boolean;
+}
+
 export interface EventItem {
   id: string;
   description: string;
@@ -245,6 +256,7 @@ export const STORAGE_KEYS = {
   BANK_CONNECTIONS: 'budget_bank_conns',
   INVESTMENTS: 'budget_investments',
   EVENTS: 'budget_events',
+  CALENDAR_ITEMS: 'budget_calendar_items',
   CONTACTS: 'ff_contacts',
   NETWORTH_HISTORY: 'ff_networth_history',
   AUTH: 'ff_auth',

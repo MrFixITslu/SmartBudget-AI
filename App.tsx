@@ -10,6 +10,7 @@ import BankSyncModal from './components/BankSyncModal';
 import BudgetAssistant from './components/BudgetAssistant';
 import EventPlanner from './components/EventPlanner';
 import Projections from './components/Projections';
+import Calendar from './components/Calendar';
 import VerificationQueue from './components/VerificationQueue';
 import { 
   Transaction, 
@@ -23,6 +24,7 @@ import {
   BudgetEvent, 
   Contact, 
   InvestmentGoal, 
+  CalendarItem,
   STORAGE_KEYS 
 } from './types';
 import { getStoredVaultHandle, storeMirrorHandle, clearVaultHandle } from './services/fileStorageService';
@@ -76,7 +78,7 @@ const MarketTicker = ({ prices, quotaExhausted }: { prices: MarketPrice[], quota
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => localStorage.getItem(STORAGE_KEYS.AUTH) === 'true');
   const [currentUsername, setCurrentUsername] = useState<string>(() => localStorage.getItem(STORAGE_KEYS.AUTH_USER) || '');
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'events' | 'projections'>(() => {
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'calendar' | 'events' | 'projections'>(() => {
     const user = localStorage.getItem(STORAGE_KEYS.AUTH_USER);
     return user === ADMIN_USER ? 'dashboard' : 'events';
   });
@@ -90,6 +92,7 @@ const App: React.FC = () => {
   const [bankConnections, setBankConnections] = useState<BankConnection[]>(() => safeParse(STORAGE_KEYS.BANK_CONNECTIONS, []));
   const [investments, setInvestments] = useState<InvestmentAccount[]>(() => safeParse(STORAGE_KEYS.INVESTMENTS, []));
   const [events, setEvents] = useState<BudgetEvent[]>(() => safeParse(STORAGE_KEYS.EVENTS, []));
+  const [calendarItems, setCalendarItems] = useState<CalendarItem[]>(() => safeParse(STORAGE_KEYS.CALENDAR_ITEMS, []));
   const [contacts, setContacts] = useState<Contact[]>(() => safeParse(STORAGE_KEYS.CONTACTS, []));
   const [cashOpeningBalance, setCashOpeningBalance] = useState<number>(() => parseFloat(localStorage.getItem(STORAGE_KEYS.CASH_OPENING) || '0'));
   
@@ -125,6 +128,7 @@ const App: React.FC = () => {
           case STORAGE_KEYS.BANK_CONNECTIONS: setBankConnections(val); break;
           case STORAGE_KEYS.INVESTMENTS: setInvestments(val); break;
           case STORAGE_KEYS.EVENTS: setEvents(val); break;
+          case STORAGE_KEYS.CALENDAR_ITEMS: setCalendarItems(val); break;
           case STORAGE_KEYS.CONTACTS: setContacts(val); break;
           case STORAGE_KEYS.CATEGORY_LIMITS: setCategoryBudgets(val); break;
           case STORAGE_KEYS.CASH_OPENING: setCashOpeningBalance(parseFloat(e.newValue) || 0); break;
@@ -158,10 +162,11 @@ const App: React.FC = () => {
     localStorage.setItem(STORAGE_KEYS.BANK_CONNECTIONS, JSON.stringify(bankConnections));
     localStorage.setItem(STORAGE_KEYS.INVESTMENTS, JSON.stringify(investments));
     localStorage.setItem(STORAGE_KEYS.EVENTS, JSON.stringify(events));
+    localStorage.setItem(STORAGE_KEYS.CALENDAR_ITEMS, JSON.stringify(calendarItems));
     localStorage.setItem(STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
     localStorage.setItem(STORAGE_KEYS.CATEGORY_LIMITS, JSON.stringify(categoryBudgets));
     localStorage.setItem(STORAGE_KEYS.CASH_OPENING, cashOpeningBalance.toString());
-  }, [transactions, recurringExpenses, recurringIncomes, savingGoals, bankConnections, investments, events, contacts, categoryBudgets, cashOpeningBalance]);
+  }, [transactions, recurringExpenses, recurringIncomes, savingGoals, bankConnections, investments, events, calendarItems, contacts, categoryBudgets, cashOpeningBalance]);
 
   const fetchMarketData = async () => {
     try {
@@ -315,7 +320,7 @@ const App: React.FC = () => {
     
     const flow = transactions.reduce((acc, t) => {
       const isBank = t.institution && bankConnections.some(bc => bc.institution === t.institution && bc.institutionType === 'bank');
-      const isToBank = t.destinationInstitution && bankConnections.some(bc => bc.institution === t.destinationInstitution && bc.institutionType === 'bank');
+      const isToBank = t.destinationInstitution && bankConnections.some(bc => bc.institution === t.institution && bc.institutionType === 'bank');
       
       if (isBank) {
         if (t.type === 'income') return acc + t.amount;
@@ -328,6 +333,10 @@ const App: React.FC = () => {
     return bankSum + flow + cashOpeningBalance;
   }, [bankConnections, transactions, cashOpeningBalance]);
 
+  const handleUpdateCalendarItems = (items: CalendarItem[]) => {
+    setCalendarItems(items);
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       {!isAuthenticated ? (
@@ -337,7 +346,7 @@ const App: React.FC = () => {
           <MarketTicker prices={marketPrices} quotaExhausted={quotaExhausted} />
           
           <header className="fixed top-8 left-0 right-0 z-[110] px-4 print:hidden">
-            <div className="max-w-5xl mx-auto bg-white/80 backdrop-blur-xl border border-slate-100 rounded-[2.5rem] shadow-2xl p-2 flex items-center justify-between">
+            <div className="max-w-6xl mx-auto bg-white/80 backdrop-blur-xl border border-slate-100 rounded-[2.5rem] shadow-2xl p-2 flex items-center justify-between">
               <div className="flex items-center gap-1">
                 <button 
                   onClick={() => setActiveTab('dashboard')} 
@@ -345,6 +354,13 @@ const App: React.FC = () => {
                 >
                   <i className="fas fa-chart-pie text-sm"></i>
                   <span className="text-[11px] font-black uppercase tracking-widest">Dashboard</span>
+                </button>
+                <button 
+                  onClick={() => setActiveTab('calendar')} 
+                  className={`flex items-center gap-2 px-6 py-3 rounded-[1.5rem] transition-all ${activeTab === 'calendar' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}
+                >
+                  <i className="fas fa-calendar-alt text-sm"></i>
+                  <span className="text-[11px] font-black uppercase tracking-widest">Calendar</span>
                 </button>
                 <button 
                   onClick={() => setActiveTab('events')} 
@@ -426,6 +442,17 @@ const App: React.FC = () => {
                   onUpdateCategoryBudget={(cat, amt) => setCategoryBudgets(prev => ({ ...prev, [cat]: amt }))}
                 />
               </div>
+            )}
+
+            {activeTab === 'calendar' && (
+              <Calendar 
+                events={events}
+                calendarItems={calendarItems}
+                transactions={transactions}
+                recurringExpenses={recurringExpenses}
+                recurringIncomes={recurringIncomes}
+                onUpdateItems={handleUpdateCalendarItems}
+              />
             )}
 
             {activeTab === 'events' && (

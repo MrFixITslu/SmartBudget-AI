@@ -44,7 +44,7 @@
         /* Document Preview Rendering Styles */
         .office-preview-content {
           font-family: 'Georgia', serif;
-          line-height: 1.7;
+          line-height: 1.6 !important;
           color: #334155;
           background: white;
           padding: 3rem;
@@ -52,6 +52,16 @@
           margin: 0 auto;
           box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1);
         }
+
+        /* Prevent overlapping in contentEditable */
+        [contenteditable] {
+          line-height: 1.6 !important;
+        }
+        [contenteditable] p, [contenteditable] span, [contenteditable] div {
+          line-height: 1.6 !important;
+          position: static !important;
+        }
+
         .office-preview-content table {
           border-collapse: collapse;
           width: 100%;
@@ -95,12 +105,22 @@
             section.sticky, 
             button, 
             .no-print,
+            .no-print * ,
             input[type="text"],
             input[type="search"],
             .animate-ping,
             .verification-queue-header {
                 display: none !important;
             }
+            
+            /* Page Break Implementation for PDF */
+            .print-only-page-break {
+                display: block !important;
+                break-after: page !important;
+                height: 0 !important;
+                visibility: hidden !important;
+            }
+
             .bg-slate-900 {
                 background-color: #0f172a !important;
                 color: white !important;
@@ -126,53 +146,53 @@
             }
             .rounded-\[3rem\], .rounded-\[4rem\], .rounded-\[2\.5rem\], .rounded-\[3\.5rem\] {
                 border-radius: 12px !important;
-            }
-            .flex-col.lg\:flex-row {
-                flex-direction: column !important;
-            }
-            .grid {
-                display: block !important;
-            }
-            .grid > div {
-                margin-bottom: 20px !important;
-                width: 100% !important;
-            }
-            section {
-                break-inside: avoid;
-                page-break-inside: avoid;
-                margin-bottom: 2rem !important;
-            }
-            h2, h3, h4 {
-                color: black !important;
-            }
-            .text-indigo-400, .text-indigo-600 { color: #4f46e5 !important; }
-            .text-emerald-400, .text-emerald-600 { color: #059669 !important; }
-            .text-rose-400, .text-rose-600 { color: #e11d48 !important; }
-
-            /* Ensure Ledger fits on page */
-            .overflow-y-auto {
-                overflow: visible !important;
-                max-height: none !important;
-            }
-            .TransactionLedger {
-                display: table !important;
-                width: 100% !important;
-            }
-        }
-    </style>
-<script type="importmap">
-{
-  "imports": {
-    "react/": "https://esm.sh/react@^19.0.0/",
-    "react": "https://esm.sh/react@^19.0.0",
-    "react-dom/": "https://esm.sh/react-dom@^19.0.0/",
-    "@google/genai": "https://esm.sh/@google/genai@^1.3.0",
-    "recharts": "https://esm.sh/recharts@^2.15.0"
+              }
+              .flex-col.lg\:flex-row {
+                  flex-direction: column !important;
+              }
+              .grid {
+                  display: block !important;
+              }
+              .grid > div {
+                  margin-bottom: 20px !important;
+                  width: 100% !important;
+              }
+              section {
+                  break-inside: avoid;
+                  page-break-inside: avoid;
+                  margin-bottom: 2rem !important;
+              }
+              h2, h3, h4 {
+                  color: black !important;
+              }
+              .text-indigo-400, .text-indigo-600 { color: #4f46e5 !important; }
+              .text-emerald-400, .text-emerald-600 { color: #059669 !important; }
+              .text-rose-400, .text-rose-600 { color: #e11d48 !important; }
+  
+              /* Ensure Ledger fits on page */
+              .overflow-y-auto {
+                  overflow: visible !important;
+                  max-height: none !important;
+              }
+              .TransactionLedger {
+                  display: table !important;
+                  width: 100% !important;
+              }
+          }
+      </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "react/": "https://esm.sh/react@^19.0.0/",
+      "react": "https://esm.sh/react@^19.0.0",
+      "react-dom/": "https://esm.sh/react-dom@^19.0.0/",
+      "@google/genai": "https://esm.sh/@google/genai@^1.3.0",
+      "recharts": "https://esm.sh/recharts@^2.15.0"
+    }
   }
-}
-</script>
-</head>
-<body class="bg-slate-50 text-slate-900 selection:bg-indigo-100 selection:text-indigo-900">
-    <div id="root"></div>
-</body>
-</html>
+  </script>
+  </head>
+  <body class="bg-slate-50 text-slate-900 selection:bg-indigo-100 selection:text-indigo-900">
+      <div id="root"></div>
+  </body>
+  </html>

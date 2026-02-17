@@ -51,15 +51,48 @@ const DocumentEditor: React.FC<Props> = ({ initialTitle, initialContent, onSave,
     }
   };
 
+  const handlePaste = (e: React.ClipboardEvent) => {
+    e.preventDefault();
+    const html = e.clipboardData.getData('text/html');
+    const text = e.clipboardData.getData('text/plain');
+
+    if (html) {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+      const sanitize = (node: Node) => {
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          const el = node as HTMLElement;
+          const preservedStyles: Record<string, string> = {};
+          const safeStyles = ['font-weight', 'font-style', 'text-decoration', 'color', 'background-color', 'text-align'];
+          safeStyles.forEach(style => {
+            const val = el.style.getPropertyValue(style);
+            if (val) preservedStyles[style] = val;
+          });
+          el.removeAttribute('style');
+          el.removeAttribute('class');
+          Object.entries(preservedStyles).forEach(([prop, val]) => {
+            el.style.setProperty(prop, val);
+          });
+          el.style.lineHeight = '1.6';
+          el.style.position = 'static';
+          el.style.height = 'auto';
+          Array.from(el.childNodes).forEach(sanitize);
+        }
+      };
+      sanitize(doc.body);
+      document.execCommand('insertHTML', false, doc.body.innerHTML);
+    } else if (text) {
+      document.execCommand('insertText', false, text);
+    }
+    updateStats();
+  };
+
   const execCommand = (e: React.MouseEvent | React.KeyboardEvent | null, command: string, value: string = '') => {
     if (e && 'preventDefault' in e) e.preventDefault(); 
     if (!editorRef.current) return;
-    
     editorRef.current.focus();
-
     try {
       if (command === 'formatBlock' && value) {
-        // Modern browser normalization
         const finalValue = value.startsWith('<') ? value : `<${value}>`;
         document.execCommand(command, false, finalValue);
       } else {
@@ -68,8 +101,26 @@ const DocumentEditor: React.FC<Props> = ({ initialTitle, initialContent, onSave,
     } catch (err) {
       console.warn("Formatting Engine Error:", command, err);
     }
-    
     updateStats();
+  };
+
+  const insertPageBreak = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const pbHtml = `
+      <div class="document-page-break no-print" contenteditable="false" style="margin: 3rem 0; border-top: 2px dashed #cbd5e1; position: relative; text-align: center; height: 0; pointer-events: none;">
+        <span style="position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: #f1f5f9; color: #64748b; font-size: 10px; font-weight: 900; padding: 0 10px; border-radius: 4px; border: 1px solid #e2e8f0; letter-spacing: 2px;">PAGE BREAK</span>
+      </div>
+      <div class="print-only-page-break" style="break-after: page; display: none;"></div>
+      <p><br></p>
+    `;
+    document.execCommand('insertHTML', false, pbHtml);
+    updateStats();
+  };
+
+  const exportToPDF = () => {
+    // We utilize browser's window.print which handles the specialized print styles in index.html
+    // This provides a clean PDF with proper page breaks.
+    window.print();
   };
 
   const changeFontSize = (delta: number) => {
@@ -84,11 +135,9 @@ const DocumentEditor: React.FC<Props> = ({ initialTitle, initialContent, onSave,
   const handleImageInsert = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = (event) => {
       const dataUrl = event.target?.result as string;
-      // Inject standard responsive image tag
       const imgTag = `<img src="${dataUrl}" style="max-width:100%; border-radius:12px; margin: 10px 0; border: 1px solid #e2e8f0; shadow: 0 10px 15px -3px rgba(0,0,0,0.1);" />`;
       document.execCommand('insertHTML', false, imgTag);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -100,7 +149,6 @@ const DocumentEditor: React.FC<Props> = ({ initialTitle, initialContent, onSave,
     if (!editorRef.current) return;
     setIsSaving(true);
     setSaveSuccess(false);
-    
     try {
       const content = editorRef.current.innerHTML;
       await onSave(title, content);
@@ -117,7 +165,7 @@ const DocumentEditor: React.FC<Props> = ({ initialTitle, initialContent, onSave,
     <div className="fixed inset-0 z-[250] bg-slate-200 flex flex-col items-center justify-start animate-in fade-in duration-300 overflow-hidden">
       
       {/* RIBBON UI */}
-      <div className="w-full bg-white border-b border-slate-300 shadow-sm z-30 px-6 pt-2 pb-1 shrink-0">
+      <div className="w-full bg-white border-b border-slate-300 shadow-sm z-30 px-6 pt-2 pb-1 shrink-0 no-print">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2 px-3 py-1 bg-indigo-50 rounded-lg border border-indigo-100">
@@ -134,11 +182,13 @@ const DocumentEditor: React.FC<Props> = ({ initialTitle, initialContent, onSave,
           </div>
           
           <div className="flex items-center gap-2">
-            {!isVaultMounted && (
-              <button onClick={onMountVault} className="px-4 py-1.5 bg-amber-500 text-white rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-amber-600 transition flex items-center gap-2">
-                <i className="fas fa-plug-circle-xmark"></i> Reconnect SSD
-              </button>
-            )}
+            <button 
+              onClick={exportToPDF}
+              className="px-4 py-2 bg-slate-900 text-white rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-slate-800 transition flex items-center gap-2 shadow-lg shadow-slate-200"
+            >
+              <i className="fas fa-file-pdf"></i> Export PDF
+            </button>
+            <div className="w-px h-6 bg-slate-200 mx-1"></div>
             <button 
               onClick={handleSave}
               disabled={isSaving}
@@ -154,7 +204,6 @@ const DocumentEditor: React.FC<Props> = ({ initialTitle, initialContent, onSave,
         </div>
 
         <div className="flex items-center gap-6 overflow-x-auto no-scrollbar py-2 border-t border-slate-100">
-          
           <div className="flex flex-col gap-1 pr-4 border-r border-slate-200 shrink-0">
              <div className="flex items-center gap-1">
                <button onMouseDown={(e) => execCommand(e, 'undo')} className="w-8 h-8 hover:bg-slate-100 rounded text-slate-600" title="Undo"><i className="fas fa-undo text-xs"></i></button>
@@ -203,20 +252,13 @@ const DocumentEditor: React.FC<Props> = ({ initialTitle, initialContent, onSave,
 
           <div className="flex flex-col gap-1 pr-4 border-r border-slate-200 shrink-0">
              <div className="flex items-center gap-1">
-                <button onMouseDown={(e) => { e.preventDefault(); fileInputRef.current?.click(); }} className="w-8 h-8 hover:bg-slate-100 rounded text-slate-600"><i className="fas fa-image text-xs"></i></button>
+                <button onMouseDown={(e) => { e.preventDefault(); fileInputRef.current?.click(); }} className="w-8 h-8 hover:bg-slate-100 rounded text-slate-600" title="Insert Image"><i className="fas fa-image text-xs"></i></button>
                 <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageInsert} />
-                <button onMouseDown={(e) => execCommand(e, 'insertHorizontalRule')} className="w-8 h-8 hover:bg-slate-100 rounded text-slate-600"><i className="fas fa-minus text-xs"></i></button>
+                <button onMouseDown={insertPageBreak} className="px-3 h-8 bg-slate-50 text-slate-500 rounded font-black text-[8px] uppercase tracking-widest hover:bg-slate-100 border border-slate-100" title="Page Break">
+                  <i className="fas fa-scissors mr-1.5"></i> Page Break
+                </button>
              </div>
              <span className="text-[8px] font-bold text-slate-400 uppercase text-center">Insert</span>
-          </div>
-
-          <div className="flex flex-col gap-1 shrink-0">
-             <div className="flex items-center gap-1">
-                <button onMouseDown={(e) => execCommand(e, 'justifyLeft')} className="w-8 h-8 hover:bg-slate-100 rounded text-slate-600"><i className="fas fa-align-left text-xs"></i></button>
-                <button onMouseDown={(e) => execCommand(e, 'justifyCenter')} className="w-8 h-8 hover:bg-slate-100 rounded text-slate-600"><i className="fas fa-align-center text-xs"></i></button>
-                <button onMouseDown={(e) => execCommand(e, 'justifyRight')} className="w-8 h-8 hover:bg-slate-100 rounded text-slate-600"><i className="fas fa-align-right text-xs"></i></button>
-             </div>
-             <span className="text-[8px] font-bold text-slate-400 uppercase text-center">Align</span>
           </div>
 
           <button onMouseDown={(e) => execCommand(e, 'removeFormat')} className="ml-auto px-4 h-8 bg-slate-50 text-slate-400 hover:text-rose-500 rounded-lg font-black text-[8px] uppercase tracking-widest flex items-center gap-2 border border-slate-100 transition-all shrink-0">
@@ -226,26 +268,27 @@ const DocumentEditor: React.FC<Props> = ({ initialTitle, initialContent, onSave,
       </div>
 
       {/* PAPER CANVAS */}
-      <div className="flex-1 w-full overflow-y-auto custom-scrollbar flex flex-col items-center py-10 px-4 bg-slate-200">
-        <div className="w-full max-w-[850px] relative shadow-2xl">
+      <div className="flex-1 w-full overflow-y-auto custom-scrollbar flex flex-col items-center py-10 px-4 bg-slate-200 print:bg-white print:p-0 print:block">
+        <div className="w-full max-w-[850px] relative shadow-2xl print:shadow-none print:max-w-none">
           <div 
             ref={editorRef}
             contentEditable
             onInput={updateStats}
             onKeyUp={updateStats}
             onMouseUp={updateStats}
-            className="w-full min-h-[1100px] bg-white p-[90px] outline-none text-slate-800 prose prose-slate max-w-none prose-h1:text-4xl prose-h1:font-black prose-p:text-[17px] prose-p:leading-relaxed prose-li:text-[17px] prose-ul:list-disc prose-ol:list-decimal"
+            onPaste={handlePaste}
+            className="w-full min-h-[1100px] bg-white p-[90px] outline-none text-slate-800 prose prose-slate max-w-none prose-h1:text-4xl prose-h1:font-black prose-p:text-[17px] prose-p:leading-relaxed prose-li:text-[17px] prose-ul:list-disc prose-ol:list-decimal print:p-0 print:min-h-0"
             style={{ fontFamily: "'Inter', sans-serif" }}
           />
         </div>
       </div>
 
       {/* STATUS BAR */}
-      <div className="w-full bg-indigo-700 text-white h-7 flex items-center justify-between px-6 text-[10px] font-bold z-40 shrink-0">
+      <div className="w-full bg-indigo-700 text-white h-7 flex items-center justify-between px-6 text-[10px] font-bold z-40 shrink-0 no-print">
          <div className="flex items-center gap-6">
             <div className="flex items-center gap-2">
                <i className="fas fa-file-alt"></i>
-               <span>Page 1 of 1</span>
+               <span>Document View</span>
             </div>
             <div className="flex items-center gap-2">
                <span>{wordCount} Words</span>
@@ -255,16 +298,16 @@ const DocumentEditor: React.FC<Props> = ({ initialTitle, initialContent, onSave,
          <div className="flex items-center gap-6">
             <div className="flex items-center gap-2">
                <i className={`fas ${isVaultMounted ? 'fa-cloud-check text-emerald-300' : 'fa-database text-amber-300'}`}></i>
-               <span>{isVaultMounted ? 'SSD Mirror Synchronized' : 'INTERNAL DATABASE VAULT'}</span>
+               <span>{isVaultMounted ? 'SSD Mirror Active' : 'INTERNAL VAULT'}</span>
             </div>
             {saveSuccess && (
                <div className="flex items-center gap-2 animate-in slide-in-from-right-4">
                   <i className="fas fa-check-circle text-emerald-300"></i>
-                  <span>AUTO-SYNC SUCCESS</span>
+                  <span>SYNC SUCCESS</span>
                </div>
             )}
             <div className="flex items-center gap-4 border-l border-white/20 pl-4">
-               <i className="fas fa-print opacity-50 cursor-pointer hover:opacity-100"></i>
+               <i className="fas fa-print opacity-50 cursor-pointer hover:opacity-100" onClick={exportToPDF}></i>
                <div className="flex items-center gap-2">
                   <div className="w-20 h-1 bg-white/20 rounded-full">
                      <div className="w-full h-full bg-white rounded-full"></div>
